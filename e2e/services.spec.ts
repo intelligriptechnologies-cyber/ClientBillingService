@@ -5,7 +5,7 @@ test('a tenant user can save a frequency-priced service and download its quotati
   await page.goto('/');
   await page.getByLabel('Demo identity').selectOption('nexio-admin');
   await page.getByRole('button', { name: 'Enter demo' }).click();
-  await page.getByRole('link', { name: 'Services' }).click();
+  await page.getByRole('link', { name: 'Services', exact: true }).click();
 
   await page.getByRole('button', { name: 'Add service' }).click();
   await page.getByLabel('Service name').fill(serviceName);

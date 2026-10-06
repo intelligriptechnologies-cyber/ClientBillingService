@@ -14,20 +14,16 @@ test('every demo tenant exposes its seeded contract, invoice, payment, and depos
     await page.getByLabel('Demo identity').selectOption(`${tenantId}-admin`);
     await page.getByRole('button', { name: 'Enter demo' }).click();
 
-    await page.getByRole('link', { name: 'Contracts' }).click();
-    await page.waitForURL('**/contracts');
+    await Promise.all([page.waitForURL('**/contracts'), page.getByRole('link', { name: 'Contracts', exact: true }).click()]);
     await expect(page.getByText(`${tenantName} managed billing contract`, { exact: true })).toBeVisible();
 
-    await page.getByRole('link', { name: 'Invoices' }).click();
-    await page.waitForURL('**/invoices');
+    await Promise.all([page.waitForURL('**/invoices'), page.getByRole('link', { name: 'Invoices', exact: true }).click()]);
     await expect(page.getByText(`${tenantName.slice(0, 3).toUpperCase()}-2026-001`, { exact: true })).toBeVisible();
 
-    await page.getByRole('link', { name: 'Payments' }).click();
-    await page.waitForURL('**/payments');
+    await Promise.all([page.waitForURL('**/payments'), page.getByRole('link', { name: 'Payments', exact: true }).click()]);
     await expect(page.getByText(`${tenantName} Customer`, { exact: true }).first()).toBeVisible();
 
-    await page.getByRole('link', { name: 'Renewals & deposits' }).click();
-    await page.waitForURL('**/renewals');
+    await Promise.all([page.waitForURL('**/renewals'), page.getByRole('link', { name: 'Renewals & deposits', exact: true }).click()]);
     await expect(page.getByRole('heading', { name: 'Security-deposit ledger' })).toBeVisible();
     await expect(page.getByText(`${tenantName} Customer`, { exact: true }).last()).toBeVisible();
 

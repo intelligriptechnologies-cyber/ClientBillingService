@@ -24,7 +24,7 @@ test('a tenant can create, filter, edit, and deactivate its customer', async ({ 
   await page.getByLabel('GSTIN').fill('29ABCDE1234F1Z5');
   await page.getByRole('button', { name: 'Save changes' }).click();
   await expect(page.getByLabel('Set Orbit Labs inactive')).toBeVisible();
-  await page.getByLabel('Set Orbit Labs inactive').check();
+  await page.getByLabel('Set Orbit Labs inactive').click();
   await expect(page.getByText('Orbit Labs is now inactive.')).toBeVisible();
 });
 
