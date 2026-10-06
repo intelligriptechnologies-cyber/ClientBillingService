@@ -1,0 +1,41 @@
+import { expect, test } from '@playwright/test';
+
+test('a tenant previews, downloads, and confirms a monthly bulk invoice run only once', async ({ page }) => {
+  const contractName = `Bulk billing acceptance ${Date.now()}`;
+  await page.goto('/');
+  await page.getByLabel('Demo identity').selectOption('nexio-admin');
+  await page.getByRole('button', { name: 'Enter demo' }).click();
+  await page.getByRole('link', { name: 'Contracts' }).click();
+  await page.getByRole('button', { name: 'Add contract' }).click();
+  await page.getByLabel('Contract name').fill(contractName);
+  await page.getByLabel('Customer').selectOption({ index: 1 });
+  await page.getByLabel('Start date').fill('2026-01-01');
+  await page.getByLabel('End date').fill('2026-12-31');
+  await page.getByLabel('Contract value').fill('1000');
+  await page.getByRole('checkbox', { name: /service/i }).first().check();
+  await page.getByRole('button', { name: 'Create contract' }).click();
+  await expect(page.getByText(contractName, { exact: true })).toBeVisible();
+  await page.getByRole('link', { name: 'Additional services' }).click();
+  await page.getByRole('button', { name: 'Add additional service' }).click();
+  await expect(page.getByLabel('Additional service customer', { exact: true })).toBeVisible();
+  await page.getByLabel('Additional service customer', { exact: true }).selectOption({ index: 1 });
+  await page.getByLabel('Additional service contract').selectOption({ label: contractName });
+  await page.getByLabel('Additional service date').fill('2026-10-15');
+  await page.getByLabel('Customized price').fill('250');
+  await page.getByLabel('Service description').fill('Bulk run workshop');
+  await page.getByRole('button', { name: 'Add additional service' }).last().click();
+
+  await page.goto('/invoices/bulk');
+  await expect(page.getByRole('heading', { name: 'Bulk invoice run' })).toBeVisible();
+  await page.getByLabel('Billing period').fill('2026-10');
+  await page.getByRole('button', { name: 'Preview invoices' }).click();
+  await expect(page.getByText(contractName)).toBeVisible();
+  await expect(page.getByText('Bulk run workshop')).toBeVisible();
+  const download = page.waitForEvent('download');
+  await page.getByRole('link', { name: 'Download preview' }).click();
+  await expect((await download).suggestedFilename()).toBe('bulk-invoice-preview-2026-10.csv');
+  await page.getByRole('button', { name: 'Issue reviewed invoices' }).click();
+  await expect(page.getByText('Issued 1 invoice.')).toBeVisible();
+  await page.getByRole('button', { name: 'Issue reviewed invoices' }).click();
+  await expect(page.getByText('This billing period was already issued.')).toBeVisible();
+});

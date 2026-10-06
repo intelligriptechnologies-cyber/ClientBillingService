@@ -55,6 +55,12 @@ export type TenantInvoice = { id: string; tenantId: string; contractId: string |
 export type InvoiceInput = { contractId?: string; customerId?: string; invoiceDate: string; dueDate: string; taxableMinor: number; gstRate?: number };
 export type InvoiceQuery = { search?: string; month?: string; status?: InvoiceStatus; page?: number; pageSize?: number };
 export type InvoiceList = { items: TenantInvoice[]; total: number };
+export type BulkInvoiceAdditionalLine = { id: string; description: string; priceMinor: number; serviceDate: string };
+export type BulkInvoiceProposal = { contractId: string; contractName: string; customerId: string; customerName: string; billingPeriod: string; invoiceDate: string; dueDate: string; taxableMinor: number; gstRate: number; gstMinor: number; totalMinor: number; additionalLines: BulkInvoiceAdditionalLine[] };
+export type BulkInvoiceSkip = { contractId: string; contractName: string; customerName: string; reason: string };
+export type BulkInvoicePreview = { billingPeriod: string; proposed: BulkInvoiceProposal[]; skipped: BulkInvoiceSkip[] };
+export type BulkInvoiceRun = { id: string; billingPeriod: string; generatedCount: number; skippedCount: number; createdAt: string };
+export type BulkInvoiceGeneration = { billingPeriod: string; generatedCount: number; skippedCount: number; alreadyGenerated: boolean; run: BulkInvoiceRun };
 export type PaymentMethod = 'bank_transfer' | 'cash' | 'card' | 'cheque' | 'other';
 export type TenantPayment = { id: string; invoiceId: string; invoiceNumber: string; customerId: string; customerName: string; paymentDate: string; amountMinor: number; tdsMinor: number; writeOffMinor: number; appliedMinor: number; method: PaymentMethod; reference: string; notes: string; recordedAt: string };
 export type PaymentInput = { invoiceId: string; paymentDate: string; amountMinor: number; tdsMinor: number; writeOffMinor: number; method: PaymentMethod; reference?: string; notes?: string };
@@ -101,6 +107,7 @@ function seed(database: DatabaseSync) {
     CREATE TABLE IF NOT EXISTS payments (id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL REFERENCES tenants(id), invoice_id TEXT NOT NULL REFERENCES invoices(id), payment_date TEXT NOT NULL, amount_minor INTEGER NOT NULL, tds_minor INTEGER NOT NULL DEFAULT 0, write_off_minor INTEGER NOT NULL DEFAULT 0, method TEXT NOT NULL CHECK(method IN ('bank_transfer', 'cash', 'card', 'cheque', 'other')), reference TEXT NOT NULL DEFAULT '', notes TEXT NOT NULL DEFAULT '', recorded_at TEXT NOT NULL);
     CREATE TABLE IF NOT EXISTS payment_reminders (id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL REFERENCES tenants(id), invoice_id TEXT NOT NULL REFERENCES invoices(id), channel TEXT NOT NULL CHECK(channel IN ('email', 'whatsapp')), note TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL);
     CREATE TABLE IF NOT EXISTS additional_services (id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL REFERENCES tenants(id), customer_id TEXT NOT NULL REFERENCES customers(id), contract_id TEXT NOT NULL REFERENCES contracts(id), service_date TEXT NOT NULL, description TEXT NOT NULL, price_minor INTEGER NOT NULL, notes TEXT NOT NULL DEFAULT '', status TEXT NOT NULL CHECK(status IN ('active', 'archived')), billed_at TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
+    CREATE TABLE IF NOT EXISTS bulk_invoice_runs (id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL REFERENCES tenants(id), billing_period TEXT NOT NULL, generated_count INTEGER NOT NULL, skipped_count INTEGER NOT NULL, details TEXT NOT NULL, created_at TEXT NOT NULL, UNIQUE(tenant_id, billing_period));
   `);
   for (const statement of ["ALTER TABLE tenants ADD COLUMN created_at TEXT NOT NULL DEFAULT ''", "ALTER TABLE tenants ADD COLUMN updated_at TEXT NOT NULL DEFAULT ''", 'ALTER TABLE security_deposits ADD COLUMN settled_minor INTEGER NOT NULL DEFAULT 0', 'ALTER TABLE security_deposits ADD COLUMN settlement_note TEXT', 'ALTER TABLE security_deposits ADD COLUMN settled_at TEXT']) { try { database.exec(statement); } catch { /* Existing database. */ } }
 
@@ -207,6 +214,11 @@ function settingsFromRow(row: Record<string, unknown>): TenantSettings { return 
 function invoiceFromRow(row: Record<string, unknown>): TenantInvoice {
   return { id: String(row.id), tenantId: String(row.tenant_id), contractId: row.contract_id ? String(row.contract_id) : null, customerId: String(row.customer_id), customerName: String(row.customer_name), invoiceNumber: String(row.invoice_number), invoiceDate: String(row.invoice_date), dueDate: String(row.due_date), taxableMinor: Number(row.taxable_minor), gstRate: Number(row.gst_rate), gstMinor: Number(row.gst_minor), totalMinor: Number(row.total_minor), paidMinor: Number(row.paid_minor), status: row.status as InvoiceStatus, snapshot: JSON.parse(String(row.snapshot)) as InvoiceSnapshot, issuedAt: String(row.issued_at) };
 }
+function bulkRunFromRow(row: Record<string, unknown>): BulkInvoiceRun { return { id: String(row.id), billingPeriod: String(row.billing_period), generatedCount: Number(row.generated_count), skippedCount: Number(row.skipped_count), createdAt: String(row.created_at) }; }
+function billingPeriodStart(period: string) { if (!/^\d{4}-\d{2}$/.test(period)) throw new Error('Billing period must use YYYY-MM.'); return `${period}-01`; }
+function billingPeriodEnd(period: string) { const [year, month] = period.split('-').map(Number); return new Date(Date.UTC(year, month, 0)).toISOString().slice(0, 10); }
+function addCalendarDays(date: string, days: number) { const value = new Date(`${date}T00:00:00Z`); value.setUTCDate(value.getUTCDate() + days); return value.toISOString().slice(0, 10); }
+function isScheduledForPeriod(contract: Contract, month: number) { return contract.billingFrequency === 'monthly' || contract.invoiceMonths.includes(month); }
 function paymentFromRow(row: Record<string, unknown>): TenantPayment {
   const amountMinor = Number(row.amount_minor); const tdsMinor = Number(row.tds_minor); const writeOffMinor = Number(row.write_off_minor);
   return { id: String(row.id), invoiceId: String(row.invoice_id), invoiceNumber: String(row.invoice_number), customerId: String(row.customer_id), customerName: String(row.customer_name), paymentDate: String(row.payment_date), amountMinor, tdsMinor, writeOffMinor, appliedMinor: amountMinor + tdsMinor + writeOffMinor, method: row.method as PaymentMethod, reference: String(row.reference), notes: String(row.notes), recordedAt: String(row.recorded_at) };
@@ -252,6 +264,32 @@ export function createTenantStore(filename = process.env.CLIENT_BILLING_DATABASE
   function nextTenantId(name: string) { const base = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '').slice(0, 40) || 'tenant'; let candidate = base; let suffix = 2; while (database.prepare('SELECT 1 FROM tenants WHERE id = ?').get(candidate)) candidate = `${base}-${suffix++}`; return candidate; }
   function event(tenantId: string, action: TenantHistoryEvent['action'], detail: string) { database.prepare('INSERT INTO tenant_lifecycle_events (id, tenant_id, action, detail, occurred_at) VALUES (?, ?, ?, ?, ?)').run(crypto.randomUUID(), tenantId, action, detail, now()); }
   function getTenant(tenantId: string): Tenant { const row = database.prepare(`SELECT tenants.id, tenants.name, tenants.status, tenants.created_at, tenants.updated_at, COUNT(users.id) AS user_count FROM tenants LEFT JOIN users ON users.tenant_id = tenants.id WHERE tenants.id = ? GROUP BY tenants.id`).get(tenantId) as Record<string, unknown> | undefined; if (!row) throw new Error('Tenant was not found.'); return tenantFromRow(row); }
+  function buildBulkPreview(session: AppSession, billingPeriod: string): BulkInvoicePreview {
+    requireTenantMember(session);
+    const periodStart = billingPeriodStart(billingPeriod); const periodEnd = billingPeriodEnd(billingPeriod); const month = Number(billingPeriod.slice(5));
+    const rows = database.prepare(`SELECT contracts.*, customers.company_name AS customer_name FROM contracts JOIN customers ON customers.id = contracts.customer_id WHERE contracts.tenant_id = ? ORDER BY contracts.name`).all(session.tenantId) as Record<string, unknown>[];
+    const additionalRows = database.prepare(`SELECT additional_services.*, customers.company_name AS customer_name, contracts.name AS contract_name FROM additional_services JOIN customers ON customers.id = additional_services.customer_id JOIN contracts ON contracts.id = additional_services.contract_id WHERE additional_services.tenant_id = ? AND additional_services.status = 'active' AND additional_services.billed_at IS NULL AND additional_services.service_date LIKE ?`).all(session.tenantId, `${billingPeriod}%`) as Record<string, unknown>[];
+    const additionsByContract = new Map<string, BulkInvoiceAdditionalLine[]>();
+    for (const row of additionalRows) {
+      const line = { id: String(row.id), description: String(row.description), priceMinor: Number(row.price_minor), serviceDate: String(row.service_date) };
+      additionsByContract.set(String(row.contract_id), [...(additionsByContract.get(String(row.contract_id)) ?? []), line]);
+    }
+    const proposed: BulkInvoiceProposal[] = []; const skipped: BulkInvoiceSkip[] = [];
+    for (const row of rows) {
+      const contract = contractFromRow(database, row);
+      const common = { contractId: contract.id, contractName: contract.name, customerName: contract.customerName };
+      if (contract.status !== 'active') { skipped.push({ ...common, reason: 'Contract is inactive.' }); continue; }
+      if (contract.startDate > periodEnd || contract.endDate < periodStart) { skipped.push({ ...common, reason: 'Contract is outside this billing period.' }); continue; }
+      if (!isScheduledForPeriod(contract, month)) { skipped.push({ ...common, reason: `Billing is not scheduled for ${new Date(`${billingPeriod}-01T00:00:00Z`).toLocaleString('en-IN', { month: 'long', timeZone: 'UTC' })}.` }); continue; }
+      const prior = database.prepare('SELECT 1 FROM invoices WHERE tenant_id = ? AND contract_id = ? AND substr(invoice_date, 1, 7) = ?').get(session.tenantId, contract.id, billingPeriod);
+      if (prior) { skipped.push({ ...common, reason: 'An invoice already exists for this contract and period.' }); continue; }
+      const additionalLines = additionsByContract.get(contract.id) ?? [];
+      const taxableMinor = contract.valueMinor + additionalLines.reduce((total, line) => total + line.priceMinor, 0);
+      const gstRate = 18; const gstMinor = Math.round(taxableMinor * gstRate / 100);
+      proposed.push({ ...common, customerId: contract.customerId, billingPeriod, invoiceDate: periodStart, dueDate: addCalendarDays(periodStart, contract.paymentTermsDays), taxableMinor, gstRate, gstMinor, totalMinor: taxableMinor + gstMinor, additionalLines });
+    }
+    return { billingPeriod, proposed, skipped };
+  }
 
   return {
     listIdentities(): DemoIdentity[] {
@@ -559,6 +597,37 @@ export function createTenantStore(filename = process.env.CLIENT_BILLING_DATABASE
         database.exec('COMMIT');
       } catch (error) { database.exec('ROLLBACK'); throw error; }
       return this.listSecurityDeposits(session).find((deposit) => deposit.id === depositId)!;
+    },
+    previewBulkInvoices(session: AppSession, billingPeriod: string): BulkInvoicePreview { return buildBulkPreview(session, billingPeriod); },
+    listBulkInvoiceRuns(session: AppSession): BulkInvoiceRun[] {
+      requireTenantMember(session);
+      return (database.prepare('SELECT id, billing_period, generated_count, skipped_count, created_at FROM bulk_invoice_runs WHERE tenant_id = ? ORDER BY billing_period DESC').all(session.tenantId) as Record<string, unknown>[]).map(bulkRunFromRow);
+    },
+    generateBulkInvoices(session: AppSession, billingPeriod: string): BulkInvoiceGeneration {
+      requireTenantMember(session); billingPeriodStart(billingPeriod);
+      database.exec('BEGIN IMMEDIATE');
+      try {
+        const existing = database.prepare('SELECT id, billing_period, generated_count, skipped_count, created_at FROM bulk_invoice_runs WHERE tenant_id = ? AND billing_period = ?').get(session.tenantId, billingPeriod) as Record<string, unknown> | undefined;
+        if (existing) { database.exec('COMMIT'); const run = bulkRunFromRow(existing); return { billingPeriod, generatedCount: run.generatedCount, skippedCount: run.skippedCount, alreadyGenerated: true, run }; }
+        const preview = buildBulkPreview(session, billingPeriod);
+        const settings = settingsFromRow(database.prepare('SELECT * FROM tenant_settings WHERE tenant_id = ?').get(session.tenantId) as Record<string, unknown>);
+        const sequenceStart = Number((database.prepare('SELECT COUNT(*) AS count FROM invoices WHERE tenant_id = ?').get(session.tenantId) as { count: number }).count);
+        const timestamp = now();
+        const insertInvoice = database.prepare('INSERT INTO invoices (id, tenant_id, contract_id, customer_id, invoice_number, invoice_date, due_date, taxable_minor, gst_rate, gst_minor, total_minor, paid_minor, status, snapshot, issued_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?)');
+        const markAdditionalBilled = database.prepare('UPDATE additional_services SET billed_at = ?, updated_at = ? WHERE id = ? AND tenant_id = ? AND billed_at IS NULL');
+        for (const [index, proposal] of preview.proposed.entries()) {
+          const customer = database.prepare('SELECT company_name, email, billing_address FROM customers WHERE id = ? AND tenant_id = ?').get(proposal.customerId, session.tenantId) as Record<string, unknown>;
+          const snapshot: InvoiceSnapshot = { companyName: settings.companyName, gstin: settings.gstin, address: settings.address, logoDataUrl: settings.logoDataUrl, stampDataUrl: settings.stampDataUrl, signatureDataUrl: settings.signatureDataUrl, customerName: String(customer.company_name), customerEmail: String(customer.email), customerAddress: String(customer.billing_address), gstRate: proposal.gstRate, footer: settings.footer };
+          const number = `${settings.invoicePrefix}-${String(sequenceStart + index + 1).padStart(4, '0')}`;
+          insertInvoice.run(`${session.tenantId}-invoice-${crypto.randomUUID()}`, session.tenantId, proposal.contractId, proposal.customerId, number, proposal.invoiceDate, proposal.dueDate, proposal.taxableMinor, proposal.gstRate, proposal.gstMinor, proposal.totalMinor, 'issued', JSON.stringify(snapshot), timestamp);
+          for (const line of proposal.additionalLines) markAdditionalBilled.run(timestamp, timestamp, line.id, session.tenantId);
+        }
+        const run: BulkInvoiceRun = { id: `${session.tenantId}-bulk-run-${crypto.randomUUID()}`, billingPeriod, generatedCount: preview.proposed.length, skippedCount: preview.skipped.length, createdAt: timestamp };
+        database.prepare('INSERT INTO bulk_invoice_runs (id, tenant_id, billing_period, generated_count, skipped_count, details, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)').run(run.id, session.tenantId, billingPeriod, run.generatedCount, run.skippedCount, JSON.stringify(preview), timestamp);
+        database.prepare('INSERT INTO operational_logs (id, tenant_id, kind, message, created_at) VALUES (?, ?, ?, ?, ?)').run(crypto.randomUUID(), session.tenantId, 'feature-flow', `Bulk invoice run for ${billingPeriod} issued ${run.generatedCount} invoice(s); ${run.skippedCount} contract(s) skipped.`, timestamp);
+        database.exec('COMMIT');
+        return { billingPeriod, generatedCount: run.generatedCount, skippedCount: run.skippedCount, alreadyGenerated: false, run };
+      } catch (error) { database.exec('ROLLBACK'); throw error; }
     },
     listInvoices(session: AppSession, query: InvoiceQuery = {}): InvoiceList {
       requireTenantMember(session);
