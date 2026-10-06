@@ -78,6 +78,49 @@ describe('tenant store', () => {
     expect(store.listInvoices(nexio, { month: '2026-10' }).items.filter((invoice) => invoice.contractId === eligible.id)).toHaveLength(1);
   });
 
+  it('allocates manual payments with TDS and write-off without exceeding an invoice balance', () => {
+    const store = storeForTest(); const nexio = store.authenticate('nexio-admin'); const evo = store.authenticate('evo-admin');
+    if (!nexio || !evo) throw new Error('Expected seeded sessions');
+    const invoice = store.listInvoices(nexio, {}).items[0];
+    const payment = store.recordPayment(nexio, { invoiceId: invoice.id, paymentDate: '2026-10-07', amountMinor: 100000, tdsMinor: 10000, writeOffMinor: 8000, method: 'bank_transfer', reference: 'UTR-2042', notes: 'Reconciled with customer.' });
+    expect(payment).toMatchObject({ invoiceId: invoice.id, appliedMinor: 118000, reference: 'UTR-2042' });
+    expect(store.getInvoice(nexio, invoice.id)).toMatchObject({ paidMinor: 118000, status: 'paid' });
+    expect(store.listPayments(nexio, { month: '2026-10' }).items).toEqual(expect.arrayContaining([expect.objectContaining({ id: payment.id, customerId: invoice.customerId })]));
+    expect(() => store.recordPayment(nexio, { invoiceId: invoice.id, paymentDate: '2026-10-08', amountMinor: 1, tdsMinor: 0, writeOffMinor: 0, method: 'cash' })).toThrow('outstanding');
+    expect(() => store.recordPayment(evo, { invoiceId: invoice.id, paymentDate: '2026-10-08', amountMinor: 1, tdsMinor: 0, writeOffMinor: 0, method: 'cash' })).toThrow('tenant');
+  });
+
+  it('lists aging pending invoices and records demo-only reminder history', () => {
+    const store = storeForTest(); const nexio = store.authenticate('nexio-admin');
+    if (!nexio) throw new Error('Expected seeded session');
+    const invoice = store.listInvoices(nexio, {}).items[0];
+    const pending = store.listPendingPayments(nexio);
+    expect(pending).toEqual(expect.arrayContaining([expect.objectContaining({ id: invoice.id, outstandingMinor: invoice.totalMinor, agingBucket: expect.any(String) })]));
+    const reminder = store.recordPaymentReminder(nexio, invoice.id, { channel: 'whatsapp', note: 'Please confirm payment date.' });
+    expect(reminder).toMatchObject({ invoiceId: invoice.id, channel: 'whatsapp' });
+    expect(store.listPendingPayments(nexio).find((item) => item.id === invoice.id)?.reminders).toEqual(expect.arrayContaining([expect.objectContaining({ id: reminder.id, channel: 'whatsapp' })]));
+  });
+  it('returns a tenant-scoped GST sales report with interstate and intrastate tax splits', () => {
+    const store = storeForTest();
+    const nexio = store.authenticate('nexio-admin');
+    const evo = store.authenticate('evo-admin');
+    if (!nexio || !evo) throw new Error('Expected seeded sessions');
+
+    store.updateTenantSettings(nexio, { ...store.getTenantSettings(nexio), gstin: '29ABCDE1234F1Z5' });
+    const customer = store.listCustomers(nexio, {}).items[0];
+    const interstate = store.createCustomer(nexio, { companyName: 'Interstate Buyer', contactName: 'Ravi', email: 'ravi@example.com', phone: '9000000000', gstin: '27ABCDE1234F1Z5', billingAddress: 'Mumbai', invoiceDelivery: 'email' });
+    store.createIssuedInvoice(nexio, { customerId: customer.id, invoiceDate: '2026-11-02', dueDate: '2026-11-16', taxableMinor: 10_000, gstRate: 18 });
+    store.createIssuedInvoice(nexio, { customerId: interstate.id, invoiceDate: '2026-11-03', dueDate: '2026-11-17', taxableMinor: 20_000, gstRate: 18 });
+
+    const report = store.getGstSalesReport(nexio, '2026-11');
+
+    expect(report).toMatchObject({ month: '2026-11', companyName: 'Nexio Hyper', gstin: '29ABCDE1234F1Z5', totals: { taxableMinor: 30_000, gstMinor: 5_400, totalMinor: 35_400, igstMinor: 3_600, cgstMinor: 900, sgstMinor: 900, netGstMinor: 5_400 } });
+    expect(report.items).toEqual(expect.arrayContaining([
+      expect.objectContaining({ customerName: customer.companyName, cgstMinor: 900, sgstMinor: 900, igstMinor: 0 }),
+      expect.objectContaining({ customerName: 'Interstate Buyer', igstMinor: 3_600, cgstMinor: 0, sgstMinor: 0 }),
+    ]));
+    expect(store.getGstSalesReport(evo, '2026-11').items).toEqual([]);
+  });
   it('keeps issued invoice snapshots stable, supports filters, and isolates invoices by tenant', () => {
     const store = storeForTest();
     const nexio = store.authenticate('nexio-admin');
