@@ -13,6 +13,36 @@ afterEach(() => {
   for (const store of stores.splice(0)) store.close();
 });
 
+describe('tenant lifecycle', () => {
+  it('lets the superadmin create, change, and disable a tenant while retaining lifecycle history', () => {
+    const store = storeForTest();
+    const superadmin = store.authenticate('superadmin');
+    if (!superadmin) throw new Error('Expected superadmin session');
+
+    const created = store.createTenant(superadmin, { name: 'Northstar Studio' });
+
+    expect(created).toMatchObject({ name: 'Northstar Studio', status: 'active' });
+    expect(store.listIdentities().filter((identity) => identity.tenantId === created.id)).toEqual(expect.arrayContaining([
+      expect.objectContaining({ role: 'admin', tenantName: 'Northstar Studio' }),
+      expect.objectContaining({ role: 'user', tenantName: 'Northstar Studio' }),
+    ]));
+
+    const updated = store.updateTenant(superadmin, created.id, { name: 'Northstar Creative', status: 'disabled' });
+    expect(updated).toMatchObject({ id: created.id, name: 'Northstar Creative', status: 'disabled' });
+    expect(store.authenticate(`${created.id}-admin`)).toBeNull();
+    expect(store.listTenantHistory(superadmin, created.id).map((event) => event.action)).toEqual(['created', 'updated', 'disabled']);
+  });
+
+  it('does not expose tenant lifecycle operations to a tenant session', () => {
+    const store = storeForTest();
+    const tenantAdmin = store.authenticate('nexio-admin');
+    if (!tenantAdmin) throw new Error('Expected tenant admin session');
+
+    expect(() => store.listTenants(tenantAdmin, {})).toThrow('superadmin');
+    expect(() => store.createTenant(tenantAdmin, { name: 'Not allowed' })).toThrow('superadmin');
+  });
+});
+
 describe('tenant store', () => {
   it('seeds five tenants and two tenant-local users for each tenant', () => {
     const store = storeForTest();
