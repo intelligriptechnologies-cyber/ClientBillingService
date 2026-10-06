@@ -23,7 +23,10 @@ export function TenantUsers() {
     if (!response.ok) { setError(body.message ?? 'Users could not be loaded.'); return; }
     setUsers(body.users);
   }
-  useEffect(() => { void load(); }, []);
+  useEffect(() => {
+    const initialLoad = window.setTimeout(() => { void load(); }, 0);
+    return () => window.clearTimeout(initialLoad);
+  }, []);
 
   const shown = useMemo(() => users.filter((user) => {
     const matchesQuery = `${user.name} ${user.email} ${user.role}`.toLowerCase().includes(query.toLowerCase());
