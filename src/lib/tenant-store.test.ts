@@ -44,6 +44,29 @@ describe('tenant lifecycle', () => {
 });
 
 describe('tenant store', () => {
+  it('keeps issued invoice snapshots stable, supports filters, and isolates invoices by tenant', () => {
+    const store = storeForTest();
+    const nexio = store.authenticate('nexio-admin');
+    const evo = store.authenticate('evo-admin');
+    if (!nexio || !evo) throw new Error('Expected seeded sessions');
+    const customer = store.listCustomers(nexio, {}).items[0];
+    const contract = store.createContract(nexio, {
+      customerId: customer.id, serviceIds: [store.listServices(nexio)[0].id], name: 'Snapshot contract', startDate: '2026-01-01', endDate: '2026-12-31',
+      valueMinor: 250000, paymentTermsDays: 14, billingFrequency: 'monthly', invoiceMonths: [], cycleDay: 1,
+      escalationPercent: 0, escalationReviewDate: '', renewalNoticeDays: 30, securityDepositMinor: 0,
+    });
+    const issued = store.createIssuedInvoice(nexio, { contractId: contract.id, invoiceDate: '2026-10-01', dueDate: '2026-10-15', taxableMinor: 250000, gstRate: 18 });
+
+    expect(store.listInvoices(nexio, { month: '2026-10', search: customer.companyName }).items).toEqual(expect.arrayContaining([expect.objectContaining({ id: issued.id, customerName: customer.companyName, status: 'issued' })]));
+    expect(store.listInvoices(evo, {}).items).not.toEqual(expect.arrayContaining([expect.objectContaining({ id: issued.id })]));
+
+    store.updateTenantSettings(nexio, { ...store.getTenantSettings(nexio), companyName: 'Changed company', invoicePrefix: 'NEW' });
+    expect(store.getInvoice(nexio, issued.id)).toMatchObject({
+      invoiceNumber: expect.stringContaining('NEX'),
+      snapshot: expect.objectContaining({ companyName: 'Nexio Hyper', customerName: customer.companyName, gstRate: 18 }),
+    });
+    expect(() => store.getInvoice(evo, issued.id)).toThrow('tenant');
+  });
   it('creates a tenant-scoped quarterly contract with its opening security deposit', () => {
     const store = storeForTest();
     const nexio = store.authenticate('nexio-admin');
