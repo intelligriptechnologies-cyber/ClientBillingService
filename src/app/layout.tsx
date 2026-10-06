@@ -6,8 +6,8 @@ const geist = Geist({ variable: '--font-geist', subsets: ['latin'] });
 const geistMono = Geist_Mono({ variable: '--font-geist-mono', subsets: ['latin'] });
 
 export const metadata: Metadata = {
-  title: 'Ledgerly | Client Billing',
-  description: 'A focused client billing workspace.',
+  title: 'Ledgerly | Tenant Billing',
+  description: 'A multi-tenant billing workspace for customers, contracts, and invoices.',
 };
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
