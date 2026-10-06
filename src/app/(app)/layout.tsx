@@ -1,6 +1,9 @@
-'use client';
-import Link from 'next/link'; import { usePathname } from 'next/navigation'; import { ChartDonut, FileText, Gear, House, Receipt, Users } from '@phosphor-icons/react';
-import { BillingProvider, useBilling } from '@/state/billing-store';
-const nav=[['/dashboard','Dashboard',House],['/clients','Clients',Users],['/invoices','Invoices',FileText],['/payments','Payments',Receipt],['/reports/outstanding','Outstanding',ChartDonut],['/settings','Settings',Gear]] as const;
-function Frame({children}:{children:React.ReactNode}){const path=usePathname();const {role,setRole}=useBilling();return <div className="app-shell"><aside className="sidebar"><Link href="/dashboard" className="brand">ledger<span>ly</span></Link><nav className="nav">{nav.filter(([href])=>href!=='/settings'||role==='admin').map(([href,label,Icon])=><Link key={href} href={href} aria-current={path===href?'page':undefined}><Icon size={18}/><span>{label}</span></Link>)}</nav><div className="role-switch"><label htmlFor="role">Prototype role</label><select id="role" value={role} onChange={(event)=>setRole(event.target.value as typeof role)}><option value="admin">Admin</option><option value="billing">Billing</option><option value="viewer">Viewer</option></select></div></aside><main className="main">{children}</main></div>}
-export default function AppLayout({children}:{children:React.ReactNode}){return <BillingProvider><Frame>{children}</Frame></BillingProvider>}
+import { redirect } from 'next/navigation';
+import { AppShell } from '@/components/app-shell';
+import { getCurrentSession } from '@/lib/session';
+
+export default async function AppLayout({ children }: { children: React.ReactNode }) {
+  const session = await getCurrentSession();
+  if (!session) redirect('/');
+  return <AppShell session={session}>{children}</AppShell>;
+}
