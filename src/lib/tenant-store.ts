@@ -49,6 +49,12 @@ export type AdditionalServiceList = { items: AdditionalService[]; total: number 
 export type TenantSettings = { companyName: string; gstin: string; address: string; invoicePrefix: string; paymentTermsDays: number; footer: string; invoiceTemplate: string; emailSubject: string; emailBody: string; smtpHost: string; smtpPort: number; smtpFrom: string; logRetentionDays: number; logoDataUrl: string; stampDataUrl: string; signatureDataUrl: string; updatedAt: string };
 export type TenantSettingsInput = Omit<TenantSettings, 'updatedAt'>;
 export type OperationalLog = { id: string; kind: 'feature-flow' | 'error'; message: string; createdAt: string };
+export type InvoiceStatus = 'issued' | 'paid' | 'partial' | 'overdue' | 'void';
+export type InvoiceSnapshot = { companyName: string; gstin: string; address: string; logoDataUrl: string; stampDataUrl: string; signatureDataUrl: string; customerName: string; customerEmail: string; customerAddress: string; gstRate: number; footer: string };
+export type TenantInvoice = { id: string; tenantId: string; contractId: string | null; customerId: string; customerName: string; invoiceNumber: string; invoiceDate: string; dueDate: string; taxableMinor: number; gstRate: number; gstMinor: number; totalMinor: number; paidMinor: number; status: InvoiceStatus; snapshot: InvoiceSnapshot; issuedAt: string };
+export type InvoiceInput = { contractId?: string; customerId?: string; invoiceDate: string; dueDate: string; taxableMinor: number; gstRate?: number };
+export type InvoiceQuery = { search?: string; month?: string; status?: InvoiceStatus; page?: number; pageSize?: number };
+export type InvoiceList = { items: TenantInvoice[]; total: number };
 
 type TenantSeed = { id: string; name: string; adminEmail: string; userEmail: string };
 type TenantFilters = { query?: string; status?: TenantStatus | 'all'; page?: number; pageSize?: number };
@@ -82,12 +88,13 @@ function seed(database: DatabaseSync) {
     CREATE TABLE IF NOT EXISTS security_deposits (id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL REFERENCES tenants(id), contract_id TEXT NOT NULL REFERENCES contracts(id), customer_id TEXT NOT NULL REFERENCES customers(id), amount_minor INTEGER NOT NULL, settled_minor INTEGER NOT NULL DEFAULT 0, settlement_note TEXT, settled_at TEXT, status TEXT NOT NULL CHECK(status IN ('held', 'settled')), created_at TEXT NOT NULL);
     CREATE TABLE IF NOT EXISTS security_deposit_settlements (id TEXT PRIMARY KEY, deposit_id TEXT NOT NULL REFERENCES security_deposits(id), tenant_id TEXT NOT NULL REFERENCES tenants(id), amount_minor INTEGER NOT NULL, note TEXT NOT NULL, settled_at TEXT NOT NULL);
     CREATE TABLE IF NOT EXISTS contract_audit_events (id TEXT PRIMARY KEY, contract_id TEXT NOT NULL REFERENCES contracts(id) ON DELETE CASCADE, action TEXT NOT NULL, detail TEXT NOT NULL, occurred_at TEXT NOT NULL);
+    CREATE TABLE IF NOT EXISTS invoices (id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL REFERENCES tenants(id), contract_id TEXT REFERENCES contracts(id), customer_id TEXT NOT NULL REFERENCES customers(id), invoice_number TEXT NOT NULL, invoice_date TEXT NOT NULL, due_date TEXT NOT NULL, taxable_minor INTEGER NOT NULL, gst_rate REAL NOT NULL, gst_minor INTEGER NOT NULL, total_minor INTEGER NOT NULL, paid_minor INTEGER NOT NULL DEFAULT 0, status TEXT NOT NULL CHECK(status IN ('issued', 'paid', 'partial', 'overdue', 'void')), snapshot TEXT NOT NULL, issued_at TEXT NOT NULL, UNIQUE(tenant_id, invoice_number));
     CREATE TABLE IF NOT EXISTS additional_services (id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL REFERENCES tenants(id), customer_id TEXT NOT NULL REFERENCES customers(id), contract_id TEXT NOT NULL REFERENCES contracts(id), service_date TEXT NOT NULL, description TEXT NOT NULL, price_minor INTEGER NOT NULL, notes TEXT NOT NULL DEFAULT '', status TEXT NOT NULL CHECK(status IN ('active', 'archived')), billed_at TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
   `);
   for (const statement of ["ALTER TABLE tenants ADD COLUMN created_at TEXT NOT NULL DEFAULT ''", "ALTER TABLE tenants ADD COLUMN updated_at TEXT NOT NULL DEFAULT ''", 'ALTER TABLE security_deposits ADD COLUMN settled_minor INTEGER NOT NULL DEFAULT 0', 'ALTER TABLE security_deposits ADD COLUMN settlement_note TEXT', 'ALTER TABLE security_deposits ADD COLUMN settled_at TEXT']) { try { database.exec(statement); } catch { /* Existing database. */ } }
 
   const tenantCount = database.prepare('SELECT COUNT(*) AS count FROM tenants').get() as { count: number };
-  if (tenantCount.count > 0) { seedSettings(database); return; }
+  if (tenantCount.count > 0) { seedSettings(database); seedInvoices(database); return; }
 
   database.exec('BEGIN');
   try {
@@ -108,7 +115,7 @@ function seed(database: DatabaseSync) {
       insertService.run(`${tenant.id}-service`, tenant.id, 'Managed billing service', 'Seeded recurring billing service', 'active', 100000, 280000, 540000, 1000000, now, now);
     }
     database.exec('COMMIT');
-    seedSettings(database);
+    seedSettings(database); seedInvoices(database);
   } catch (error) {
     database.exec('ROLLBACK');
     throw error;
@@ -116,6 +123,7 @@ function seed(database: DatabaseSync) {
 }
 
 function seedSettings(database: DatabaseSync) { const rows = database.prepare('SELECT id, name FROM tenants').all() as Array<{ id: string; name: string }>; const insert = database.prepare(`INSERT OR IGNORE INTO tenant_settings (tenant_id, company_name, gstin, address, invoice_prefix, payment_terms_days, footer, invoice_template, email_subject, email_body, smtp_host, smtp_port, smtp_from, log_retention_days, logo_data_url, stamp_data_url, signature_data_url, updated_at) VALUES (?, ?, '', '', ?, 14, 'Thank you for your business.', 'Invoice {{invoiceNumber}} for {{customerName}}', 'Your invoice {{invoiceNumber}}', 'Hello {{customerName}}, please find your invoice attached.', '', 587, '', 30, '', '', '', ?)`); for (const row of rows) insert.run(row.id, row.name, row.name.slice(0, 3).toUpperCase(), '2026-10-01T09:00:00.000Z'); }
+function seedInvoices(database: DatabaseSync) { const rows = database.prepare('SELECT tenants.id, tenants.name, customers.id AS customer_id, customers.email, customers.billing_address FROM tenants JOIN customers ON customers.tenant_id = tenants.id').all() as Array<{ id: string; name: string; customer_id: string; email: string; billing_address: string }>; const insert = database.prepare('INSERT OR IGNORE INTO invoices (id, tenant_id, contract_id, customer_id, invoice_number, invoice_date, due_date, taxable_minor, gst_rate, gst_minor, total_minor, paid_minor, status, snapshot, issued_at) VALUES (?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?)'); for (const row of rows) { const taxableMinor = 100000; const gstMinor = 18000; const snapshot = JSON.stringify({ companyName: row.name, gstin: '', address: '', logoDataUrl: '', stampDataUrl: '', signatureDataUrl: '', customerName: `${row.name} Customer`, customerEmail: row.email, customerAddress: row.billing_address, gstRate: 18, footer: 'Thank you for your business.' }); insert.run(`${row.id}-invoice-001`, row.id, row.customer_id, `${row.name.slice(0, 3).toUpperCase()}-2026-001`, '2026-10-01', '2026-10-15', taxableMinor, 18, gstMinor, taxableMinor + gstMinor, 'issued', snapshot, '2026-10-01T09:00:00.000Z'); } }
 
 function customerFromRow(row: Record<string, unknown>): CustomerRecord { return { id: String(row.id), tenantId: String(row.tenant_id), companyName: String(row.company_name), contactName: String(row.contact_name), email: String(row.email), phone: String(row.phone), gstin: String(row.gstin), billingAddress: String(row.billing_address), invoiceDelivery: row.invoice_delivery as InvoiceDelivery, status: row.status as CustomerStatus, createdAt: String(row.created_at), updatedAt: String(row.updated_at) }; }
 function customerError(input: CustomerInput) { if (!input.companyName.trim()) return 'Company name is required.'; if (!input.contactName.trim()) return 'Contact name is required.'; if (!input.email.trim() || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(input.email)) return 'Enter a valid email address.'; if (!input.phone.trim()) return 'Phone is required.'; if (!input.billingAddress.trim()) return 'Billing address is required.'; return null; }
@@ -185,6 +193,9 @@ function requireTenantAdmin(session: AppSession): asserts session is AppSession 
   if (session.role !== 'admin') throw new Error('Only a tenant admin can manage users.');
 }
 function settingsFromRow(row: Record<string, unknown>): TenantSettings { return { companyName: String(row.company_name), gstin: String(row.gstin), address: String(row.address), invoicePrefix: String(row.invoice_prefix), paymentTermsDays: Number(row.payment_terms_days), footer: String(row.footer), invoiceTemplate: String(row.invoice_template), emailSubject: String(row.email_subject), emailBody: String(row.email_body), smtpHost: String(row.smtp_host), smtpPort: Number(row.smtp_port), smtpFrom: String(row.smtp_from), logRetentionDays: Number(row.log_retention_days), logoDataUrl: String(row.logo_data_url), stampDataUrl: String(row.stamp_data_url), signatureDataUrl: String(row.signature_data_url), updatedAt: String(row.updated_at) }; }
+function invoiceFromRow(row: Record<string, unknown>): TenantInvoice {
+  return { id: String(row.id), tenantId: String(row.tenant_id), contractId: row.contract_id ? String(row.contract_id) : null, customerId: String(row.customer_id), customerName: String(row.customer_name), invoiceNumber: String(row.invoice_number), invoiceDate: String(row.invoice_date), dueDate: String(row.due_date), taxableMinor: Number(row.taxable_minor), gstRate: Number(row.gst_rate), gstMinor: Number(row.gst_minor), totalMinor: Number(row.total_minor), paidMinor: Number(row.paid_minor), status: row.status as InvoiceStatus, snapshot: JSON.parse(String(row.snapshot)) as InvoiceSnapshot, issuedAt: String(row.issued_at) };
+}
 function validateSettings(input: TenantSettingsInput) { if (!input.companyName.trim()) return 'Company name is required.'; if (!input.invoicePrefix.trim()) return 'Invoice prefix is required.'; if (!Number.isInteger(input.paymentTermsDays) || input.paymentTermsDays < 0) return 'Payment terms must be zero or more days.'; if (!Number.isInteger(input.smtpPort) || input.smtpPort < 1 || input.smtpPort > 65535) return 'SMTP port must be between 1 and 65535.'; if (!Number.isInteger(input.logRetentionDays) || input.logRetentionDays < 1 || input.logRetentionDays > 3650) return 'Log retention must be between 1 and 3650 days.'; return null; }
 
 function requireTenantMember(session: AppSession): asserts session is AppSession & { tenantId: string } {
@@ -524,6 +535,42 @@ export function createTenantStore(filename = process.env.CLIENT_BILLING_DATABASE
         database.exec('COMMIT');
       } catch (error) { database.exec('ROLLBACK'); throw error; }
       return this.listSecurityDeposits(session).find((deposit) => deposit.id === depositId)!;
+    },
+    listInvoices(session: AppSession, query: InvoiceQuery = {}): InvoiceList {
+      requireTenantMember(session);
+      const conditions = ['invoices.tenant_id = ?']; const values: Array<string | number> = [session.tenantId];
+      if (query.search?.trim()) { conditions.push('(lower(invoices.invoice_number) LIKE ? OR lower(customers.company_name) LIKE ?)'); const term = `%${query.search.trim().toLowerCase()}%`; values.push(term, term); }
+      if (query.month && /^\d{4}-\d{2}$/.test(query.month)) { conditions.push('substr(invoices.invoice_date, 1, 7) = ?'); values.push(query.month); }
+      if (query.status) { conditions.push('invoices.status = ?'); values.push(query.status); }
+      const where = conditions.join(' AND '); const pageSize = Math.min(Math.max(query.pageSize ?? 10, 1), 100); const page = Math.max(query.page ?? 1, 1);
+      const total = Number((database.prepare(`SELECT COUNT(*) AS count FROM invoices JOIN customers ON customers.id = invoices.customer_id WHERE ${where}`).get(...values) as { count: number }).count);
+      const rows = database.prepare(`SELECT invoices.*, customers.company_name AS customer_name FROM invoices JOIN customers ON customers.id = invoices.customer_id WHERE ${where} ORDER BY invoices.invoice_date DESC, invoices.invoice_number DESC LIMIT ? OFFSET ?`).all(...values, pageSize, (page - 1) * pageSize) as Record<string, unknown>[];
+      return { items: rows.map(invoiceFromRow), total };
+    },
+    getInvoice(session: AppSession, invoiceId: string): TenantInvoice | null {
+      requireTenantMember(session);
+      const row = database.prepare('SELECT invoices.*, customers.company_name AS customer_name FROM invoices JOIN customers ON customers.id = invoices.customer_id WHERE invoices.id = ?').get(invoiceId) as Record<string, unknown> | undefined;
+      if (!row) return null;
+      if (row.tenant_id !== session.tenantId) throw new Error('This invoice does not belong to your tenant.');
+      return invoiceFromRow(row);
+    },
+    createIssuedInvoice(session: AppSession, input: InvoiceInput): TenantInvoice {
+      requireTenantMember(session);
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(input.invoiceDate) || !/^\d{4}-\d{2}-\d{2}$/.test(input.dueDate) || input.dueDate < input.invoiceDate) throw new Error('Enter valid invoice and due dates.');
+      if (!Number.isInteger(input.taxableMinor) || input.taxableMinor < 0) throw new Error('Taxable amount must be a non-negative whole minor amount.');
+      const gstRate = input.gstRate ?? 0; if (!Number.isFinite(gstRate) || gstRate < 0 || gstRate > 100) throw new Error('GST rate must be between 0 and 100.');
+      let customerId = input.customerId;
+      if (input.contractId) { const contract = database.prepare('SELECT customer_id FROM contracts WHERE id = ? AND tenant_id = ?').get(input.contractId, session.tenantId) as { customer_id: string } | undefined; if (!contract) throw new Error('The selected contract must belong to your tenant.'); customerId = contract.customer_id; }
+      if (!customerId) throw new Error('Choose a customer or contract.');
+      const customer = database.prepare('SELECT * FROM customers WHERE id = ? AND tenant_id = ?').get(customerId, session.tenantId) as Record<string, unknown> | undefined;
+      if (!customer) throw new Error('The selected customer must belong to your tenant.');
+      const settings = settingsFromRow(database.prepare('SELECT * FROM tenant_settings WHERE tenant_id = ?').get(session.tenantId) as Record<string, unknown>);
+      const sequence = Number((database.prepare('SELECT COUNT(*) AS count FROM invoices WHERE tenant_id = ?').get(session.tenantId) as { count: number }).count) + 1;
+      const taxableMinor = input.taxableMinor; const gstMinor = Math.round(taxableMinor * gstRate / 100); const timestamp = now(); const id = `${session.tenantId}-invoice-${crypto.randomUUID()}`;
+      const snapshot: InvoiceSnapshot = { companyName: settings.companyName, gstin: settings.gstin, address: settings.address, logoDataUrl: settings.logoDataUrl, stampDataUrl: settings.stampDataUrl, signatureDataUrl: settings.signatureDataUrl, customerName: String(customer.company_name), customerEmail: String(customer.email), customerAddress: String(customer.billing_address), gstRate, footer: settings.footer };
+      const number = `${settings.invoicePrefix}-${String(sequence).padStart(4, '0')}`;
+      database.prepare('INSERT INTO invoices (id, tenant_id, contract_id, customer_id, invoice_number, invoice_date, due_date, taxable_minor, gst_rate, gst_minor, total_minor, paid_minor, status, snapshot, issued_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?)').run(id, session.tenantId, input.contractId ?? null, customerId, number, input.invoiceDate, input.dueDate, taxableMinor, gstRate, gstMinor, taxableMinor + gstMinor, 'issued', JSON.stringify(snapshot), timestamp);
+      return this.getInvoice(session, id)!;
     },
     getTenantSettings(session: AppSession): TenantSettings { requireTenantAdmin(session); return settingsFromRow(database.prepare('SELECT * FROM tenant_settings WHERE tenant_id = ?').get(session.tenantId) as Record<string, unknown>); },
     updateTenantSettings(session: AppSession, input: TenantSettingsInput): TenantSettings { requireTenantAdmin(session); const error = validateSettings(input); if (error) throw new Error(error); const timestamp = now(); database.prepare(`UPDATE tenant_settings SET company_name=?, gstin=?, address=?, invoice_prefix=?, payment_terms_days=?, footer=?, invoice_template=?, email_subject=?, email_body=?, smtp_host=?, smtp_port=?, smtp_from=?, log_retention_days=?, logo_data_url=?, stamp_data_url=?, signature_data_url=?, updated_at=? WHERE tenant_id=?`).run(input.companyName.trim(), input.gstin.trim(), input.address.trim(), input.invoicePrefix.trim().toUpperCase(), input.paymentTermsDays, input.footer.trim(), input.invoiceTemplate.trim(), input.emailSubject.trim(), input.emailBody.trim(), input.smtpHost.trim(), input.smtpPort, input.smtpFrom.trim(), input.logRetentionDays, input.logoDataUrl, input.stampDataUrl, input.signatureDataUrl, timestamp, session.tenantId); database.prepare('DELETE FROM operational_logs WHERE tenant_id = ? AND created_at < ?').run(session.tenantId, new Date(Date.now() - input.logRetentionDays * 86400000).toISOString()); database.prepare('INSERT INTO operational_logs (id, tenant_id, kind, message, created_at) VALUES (?, ?, ?, ?, ?)').run(crypto.randomUUID(), session.tenantId, 'feature-flow', 'Tenant settings were updated.', timestamp); return this.getTenantSettings(session); },
