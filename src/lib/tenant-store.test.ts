@@ -44,6 +44,40 @@ describe('tenant lifecycle', () => {
 });
 
 describe('tenant store', () => {
+  it('previews a period billing run with additional services, explains skips, and issues it only once', () => {
+    const store = storeForTest();
+    const nexio = store.authenticate('nexio-admin');
+    if (!nexio) throw new Error('Expected seeded session');
+    const customer = store.listCustomers(nexio, {}).items[0];
+    const service = store.listServices(nexio)[0];
+    if (!customer || !service) throw new Error('Expected seeded customer and service');
+
+    const eligible = store.createContract(nexio, {
+      customerId: customer.id, serviceIds: [service.id], name: 'October managed billing', startDate: '2026-01-01', endDate: '2026-12-31',
+      valueMinor: 100000, paymentTermsDays: 14, billingFrequency: 'monthly', invoiceMonths: [], cycleDay: 1,
+      escalationPercent: 0, escalationReviewDate: '', renewalNoticeDays: 30, securityDepositMinor: 0,
+    });
+    store.createContract(nexio, {
+      customerId: customer.id, serviceIds: [service.id], name: 'January-only annual billing', startDate: '2026-01-01', endDate: '2026-12-31',
+      valueMinor: 100000, paymentTermsDays: 14, billingFrequency: 'annual', invoiceMonths: [1], cycleDay: 1,
+      escalationPercent: 0, escalationReviewDate: '', renewalNoticeDays: 30, securityDepositMinor: 0,
+    });
+    store.createAdditionalService(nexio, { customerId: customer.id, contractId: eligible.id, serviceDate: '2026-10-15', description: 'On-site workshop', priceMinor: 25000, notes: '' });
+
+    const preview = store.previewBulkInvoices(nexio, '2026-10');
+    expect(preview.proposed).toEqual(expect.arrayContaining([expect.objectContaining({ contractId: eligible.id, taxableMinor: 125000, additionalLines: [expect.objectContaining({ description: 'On-site workshop', priceMinor: 25000 })] })]));
+    expect(preview.skipped).toEqual(expect.arrayContaining([expect.objectContaining({ reason: 'Billing is not scheduled for October.' })]));
+
+    const first = store.generateBulkInvoices(nexio, '2026-10');
+    expect(first).toMatchObject({ alreadyGenerated: false, generatedCount: 1 });
+    expect(store.listInvoices(nexio, { month: '2026-10' }).items).toEqual(expect.arrayContaining([expect.objectContaining({ contractId: eligible.id, taxableMinor: 125000, gstMinor: 22500 })]));
+    expect(store.listAdditionalServices(nexio, { billingPeriod: '2026-10' }).items).toEqual([]);
+    expect(store.listBulkInvoiceRuns(nexio)).toEqual(expect.arrayContaining([expect.objectContaining({ billingPeriod: '2026-10', generatedCount: 1 })]));
+
+    expect(store.generateBulkInvoices(nexio, '2026-10')).toMatchObject({ alreadyGenerated: true, generatedCount: 1 });
+    expect(store.listInvoices(nexio, { month: '2026-10' }).items.filter((invoice) => invoice.contractId === eligible.id)).toHaveLength(1);
+  });
+
   it('keeps issued invoice snapshots stable, supports filters, and isolates invoices by tenant', () => {
     const store = storeForTest();
     const nexio = store.authenticate('nexio-admin');
