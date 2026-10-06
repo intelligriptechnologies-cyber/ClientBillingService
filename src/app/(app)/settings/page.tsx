@@ -1,6 +1,7 @@
 'use client';
 
 import { ChangeEvent, FormEvent, useEffect, useState } from 'react';
+import Image from 'next/image';
 import { PageTitle } from '@/components/ui';
 import type { OperationalLog, TenantSettings } from '@/lib/tenant-store';
 
@@ -8,15 +9,17 @@ type Tab = 'company' | 'invoice' | 'templates' | 'email' | 'general' | 'logs';
 const tabs: Array<[Tab, string]> = [['company', 'Company'], ['invoice', 'Invoice'], ['templates', 'Templates'], ['email', 'Email'], ['general', 'General'], ['logs', 'Operational logs']];
 function downloadText(filename: string, contents: string) { const href = URL.createObjectURL(new Blob([contents], { type: 'text/plain' })); const link = document.createElement('a'); link.href = href; link.download = filename; link.click(); URL.revokeObjectURL(href); }
 function Field({ label, children, full = false }: { label: string; children: React.ReactNode; full?: boolean }) { return <label className={`field${full ? ' full' : ''}`}><span>{label}</span>{children}</label>; }
-function Asset({ label, source, onChange }: { label: string; source: string; onChange: (event: ChangeEvent<HTMLInputElement>) => void }) { return <label className="field"><span>{label}</span><input className="input" type="file" accept="image/*" onChange={onChange}/>{source && <img src={source} alt={`${label} preview`} style={{ maxHeight: 64, maxWidth: 180, objectFit: 'contain' }}/>}</label>; }
+function Asset({ label, source, onChange }: { label: string; source: string; onChange: (event: ChangeEvent<HTMLInputElement>) => void }) { return <label className="field"><span>{label}</span><input className="input" type="file" accept="image/*" onChange={onChange}/>{source && <Image src={source} alt={`${label} preview`} width={180} height={64} unoptimized style={{ maxHeight: 64, maxWidth: 180, objectFit: 'contain' }}/>}</label>; }
 function LogList({ title, logs }: { title: string; logs: OperationalLog[] }) { return <section><h3>{title}</h3>{logs.length ? <div className="table-wrap"><table className="data-table"><thead><tr><th>When</th><th>Message</th><th>Download</th></tr></thead><tbody>{logs.map((log) => <tr key={log.id}><td>{new Date(log.createdAt).toLocaleString()}</td><td>{log.message}</td><td><button type="button" className="button button-secondary" onClick={() => downloadText(`${log.kind}-${log.id}.txt`, `${log.createdAt}\n${log.kind}\n${log.message}\n`)}>Text file</button></td></tr>)}</tbody></table></div> : <p className="empty">No {title.toLowerCase()} have been recorded for this tenant.</p>}</section>; }
 
 export default function SettingsPage() {
   const [tab, setTab] = useState<Tab>('company'); const [settings, setSettings] = useState<TenantSettings | null>(null); const [logs, setLogs] = useState<OperationalLog[]>([]); const [message, setMessage] = useState(''); const [error, setError] = useState(''); const [preview, setPreview] = useState('');
   const load = async () => { const response = await fetch('/api/settings'); const body = await response.json(); if (!response.ok) { setError(body.message); return; } setSettings(body.settings); const logResponse = await fetch('/api/logs'); if (logResponse.ok) setLogs((await logResponse.json()).logs); };
+  // Settings are tenant-scoped request data and must be hydrated after the client session is available.
+  // eslint-disable-next-line react-hooks/set-state-in-effect
   useEffect(() => { void load(); }, []);
   const change = <K extends keyof TenantSettings>(key: K, value: TenantSettings[K]) => setSettings((current) => current ? { ...current, [key]: value } : current);
-  const save = async (event: FormEvent) => { event.preventDefault(); if (!settings) return; setMessage(''); setError(''); const { updatedAt, ...input } = settings; const response = await fetch('/api/settings', { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify(input) }); const body = await response.json(); if (!response.ok) { setError(body.message); return; } setSettings(body.settings); setMessage('Settings saved for this tenant.'); await load(); };
+  const save = async (event: FormEvent) => { event.preventDefault(); if (!settings) return; setMessage(''); setError(''); const response = await fetch('/api/settings', { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify(settings) }); const body = await response.json(); if (!response.ok) { setError(body.message); return; } setSettings(body.settings); setMessage('Settings saved for this tenant.'); await load(); };
   const asset = (key: 'logoDataUrl' | 'stampDataUrl' | 'signatureDataUrl') => (event: ChangeEvent<HTMLInputElement>) => { const file = event.target.files?.[0]; if (!file) return; const reader = new FileReader(); reader.onload = () => change(key, String(reader.result)); reader.readAsDataURL(file); };
   const getPreview = async () => { const response = await fetch('/api/settings/preview', { method: 'POST' }); const body = await response.json(); if (response.ok) setPreview(body.preview); else setError(body.message); };
   const testSmtp = async () => { const response = await fetch('/api/settings/smtp-test', { method: 'POST' }); const body = await response.json(); if (response.ok) { setMessage(body.message); await load(); } else setError(body.message); };

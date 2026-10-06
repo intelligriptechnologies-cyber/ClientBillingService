@@ -23,6 +23,8 @@ export function TenantUsers() {
     if (!response.ok) { setError(body.message ?? 'Users could not be loaded.'); return; }
     setUsers(body.users);
   }
+  // The active tenant comes from the soft-login cookie, so users are loaded only after this client component mounts.
+  // eslint-disable-next-line react-hooks/set-state-in-effect
   useEffect(() => { void load(); }, []);
 
   const shown = useMemo(() => users.filter((user) => {
