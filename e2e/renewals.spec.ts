@@ -4,7 +4,7 @@ test('a tenant renews an expired contract and settles its security deposit', asy
   const contractName = `Closeout renewal ${Date.now()}`;
   await page.goto('/');
   await page.getByLabel('Demo identity').selectOption('nexio-admin');
-  await page.getByRole('button', { name: 'Enter demo' }).click();
+  await Promise.all([page.waitForURL('**/dashboard'), page.getByRole('button', { name: 'Enter demo' }).click()]);
   await page.goto('/contracts');
   await page.getByRole('button', { name: 'Add contract' }).click();
   await page.getByLabel('Contract name').fill(contractName);
