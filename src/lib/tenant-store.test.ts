@@ -44,6 +44,28 @@ describe('tenant lifecycle', () => {
 });
 
 describe('tenant store', () => {
+  it('allocates manual payments with TDS and write-off without exceeding an invoice balance', () => {
+    const store = storeForTest(); const nexio = store.authenticate('nexio-admin'); const evo = store.authenticate('evo-admin');
+    if (!nexio || !evo) throw new Error('Expected seeded sessions');
+    const invoice = store.listInvoices(nexio, {}).items[0];
+    const payment = store.recordPayment(nexio, { invoiceId: invoice.id, paymentDate: '2026-10-07', amountMinor: 100000, tdsMinor: 10000, writeOffMinor: 8000, method: 'bank_transfer', reference: 'UTR-2042', notes: 'Reconciled with customer.' });
+    expect(payment).toMatchObject({ invoiceId: invoice.id, appliedMinor: 118000, reference: 'UTR-2042' });
+    expect(store.getInvoice(nexio, invoice.id)).toMatchObject({ paidMinor: 118000, status: 'paid' });
+    expect(store.listPayments(nexio, { month: '2026-10' }).items).toEqual(expect.arrayContaining([expect.objectContaining({ id: payment.id, customerId: invoice.customerId })]));
+    expect(() => store.recordPayment(nexio, { invoiceId: invoice.id, paymentDate: '2026-10-08', amountMinor: 1, tdsMinor: 0, writeOffMinor: 0, method: 'cash' })).toThrow('outstanding');
+    expect(() => store.recordPayment(evo, { invoiceId: invoice.id, paymentDate: '2026-10-08', amountMinor: 1, tdsMinor: 0, writeOffMinor: 0, method: 'cash' })).toThrow('tenant');
+  });
+
+  it('lists aging pending invoices and records demo-only reminder history', () => {
+    const store = storeForTest(); const nexio = store.authenticate('nexio-admin');
+    if (!nexio) throw new Error('Expected seeded session');
+    const invoice = store.listInvoices(nexio, {}).items[0];
+    const pending = store.listPendingPayments(nexio);
+    expect(pending).toEqual(expect.arrayContaining([expect.objectContaining({ id: invoice.id, outstandingMinor: invoice.totalMinor, agingBucket: expect.any(String) })]));
+    const reminder = store.recordPaymentReminder(nexio, invoice.id, { channel: 'whatsapp', note: 'Please confirm payment date.' });
+    expect(reminder).toMatchObject({ invoiceId: invoice.id, channel: 'whatsapp' });
+    expect(store.listPendingPayments(nexio).find((item) => item.id === invoice.id)?.reminders).toEqual(expect.arrayContaining([expect.objectContaining({ id: reminder.id, channel: 'whatsapp' })]));
+  });
   it('returns a tenant-scoped GST sales report with interstate and intrastate tax splits', () => {
     const store = storeForTest();
     const nexio = store.authenticate('nexio-admin');
@@ -65,7 +87,6 @@ describe('tenant store', () => {
     ]));
     expect(store.getGstSalesReport(evo, '2026-11').items).toEqual([]);
   });
-
   it('keeps issued invoice snapshots stable, supports filters, and isolates invoices by tenant', () => {
     const store = storeForTest();
     const nexio = store.authenticate('nexio-admin');

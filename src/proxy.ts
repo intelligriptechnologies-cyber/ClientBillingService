@@ -2,7 +2,7 @@ import { NextResponse, type NextRequest } from 'next/server';
 
 // Legacy prototype routes read a single shared in-memory store. Keep them unreachable
 // until their tenant-scoped replacements land in the corresponding implementation slices.
-const legacyRoutes = new Set(['/clients', '/invoices', '/payments', '/reports/outstanding', '/settings']);
+const legacyRoutes = new Set(['/clients', '/reports/outstanding', '/settings']);
 
 export function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
