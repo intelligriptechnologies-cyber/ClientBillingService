@@ -44,6 +44,38 @@ describe('tenant lifecycle', () => {
 });
 
 describe('tenant store', () => {
+  it('creates a tenant-scoped quarterly contract with its opening security deposit', () => {
+    const store = storeForTest();
+    const nexio = store.authenticate('nexio-admin');
+    const evo = store.authenticate('evo-admin');
+    if (!nexio || !evo) throw new Error('Expected seeded sessions');
+    const customer = store.listCustomers(nexio, {}).items[0];
+    const service = store.createService(nexio, { name: 'Analytics support', prices: { monthly: 100000, quarterly: 280000, halfYearly: 540000, annual: 1000000 } });
+    if (!customer) throw new Error('Expected seeded customer');
+
+    const contract = store.createContract(nexio, {
+      customerId: customer.id, serviceIds: [service.id], name: 'FY26 analytics support', startDate: '2026-04-01', endDate: '2027-03-31',
+      valueMinor: 1200000, paymentTermsDays: 14, billingFrequency: 'quarterly', invoiceMonths: [4, 7, 10], cycleDay: 5,
+      escalationPercent: 8, escalationReviewDate: '2027-04-01', renewalNoticeDays: 45, securityDepositMinor: 250000,
+    });
+
+    expect(contract).toMatchObject({ customerId: customer.id, billingFrequency: 'quarterly', invoiceMonths: [4, 7, 10], status: 'active' });
+    expect(store.listSecurityDeposits(nexio)).toEqual(expect.arrayContaining([expect.objectContaining({ contractId: contract.id, amountMinor: 250000, status: 'held' })]));
+    expect(store.listContracts(evo, {}).items).toEqual([]);
+  });
+
+  it('rejects an invalid invoice-month schedule and cross-tenant contract references', () => {
+    const store = storeForTest();
+    const nexio = store.authenticate('nexio-admin');
+    const evo = store.authenticate('evo-admin');
+    if (!nexio || !evo) throw new Error('Expected seeded sessions');
+    const customer = store.listCustomers(nexio, {}).items[0];
+    const service = store.createService(nexio, { name: 'Analytics support', prices: { monthly: 100000, quarterly: 280000, halfYearly: 540000, annual: 1000000 } });
+    if (!customer) throw new Error('Expected seeded customer');
+    const input = { customerId: customer.id, serviceIds: [service.id], name: 'Invalid schedule', startDate: '2026-04-01', endDate: '2027-03-31', valueMinor: 100000, paymentTermsDays: 14, billingFrequency: 'quarterly' as const, invoiceMonths: [4, 7], cycleDay: 1, escalationPercent: 0, escalationReviewDate: '', renewalNoticeDays: 30, securityDepositMinor: 0 };
+    expect(() => store.createContract(nexio, input)).toThrow('3 invoice months');
+    expect(() => store.createContract(evo, { ...input, invoiceMonths: [4, 7, 10] })).toThrow('customer');
+  });
   it('seeds five tenants and two tenant-local users for each tenant', () => {
     const store = storeForTest();
 
