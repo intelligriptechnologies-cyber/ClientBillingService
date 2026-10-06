@@ -6,6 +6,9 @@ export type AppRole = 'superadmin' | 'admin' | 'user';
 export type DemoIdentity = { id: string; name: string; email: string; role: AppRole; tenantId: string | null; tenantName: string | null };
 export type AppSession = DemoIdentity;
 export type TenantRecord = { id: string; tenantId: string; label: string };
+export type TenantUser = { id: string; name: string; email: string; role: Extract<AppRole, 'admin' | 'user'>; status: 'active' | 'disabled' };
+export type TenantUserInput = { name: string; email: string; role: TenantUser['role'] };
+export type TenantUserUpdate = Partial<TenantUserInput> & { status?: TenantUser['status'] };
 export type CustomerStatus = 'active' | 'inactive';
 export type InvoiceDelivery = 'monthly' | 'quarterly' | 'email' | 'manual';
 export type CustomerRecord = { id: string; tenantId: string; companyName: string; contactName: string; email: string; phone: string; gstin: string; billingAddress: string; invoiceDelivery: InvoiceDelivery; status: CustomerStatus; createdAt: string; updatedAt: string };
@@ -56,22 +59,27 @@ function seed(database: DatabaseSync) {
   }
 }
 
-function customerFromRow(row: Record<string, unknown>): CustomerRecord {
-  return { id: String(row.id), tenantId: String(row.tenant_id), companyName: String(row.company_name), contactName: String(row.contact_name), email: String(row.email), phone: String(row.phone), gstin: String(row.gstin), billingAddress: String(row.billing_address), invoiceDelivery: row.invoice_delivery as InvoiceDelivery, status: row.status as CustomerStatus, createdAt: String(row.created_at), updatedAt: String(row.updated_at) };
-}
-
-function customerError(input: CustomerInput) {
-  if (!input.companyName.trim()) return 'Company name is required.';
-  if (!input.contactName.trim()) return 'Contact name is required.';
-  if (!input.email.trim() || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(input.email)) return 'Enter a valid email address.';
-  if (!input.phone.trim()) return 'Phone is required.';
-  if (!input.billingAddress.trim()) return 'Billing address is required.';
-  return null;
-}
+function customerFromRow(row: Record<string, unknown>): CustomerRecord { return { id: String(row.id), tenantId: String(row.tenant_id), companyName: String(row.company_name), contactName: String(row.contact_name), email: String(row.email), phone: String(row.phone), gstin: String(row.gstin), billingAddress: String(row.billing_address), invoiceDelivery: row.invoice_delivery as InvoiceDelivery, status: row.status as CustomerStatus, createdAt: String(row.created_at), updatedAt: String(row.updated_at) }; }
+function customerError(input: CustomerInput) { if (!input.companyName.trim()) return 'Company name is required.'; if (!input.contactName.trim()) return 'Contact name is required.'; if (!input.email.trim() || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(input.email)) return 'Enter a valid email address.'; if (!input.phone.trim()) return 'Phone is required.'; if (!input.billingAddress.trim()) return 'Billing address is required.'; return null; }
 
 function identityFromRow(row: Record<string, unknown> | undefined): DemoIdentity | null {
   if (!row) return null;
   return { id: String(row.id), name: String(row.name), email: String(row.email), role: row.role as AppRole, tenantId: row.tenant_id ? String(row.tenant_id) : null, tenantName: row.tenant_name ? String(row.tenant_name) : null };
+}
+
+function tenantUserFromRow(row: Record<string, unknown>): TenantUser {
+  return {
+    id: String(row.id),
+    name: String(row.name),
+    email: String(row.email),
+    role: row.role as TenantUser['role'],
+    status: row.status as TenantUser['status'],
+  };
+}
+
+function requireTenantAdmin(session: AppSession): asserts session is AppSession & { tenantId: string; role: 'admin' } {
+  if (!session.tenantId) throw new Error('Only a tenant admin can manage users.');
+  if (session.role !== 'admin') throw new Error('Only a tenant admin can manage users.');
 }
 
 export function createTenantStore(filename = process.env.CLIENT_BILLING_DATABASE ?? '.data/client-billing.sqlite') {
@@ -99,39 +107,69 @@ export function createTenantStore(filename = process.env.CLIENT_BILLING_DATABASE
       database.prepare('INSERT INTO tenant_records (id, tenant_id, label) VALUES (?, ?, ?)').run(id, tenantId, label);
       return { id, tenantId, label };
     },
+    listTenantUsers(session: AppSession): TenantUser[] {
+      requireTenantAdmin(session);
+      return (database.prepare(`SELECT id, name, email, role, status FROM users
+        WHERE tenant_id = ? ORDER BY name COLLATE NOCASE`).all(session.tenantId) as Record<string, unknown>[]).map(tenantUserFromRow);
+    },
+    createTenantUser(session: AppSession, input: TenantUserInput): TenantUser {
+      requireTenantAdmin(session);
+      const name = input.name.trim();
+      const email = input.email.trim();
+      if (!name || !email) throw new Error('A user name and email are required.');
+      if (input.role !== 'admin' && input.role !== 'user') throw new Error('Choose an admin or user role.');
+      const id = `${session.tenantId}-user-${crypto.randomUUID()}`;
+      try {
+        database.prepare('INSERT INTO users (id, tenant_id, name, email, role, password, status) VALUES (?, ?, ?, ?, ?, ?, ?)')
+          .run(id, session.tenantId, name, email, input.role, 'admin123', 'active');
+      } catch (error) {
+        if (String(error).includes('UNIQUE')) throw new Error('A user with that email already exists.');
+        throw error;
+      }
+      return tenantUserFromRow(database.prepare('SELECT id, name, email, role, status FROM users WHERE id = ?').get(id) as Record<string, unknown>);
+    },
+    updateTenantUser(session: AppSession, userId: string, update: TenantUserUpdate): TenantUser {
+      requireTenantAdmin(session);
+      const existing = database.prepare('SELECT id, name, email, role, status FROM users WHERE id = ? AND tenant_id = ?').get(userId, session.tenantId) as Record<string, unknown> | undefined;
+      if (!existing) throw new Error('This user does not belong to your tenant.');
+      const name = update.name === undefined ? String(existing.name) : update.name.trim();
+      const email = update.email === undefined ? String(existing.email) : update.email.trim();
+      const role = update.role === undefined ? existing.role as TenantUser['role'] : update.role;
+      const status = update.status === undefined ? existing.status as TenantUser['status'] : update.status;
+      if (!name || !email) throw new Error('A user name and email are required.');
+      if ((role !== 'admin' && role !== 'user') || (status !== 'active' && status !== 'disabled')) throw new Error('Invalid user role or status.');
+      try {
+        database.prepare('UPDATE users SET name = ?, email = ?, role = ?, status = ? WHERE id = ? AND tenant_id = ?').run(name, email, role, status, userId, session.tenantId);
+      } catch (error) {
+        if (String(error).includes('UNIQUE')) throw new Error('A user with that email already exists.');
+        throw error;
+      }
+      return tenantUserFromRow(database.prepare('SELECT id, name, email, role, status FROM users WHERE id = ?').get(userId) as Record<string, unknown>);
+    },
     listCustomers(session: AppSession, query: CustomerQuery = {}) {
       if (!session.tenantId) return { items: [] as CustomerRecord[], total: 0 };
-      const search = query.search?.trim().toLowerCase() ?? '';
-      const filters = ['tenant_id = ?']; const values: (string | number)[] = [session.tenantId];
+      const search = query.search?.trim().toLowerCase() ?? ''; const filters = ['tenant_id = ?']; const values: (string | number)[] = [session.tenantId];
       if (search) { filters.push('(lower(company_name) LIKE ? OR lower(contact_name) LIKE ? OR lower(email) LIKE ?)'); values.push(`%${search}%`, `%${search}%`, `%${search}%`); }
-      if (query.status) { filters.push('status = ?'); values.push(query.status); }
-      if (query.invoiceDelivery) { filters.push('invoice_delivery = ?'); values.push(query.invoiceDelivery); }
-      const where = filters.join(' AND ');
-      const total = (database.prepare(`SELECT count(*) AS count FROM customers WHERE ${where}`).get(...values) as { count: number }).count;
+      if (query.status) { filters.push('status = ?'); values.push(query.status); } if (query.invoiceDelivery) { filters.push('invoice_delivery = ?'); values.push(query.invoiceDelivery); }
+      const where = filters.join(' AND '); const total = (database.prepare(`SELECT count(*) AS count FROM customers WHERE ${where}`).get(...values) as { count: number }).count;
       const pageSize = Math.min(Math.max(query.pageSize ?? 10, 1), 100); const page = Math.max(query.page ?? 1, 1);
       const items = database.prepare(`SELECT * FROM customers WHERE ${where} ORDER BY company_name LIMIT ? OFFSET ?`).all(...values, pageSize, (page - 1) * pageSize) as Record<string, unknown>[];
       return { items: items.map(customerFromRow), total };
     },
     createCustomer(session: AppSession, input: CustomerInput) {
-      if (!session.tenantId) throw new Error('Only tenant users can manage customers.');
-      const error = customerError(input); if (error) throw new Error(error);
+      if (!session.tenantId) throw new Error('Only tenant users can manage customers.'); const error = customerError(input); if (error) throw new Error(error);
       const id = `customer-${crypto.randomUUID()}`; const now = new Date().toISOString();
       database.prepare('INSERT INTO customers (id, tenant_id, company_name, contact_name, email, phone, gstin, billing_address, invoice_delivery, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').run(id, session.tenantId, input.companyName.trim(), input.contactName.trim(), input.email.trim(), input.phone.trim(), input.gstin.trim(), input.billingAddress.trim(), input.invoiceDelivery, 'active', now, now);
       return customerFromRow(database.prepare('SELECT * FROM customers WHERE id = ? AND tenant_id = ?').get(id, session.tenantId) as Record<string, unknown>);
     },
     updateCustomer(session: AppSession, customerId: string, input: CustomerInput) {
-      if (!session.tenantId) throw new Error('Only tenant users can manage customers.');
-      const error = customerError(input); if (error) throw new Error(error);
-      const now = new Date().toISOString();
-      const changed = database.prepare('UPDATE customers SET company_name = ?, contact_name = ?, email = ?, phone = ?, gstin = ?, billing_address = ?, invoice_delivery = ?, updated_at = ? WHERE id = ? AND tenant_id = ?').run(input.companyName.trim(), input.contactName.trim(), input.email.trim(), input.phone.trim(), input.gstin.trim(), input.billingAddress.trim(), input.invoiceDelivery, now, customerId, session.tenantId);
-      if (!changed.changes) throw new Error('Customer not found.');
-      return customerFromRow(database.prepare('SELECT * FROM customers WHERE id = ? AND tenant_id = ?').get(customerId, session.tenantId) as Record<string, unknown>);
+      if (!session.tenantId) throw new Error('Only tenant users can manage customers.'); const error = customerError(input); if (error) throw new Error(error);
+      const changed = database.prepare('UPDATE customers SET company_name = ?, contact_name = ?, email = ?, phone = ?, gstin = ?, billing_address = ?, invoice_delivery = ?, updated_at = ? WHERE id = ? AND tenant_id = ?').run(input.companyName.trim(), input.contactName.trim(), input.email.trim(), input.phone.trim(), input.gstin.trim(), input.billingAddress.trim(), input.invoiceDelivery, new Date().toISOString(), customerId, session.tenantId);
+      if (!changed.changes) throw new Error('Customer not found.'); return customerFromRow(database.prepare('SELECT * FROM customers WHERE id = ? AND tenant_id = ?').get(customerId, session.tenantId) as Record<string, unknown>);
     },
     setCustomerStatus(session: AppSession, customerId: string, status: CustomerStatus) {
-      if (!session.tenantId) throw new Error('Only tenant users can manage customers.');
-      const changed = database.prepare('UPDATE customers SET status = ?, updated_at = ? WHERE id = ? AND tenant_id = ?').run(status, new Date().toISOString(), customerId, session.tenantId);
-      if (!changed.changes) throw new Error('Customer not found.');
-      return customerFromRow(database.prepare('SELECT * FROM customers WHERE id = ? AND tenant_id = ?').get(customerId, session.tenantId) as Record<string, unknown>);
+      if (!session.tenantId) throw new Error('Only tenant users can manage customers.'); const changed = database.prepare('UPDATE customers SET status = ?, updated_at = ? WHERE id = ? AND tenant_id = ?').run(status, new Date().toISOString(), customerId, session.tenantId);
+      if (!changed.changes) throw new Error('Customer not found.'); return customerFromRow(database.prepare('SELECT * FROM customers WHERE id = ? AND tenant_id = ?').get(customerId, session.tenantId) as Record<string, unknown>);
     },
     close() { database.close(); },
   };
