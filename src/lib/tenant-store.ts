@@ -112,7 +112,7 @@ function seed(database: DatabaseSync) {
   for (const statement of ["ALTER TABLE tenants ADD COLUMN created_at TEXT NOT NULL DEFAULT ''", "ALTER TABLE tenants ADD COLUMN updated_at TEXT NOT NULL DEFAULT ''", 'ALTER TABLE security_deposits ADD COLUMN settled_minor INTEGER NOT NULL DEFAULT 0', 'ALTER TABLE security_deposits ADD COLUMN settlement_note TEXT', 'ALTER TABLE security_deposits ADD COLUMN settled_at TEXT']) { try { database.exec(statement); } catch { /* Existing database. */ } }
 
   const tenantCount = database.prepare('SELECT COUNT(*) AS count FROM tenants').get() as { count: number };
-  if (tenantCount.count > 0) { seedSettings(database); seedInvoices(database); return; }
+  if (tenantCount.count > 0) { seedSettings(database); seedInvoices(database); seedOperationalScenarios(database); return; }
 
   database.exec('BEGIN');
   try {
@@ -133,7 +133,7 @@ function seed(database: DatabaseSync) {
       insertService.run(`${tenant.id}-service`, tenant.id, 'Managed billing service', 'Seeded recurring billing service', 'active', 100000, 280000, 540000, 1000000, now, now);
     }
     database.exec('COMMIT');
-    seedSettings(database); seedInvoices(database);
+    seedSettings(database); seedInvoices(database); seedOperationalScenarios(database);
   } catch (error) {
     database.exec('ROLLBACK');
     throw error;
@@ -142,6 +142,29 @@ function seed(database: DatabaseSync) {
 
 function seedSettings(database: DatabaseSync) { const rows = database.prepare('SELECT id, name FROM tenants').all() as Array<{ id: string; name: string }>; const insert = database.prepare(`INSERT OR IGNORE INTO tenant_settings (tenant_id, company_name, gstin, address, invoice_prefix, payment_terms_days, footer, invoice_template, email_subject, email_body, smtp_host, smtp_port, smtp_from, log_retention_days, logo_data_url, stamp_data_url, signature_data_url, updated_at) VALUES (?, ?, '', '', ?, 14, 'Thank you for your business.', 'Invoice {{invoiceNumber}} for {{customerName}}', 'Your invoice {{invoiceNumber}}', 'Hello {{customerName}}, please find your invoice attached.', '', 587, '', 30, '', '', '', ?)`); for (const row of rows) insert.run(row.id, row.name, row.name.slice(0, 3).toUpperCase(), '2026-10-01T09:00:00.000Z'); }
 function seedInvoices(database: DatabaseSync) { const rows = database.prepare('SELECT tenants.id, tenants.name, customers.id AS customer_id, customers.email, customers.billing_address FROM tenants JOIN customers ON customers.tenant_id = tenants.id').all() as Array<{ id: string; name: string; customer_id: string; email: string; billing_address: string }>; const insert = database.prepare('INSERT OR IGNORE INTO invoices (id, tenant_id, contract_id, customer_id, invoice_number, invoice_date, due_date, taxable_minor, gst_rate, gst_minor, total_minor, paid_minor, status, snapshot, issued_at) VALUES (?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?)'); for (const row of rows) { const taxableMinor = 100000; const gstMinor = 18000; const snapshot = JSON.stringify({ companyName: row.name, gstin: '', address: '', logoDataUrl: '', stampDataUrl: '', signatureDataUrl: '', customerName: `${row.name} Customer`, customerEmail: row.email, customerAddress: row.billing_address, gstRate: 18, footer: 'Thank you for your business.' }); insert.run(`${row.id}-invoice-001`, row.id, row.customer_id, `${row.name.slice(0, 3).toUpperCase()}-2026-001`, '2026-10-01', '2026-10-15', taxableMinor, 18, gstMinor, taxableMinor + gstMinor, 'issued', snapshot, '2026-10-01T09:00:00.000Z'); } }
+function seedOperationalScenarios(database: DatabaseSync) {
+  const rows = database.prepare('SELECT tenants.id, tenants.name, customers.id AS customer_id, customers.email, customers.billing_address FROM tenants JOIN customers ON customers.tenant_id = tenants.id').all() as Array<{ id: string; name: string; customer_id: string; email: string; billing_address: string }>;
+  const timestamp = '2026-10-01T09:00:00.000Z';
+  const insertContract = database.prepare(`INSERT OR IGNORE INTO contracts (id, tenant_id, customer_id, name, start_date, end_date, value_minor, payment_terms_days, billing_frequency, invoice_months, cycle_day, escalation_percent, escalation_review_date, renewal_notice_days, security_deposit_minor, status, created_at, updated_at) VALUES (?, ?, ?, ?, '2026-01-01', '2026-12-31', 100000, 14, 'monthly', '[]', 1, 0, NULL, 30, 25000, 'active', ?, ?)`);
+  const insertContractService = database.prepare('INSERT OR IGNORE INTO contract_services (contract_id, service_id) VALUES (?, ?)');
+  const insertDeposit = database.prepare(`INSERT OR IGNORE INTO security_deposits (id, tenant_id, contract_id, customer_id, amount_minor, settled_minor, status, created_at) VALUES (?, ?, ?, ?, 25000, 0, 'held', ?)`);
+  const insertInvoice = database.prepare(`INSERT OR IGNORE INTO invoices (id, tenant_id, contract_id, customer_id, invoice_number, invoice_date, due_date, taxable_minor, gst_rate, gst_minor, total_minor, paid_minor, status, snapshot, issued_at) VALUES (?, ?, ?, ?, ?, '2026-09-01', '2026-09-15', 100000, 18, 18000, 118000, 118000, 'paid', ?, ?)`);
+  const insertPayment = database.prepare(`INSERT OR IGNORE INTO payments (id, tenant_id, invoice_id, payment_date, amount_minor, tds_minor, write_off_minor, method, reference, notes, recorded_at) VALUES (?, ?, ?, '2026-09-10', 100000, 18000, 0, 'bank_transfer', 'SEED-PAID', 'Seeded settled invoice.', ?)`);
+  const linkCurrentInvoice = database.prepare('UPDATE invoices SET contract_id = ? WHERE id = ? AND tenant_id = ?');
+  for (const row of rows) {
+    const contractId = `${row.id}-seed-contract`;
+    const currentInvoiceId = `${row.id}-invoice-001`;
+    const paidInvoiceId = `${row.id}-invoice-payment-001`;
+    const prefix = row.name.slice(0, 3).toUpperCase();
+    const snapshot = JSON.stringify({ companyName: row.name, gstin: '', address: '', logoDataUrl: '', stampDataUrl: '', signatureDataUrl: '', customerName: `${row.name} Customer`, customerEmail: row.email, customerAddress: row.billing_address, gstRate: 18, footer: 'Thank you for your business.' });
+    insertContract.run(contractId, row.id, row.customer_id, `${row.name} managed billing contract`, timestamp, timestamp);
+    insertContractService.run(contractId, `${row.id}-service`);
+    insertDeposit.run(`${row.id}-seed-deposit`, row.id, contractId, row.customer_id, timestamp);
+    linkCurrentInvoice.run(contractId, currentInvoiceId, row.id);
+    insertInvoice.run(paidInvoiceId, row.id, contractId, row.customer_id, `${prefix}-2026-000`, snapshot, timestamp);
+    insertPayment.run(`${row.id}-seed-payment`, row.id, paidInvoiceId, timestamp);
+  }
+}
 
 function customerFromRow(row: Record<string, unknown>): CustomerRecord { return { id: String(row.id), tenantId: String(row.tenant_id), companyName: String(row.company_name), contactName: String(row.contact_name), email: String(row.email), phone: String(row.phone), gstin: String(row.gstin), billingAddress: String(row.billing_address), invoiceDelivery: row.invoice_delivery as InvoiceDelivery, status: row.status as CustomerStatus, createdAt: String(row.created_at), updatedAt: String(row.updated_at) }; }
 function customerError(input: CustomerInput) { if (!input.companyName.trim()) return 'Company name is required.'; if (!input.contactName.trim()) return 'Contact name is required.'; if (!input.email.trim() || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(input.email)) return 'Enter a valid email address.'; if (!input.phone.trim()) return 'Phone is required.'; if (!input.billingAddress.trim()) return 'Billing address is required.'; return null; }

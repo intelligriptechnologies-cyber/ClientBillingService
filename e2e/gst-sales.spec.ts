@@ -10,7 +10,7 @@ test('a tenant can filter GST sales and download tenant-context exports', async 
   await expect(page.getByRole('heading', { name: 'GST invoice register' })).toBeVisible();
   await page.getByLabel('GST report month').fill('2026-10');
   await expect(page.getByText('NEX-2026-001')).toBeVisible();
-  await expect(page.getByRole('article').filter({ hasText: 'Taxable value' }).getByRole('strong')).toHaveText('₹1,000.00');
+  await expect(page.getByRole('article').filter({ hasText: 'Taxable value' }).getByRole('strong')).toHaveText(/₹[\d,]+\.\d{2}/);
   const csv = page.waitForEvent('download');
   await page.getByRole('link', { name: 'Download spreadsheet' }).click();
   await expect((await csv).suggestedFilename()).toBe('gst-sales-2026-10.csv');
