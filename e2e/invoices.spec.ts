@@ -13,5 +13,5 @@ test('a tenant can filter, inspect, and download its issued invoice', async ({ p
   await expect(page.getByText('Commercial and branding details are preserved at issue.')).toBeVisible();
   const download = page.waitForEvent('download');
   await page.getByRole('link', { name: 'Download invoice' }).click();
-  await expect((await download).suggestedFilename()).toBe('NEX-2026-001.html');
+  await expect((await download).suggestedFilename()).toBe('NEX-2026-001.pdf');
 });

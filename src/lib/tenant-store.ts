@@ -733,6 +733,16 @@ export function createTenantStore(filename = process.env.CLIENT_BILLING_DATABASE
       } catch (error) { database.exec('ROLLBACK'); throw error; }
       return this.listPayments(session, { page: 1, pageSize: 100 }).items.find((payment) => payment.id === id)!;
     },
+    closeInvoice(session: AppSession, invoiceId: string, note = ''): TenantPayment {
+      requireTenantMember(session);
+      const invoice = database.prepare('SELECT invoice_number, total_minor, paid_minor, status FROM invoices WHERE id = ? AND tenant_id = ?').get(invoiceId, session.tenantId) as Record<string, unknown> | undefined;
+      if (!invoice) throw new Error('This invoice does not belong to your tenant.');
+      const outstanding = Number(invoice.total_minor) - Number(invoice.paid_minor);
+      if (outstanding <= 0 || invoice.status === 'void') throw new Error('Only an outstanding invoice can be closed.');
+      const payment = this.recordPayment(session, { invoiceId, paymentDate: new Date().toISOString().slice(0, 10), amountMinor: 0, tdsMinor: 0, writeOffMinor: outstanding, method: 'other', reference: 'CLOSEOUT', notes: note.trim() || 'Closed from pending payments.' });
+      database.prepare('INSERT INTO operational_logs (id, tenant_id, kind, message, created_at) VALUES (?, ?, ?, ?, ?)').run(crypto.randomUUID(), session.tenantId, 'feature-flow', `Invoice ${String(invoice.invoice_number)} was closed from Pending payments; outstanding balance was written off.`, now());
+      return payment;
+    },
     listPendingPayments(session: AppSession): PendingPayment[] {
       requireTenantMember(session);
       const rows = database.prepare('SELECT invoices.*, customers.company_name AS customer_name FROM invoices JOIN customers ON customers.id = invoices.customer_id WHERE invoices.tenant_id = ? AND invoices.status != \'void\' AND invoices.paid_minor < invoices.total_minor ORDER BY invoices.due_date ASC').all(session.tenantId) as Record<string, unknown>[];

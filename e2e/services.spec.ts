@@ -18,5 +18,5 @@ test('a tenant user can save a frequency-priced service and download its quotati
   await page.getByRole('button', { name: 'Save quotation' }).click();
   await expect(page.getByText('E2E customer', { exact: true })).toBeVisible();
   const download = await Promise.all([page.waitForEvent('download'), page.getByRole('link', { name: 'Download' }).click()]);
-  expect(download[0].suggestedFilename()).toMatch(/^Q-NEXIO-\d+\.html$/);
+  expect(download[0].suggestedFilename()).toMatch(/^Q-NEXIO-\d+\.pdf$/);
 });
