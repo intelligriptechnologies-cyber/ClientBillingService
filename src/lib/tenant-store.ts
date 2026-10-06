@@ -32,13 +32,20 @@ export type ContractInput = Omit<Contract, 'id' | 'tenantId' | 'customerName' | 
 export type ContractUpdate = Partial<ContractInput> & { status?: ContractStatus };
 export type ContractQuery = { search?: string; status?: ContractStatus; customerId?: string; page?: number; pageSize?: number };
 export type ContractList = { items: Contract[]; total: number };
+export type SecurityDeposit = { id: string; contractId: string; customerId: string; customerName: string; amountMinor: number; settledMinor: number; balanceMinor: number; status: 'held' | 'settled'; createdAt: string; settledAt: string | null; settlementNote: string | null };
+export type DepositSettlementInput = { amountMinor: number; note: string };
+export type DepositSettlement = { id: string; depositId: string; amountMinor: number; note: string; settledAt: string };
+export type ContractAuditEvent = { id: string; action: string; detail: string; occurredAt: string };
+export type RenewalStatus = 'expired' | 'upcoming' | 'current';
+export type RenewalRecord = { contractId: string; contractName: string; customerName: string; endDate: string; valueMinor: number; renewalNoticeDays: number; renewalStatus: RenewalStatus; dueTiming: string; status: ContractStatus };
+export type RenewalQuery = { status?: RenewalStatus; search?: string; page?: number; pageSize?: number };
+export type RenewalList = { items: RenewalRecord[]; total: number };
 export type AdditionalServiceStatus = 'active' | 'archived';
 export type AdditionalService = { id: string; tenantId: string; customerId: string; customerName: string; contractId: string; contractName: string; serviceDate: string; description: string; priceMinor: number; notes: string; status: AdditionalServiceStatus; billedAt: string | null; createdAt: string; updatedAt: string };
 export type AdditionalServiceInput = { customerId: string; contractId: string; serviceDate: string; description: string; priceMinor: number; notes?: string };
 export type AdditionalServiceUpdate = Partial<AdditionalServiceInput> & { status?: AdditionalServiceStatus };
 export type AdditionalServiceQuery = { search?: string; customerId?: string; contractId?: string; status?: AdditionalServiceStatus; billingPeriod?: string; page?: number; pageSize?: number };
 export type AdditionalServiceList = { items: AdditionalService[]; total: number };
-export type SecurityDeposit = { id: string; contractId: string; customerId: string; customerName: string; amountMinor: number; status: 'held' | 'settled'; createdAt: string };
 export type TenantSettings = { companyName: string; gstin: string; address: string; invoicePrefix: string; paymentTermsDays: number; footer: string; invoiceTemplate: string; emailSubject: string; emailBody: string; smtpHost: string; smtpPort: number; smtpFrom: string; logRetentionDays: number; logoDataUrl: string; stampDataUrl: string; signatureDataUrl: string; updatedAt: string };
 export type TenantSettingsInput = Omit<TenantSettings, 'updatedAt'>;
 export type OperationalLog = { id: string; kind: 'feature-flow' | 'error'; message: string; createdAt: string };
@@ -72,11 +79,12 @@ function seed(database: DatabaseSync) {
     CREATE TABLE IF NOT EXISTS operational_logs (id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL REFERENCES tenants(id), kind TEXT NOT NULL CHECK(kind IN ('feature-flow', 'error')), message TEXT NOT NULL, created_at TEXT NOT NULL);
     CREATE TABLE IF NOT EXISTS contracts (id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL REFERENCES tenants(id), customer_id TEXT NOT NULL REFERENCES customers(id), name TEXT NOT NULL, start_date TEXT NOT NULL, end_date TEXT NOT NULL, value_minor INTEGER NOT NULL, payment_terms_days INTEGER NOT NULL, billing_frequency TEXT NOT NULL CHECK(billing_frequency IN ('monthly', 'quarterly', 'halfYearly', 'annual')), invoice_months TEXT NOT NULL, cycle_day INTEGER NOT NULL, escalation_percent REAL NOT NULL, escalation_review_date TEXT, renewal_notice_days INTEGER NOT NULL, security_deposit_minor INTEGER NOT NULL, status TEXT NOT NULL CHECK(status IN ('active', 'inactive')), created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
     CREATE TABLE IF NOT EXISTS contract_services (contract_id TEXT NOT NULL REFERENCES contracts(id) ON DELETE CASCADE, service_id TEXT NOT NULL REFERENCES services(id), PRIMARY KEY(contract_id, service_id));
-    CREATE TABLE IF NOT EXISTS security_deposits (id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL REFERENCES tenants(id), contract_id TEXT NOT NULL REFERENCES contracts(id), customer_id TEXT NOT NULL REFERENCES customers(id), amount_minor INTEGER NOT NULL, status TEXT NOT NULL CHECK(status IN ('held', 'settled')), created_at TEXT NOT NULL);
+    CREATE TABLE IF NOT EXISTS security_deposits (id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL REFERENCES tenants(id), contract_id TEXT NOT NULL REFERENCES contracts(id), customer_id TEXT NOT NULL REFERENCES customers(id), amount_minor INTEGER NOT NULL, settled_minor INTEGER NOT NULL DEFAULT 0, settlement_note TEXT, settled_at TEXT, status TEXT NOT NULL CHECK(status IN ('held', 'settled')), created_at TEXT NOT NULL);
+    CREATE TABLE IF NOT EXISTS security_deposit_settlements (id TEXT PRIMARY KEY, deposit_id TEXT NOT NULL REFERENCES security_deposits(id), tenant_id TEXT NOT NULL REFERENCES tenants(id), amount_minor INTEGER NOT NULL, note TEXT NOT NULL, settled_at TEXT NOT NULL);
     CREATE TABLE IF NOT EXISTS contract_audit_events (id TEXT PRIMARY KEY, contract_id TEXT NOT NULL REFERENCES contracts(id) ON DELETE CASCADE, action TEXT NOT NULL, detail TEXT NOT NULL, occurred_at TEXT NOT NULL);
     CREATE TABLE IF NOT EXISTS additional_services (id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL REFERENCES tenants(id), customer_id TEXT NOT NULL REFERENCES customers(id), contract_id TEXT NOT NULL REFERENCES contracts(id), service_date TEXT NOT NULL, description TEXT NOT NULL, price_minor INTEGER NOT NULL, notes TEXT NOT NULL DEFAULT '', status TEXT NOT NULL CHECK(status IN ('active', 'archived')), billed_at TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
   `);
-  for (const statement of ["ALTER TABLE tenants ADD COLUMN created_at TEXT NOT NULL DEFAULT ''", "ALTER TABLE tenants ADD COLUMN updated_at TEXT NOT NULL DEFAULT ''"]) { try { database.exec(statement); } catch { /* Existing database. */ } }
+  for (const statement of ["ALTER TABLE tenants ADD COLUMN created_at TEXT NOT NULL DEFAULT ''", "ALTER TABLE tenants ADD COLUMN updated_at TEXT NOT NULL DEFAULT ''", 'ALTER TABLE security_deposits ADD COLUMN settled_minor INTEGER NOT NULL DEFAULT 0', 'ALTER TABLE security_deposits ADD COLUMN settlement_note TEXT', 'ALTER TABLE security_deposits ADD COLUMN settled_at TEXT']) { try { database.exec(statement); } catch { /* Existing database. */ } }
 
   const tenantCount = database.prepare('SELECT COUNT(*) AS count FROM tenants').get() as { count: number };
   if (tenantCount.count > 0) { seedSettings(database); return; }
@@ -135,6 +143,23 @@ function validateContractInput(input: ContractInput) {
   const requiredMonths: Record<BillingFrequency, number> = { monthly: 0, quarterly: 3, halfYearly: 2, annual: 1 };
   const months = [...new Set(input.invoiceMonths)].sort((a, b) => a - b);
   if (months.length !== requiredMonths[input.billingFrequency] || months.some((month) => !Number.isInteger(month) || month < 1 || month > 12)) throw new Error(`${input.billingFrequency === 'halfYearly' ? 'Half-yearly' : input.billingFrequency[0].toUpperCase() + input.billingFrequency.slice(1)} contracts require ${requiredMonths[input.billingFrequency]} invoice months.`);
+}
+
+function renewalStatusFor(contract: Contract, date = new Date()): RenewalStatus {
+  const today = date.toISOString().slice(0, 10);
+  if (contract.endDate < today) return 'expired';
+  const noticeDate = new Date(`${contract.endDate}T00:00:00Z`);
+  noticeDate.setUTCDate(noticeDate.getUTCDate() - contract.renewalNoticeDays);
+  return noticeDate.toISOString().slice(0, 10) <= today ? 'upcoming' : 'current';
+}
+
+function renewalDueTiming(endDate: string, date = new Date()) {
+  const today = Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate());
+  const end = Date.parse(`${endDate}T00:00:00Z`);
+  const days = Math.round((end - today) / 86400000);
+  if (days < 0) return `${Math.abs(days)} days overdue`;
+  if (days === 0) return 'Due today';
+  return `Due in ${days} days`;
 }
 
 function identityFromRow(row: Record<string, unknown> | undefined): DemoIdentity | null {
@@ -450,8 +475,55 @@ export function createTenantStore(filename = process.env.CLIENT_BILLING_DATABASE
       try { database.prepare('UPDATE contracts SET customer_id=?, name=?, start_date=?, end_date=?, value_minor=?, payment_terms_days=?, billing_frequency=?, invoice_months=?, cycle_day=?, escalation_percent=?, escalation_review_date=?, renewal_notice_days=?, security_deposit_minor=?, status=?, updated_at=? WHERE id=? AND tenant_id=?').run(input.customerId, input.name.trim(), input.startDate, input.endDate, input.valueMinor, input.paymentTermsDays, input.billingFrequency, JSON.stringify([...new Set(input.invoiceMonths)].sort((a, b) => a - b)), input.cycleDay, input.escalationPercent, input.escalationReviewDate || null, input.renewalNoticeDays, input.securityDepositMinor, status, timestamp, contractId, session.tenantId); database.prepare('DELETE FROM contract_services WHERE contract_id = ?').run(contractId); const insertService = database.prepare('INSERT INTO contract_services (contract_id, service_id) VALUES (?, ?)'); for (const serviceId of services) insertService.run(contractId, serviceId); database.prepare('INSERT INTO contract_audit_events (id, contract_id, action, detail, occurred_at) VALUES (?, ?, ?, ?, ?)').run(crypto.randomUUID(), contractId, 'updated', `Contract ${status}.`, timestamp); database.exec('COMMIT'); } catch (error) { database.exec('ROLLBACK'); throw error; }
       return contractFromRow(database, database.prepare('SELECT contracts.*, customers.company_name AS customer_name FROM contracts JOIN customers ON customers.id = contracts.customer_id WHERE contracts.id = ?').get(contractId) as Record<string, unknown>);
     },
+    listRenewals(session: AppSession, query: RenewalQuery = {}): RenewalList {
+      requireTenantMember(session);
+      const contracts = this.listContracts(session, { search: query.search, page: 1, pageSize: 100 }).items;
+      const records = contracts.map((contract): RenewalRecord => ({ contractId: contract.id, contractName: contract.name, customerName: contract.customerName, endDate: contract.endDate, valueMinor: contract.valueMinor, renewalNoticeDays: contract.renewalNoticeDays, renewalStatus: renewalStatusFor(contract), dueTiming: renewalDueTiming(contract.endDate), status: contract.status }));
+      const filtered = records.filter((record) => !query.status || record.renewalStatus === query.status);
+      const pageSize = Math.min(Math.max(query.pageSize ?? 10, 1), 100); const page = Math.max(query.page ?? 1, 1);
+      return { items: filtered.slice((page - 1) * pageSize, page * pageSize), total: filtered.length };
+    },
+    listContractAudit(session: AppSession, contractId: string): ContractAuditEvent[] {
+      requireTenantMember(session);
+      const owned = database.prepare('SELECT id FROM contracts WHERE id = ? AND tenant_id = ?').get(contractId, session.tenantId);
+      if (!owned) throw new Error('This contract does not belong to your tenant.');
+      return (database.prepare('SELECT id, action, detail, occurred_at FROM contract_audit_events WHERE contract_id = ? ORDER BY occurred_at DESC').all(contractId) as Record<string, unknown>[]).map((row) => ({ id: String(row.id), action: String(row.action), detail: String(row.detail), occurredAt: String(row.occurred_at) }));
+    },
+    renewContract(session: AppSession, contractId: string, input: { endDate: string; note: string }): Contract {
+      requireTenantMember(session);
+      const existing = database.prepare('SELECT contracts.*, customers.company_name AS customer_name FROM contracts JOIN customers ON customers.id = contracts.customer_id WHERE contracts.id = ? AND contracts.tenant_id = ?').get(contractId, session.tenantId) as Record<string, unknown> | undefined;
+      if (!existing) throw new Error('This contract does not belong to your tenant.');
+      const contract = contractFromRow(database, existing);
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(input.endDate) || input.endDate <= contract.endDate) throw new Error('The renewed end date must be later than the current end date.');
+      const timestamp = now(); const note = input.note.trim() || 'Renewal recorded.';
+      database.exec('BEGIN');
+      try {
+        database.prepare('UPDATE contracts SET end_date = ?, status = \'active\', updated_at = ? WHERE id = ? AND tenant_id = ?').run(input.endDate, timestamp, contractId, session.tenantId);
+        database.prepare('INSERT INTO contract_audit_events (id, contract_id, action, detail, occurred_at) VALUES (?, ?, ?, ?, ?)').run(crypto.randomUUID(), contractId, 'renewed', note, timestamp);
+        database.exec('COMMIT');
+      } catch (error) { database.exec('ROLLBACK'); throw error; }
+      return contractFromRow(database, database.prepare('SELECT contracts.*, customers.company_name AS customer_name FROM contracts JOIN customers ON customers.id = contracts.customer_id WHERE contracts.id = ?').get(contractId) as Record<string, unknown>);
+    },
     listSecurityDeposits(session: AppSession): SecurityDeposit[] {
-      requireTenantMember(session); return (database.prepare('SELECT security_deposits.*, customers.company_name AS customer_name FROM security_deposits JOIN customers ON customers.id = security_deposits.customer_id WHERE security_deposits.tenant_id = ? ORDER BY security_deposits.created_at DESC').all(session.tenantId) as Record<string, unknown>[]).map((row) => ({ id: String(row.id), contractId: String(row.contract_id), customerId: String(row.customer_id), customerName: String(row.customer_name), amountMinor: Number(row.amount_minor), status: row.status as SecurityDeposit['status'], createdAt: String(row.created_at) }));
+      requireTenantMember(session); return (database.prepare('SELECT security_deposits.*, customers.company_name AS customer_name FROM security_deposits JOIN customers ON customers.id = security_deposits.customer_id WHERE security_deposits.tenant_id = ? ORDER BY security_deposits.created_at DESC').all(session.tenantId) as Record<string, unknown>[]).map((row) => { const amountMinor = Number(row.amount_minor); const settledMinor = Number(row.settled_minor); return { id: String(row.id), contractId: String(row.contract_id), customerId: String(row.customer_id), customerName: String(row.customer_name), amountMinor, settledMinor, balanceMinor: amountMinor - settledMinor, status: row.status as SecurityDeposit['status'], createdAt: String(row.created_at), settledAt: row.settled_at ? String(row.settled_at) : null, settlementNote: row.settlement_note ? String(row.settlement_note) : null }; });
+    },
+    settleSecurityDeposit(session: AppSession, depositId: string, input: DepositSettlementInput): SecurityDeposit {
+      requireTenantMember(session);
+      if (!Number.isInteger(input.amountMinor) || input.amountMinor <= 0) throw new Error('Settlement amount must be a positive whole minor-unit value.');
+      const row = database.prepare('SELECT * FROM security_deposits WHERE id = ? AND tenant_id = ?').get(depositId, session.tenantId) as Record<string, unknown> | undefined;
+      if (!row) throw new Error('This security deposit does not belong to your tenant.');
+      const amountMinor = Number(row.amount_minor); const settledMinor = Number(row.settled_minor);
+      if (settledMinor >= amountMinor || row.status === 'settled') throw new Error('This security deposit has already been settled.');
+      if (input.amountMinor > amountMinor - settledMinor) throw new Error('Settlement cannot exceed the held deposit balance.');
+      const totalSettled = settledMinor + input.amountMinor; const timestamp = now(); const isSettled = totalSettled === amountMinor;
+      database.exec('BEGIN');
+      try {
+        database.prepare('INSERT INTO security_deposit_settlements (id, deposit_id, tenant_id, amount_minor, note, settled_at) VALUES (?, ?, ?, ?, ?, ?)').run(crypto.randomUUID(), depositId, session.tenantId, input.amountMinor, input.note.trim() || 'Customer closeout settlement.', timestamp);
+        database.prepare('UPDATE security_deposits SET settled_minor = ?, settlement_note = ?, settled_at = ?, status = ? WHERE id = ? AND tenant_id = ?').run(totalSettled, input.note.trim() || 'Customer closeout settlement.', isSettled ? timestamp : null, isSettled ? 'settled' : 'held', depositId, session.tenantId);
+        database.prepare('INSERT INTO contract_audit_events (id, contract_id, action, detail, occurred_at) VALUES (?, ?, ?, ?, ?)').run(crypto.randomUUID(), String(row.contract_id), 'deposit-settled', `Security deposit settlement of ${input.amountMinor} recorded.`, timestamp);
+        database.exec('COMMIT');
+      } catch (error) { database.exec('ROLLBACK'); throw error; }
+      return this.listSecurityDeposits(session).find((deposit) => deposit.id === depositId)!;
     },
     getTenantSettings(session: AppSession): TenantSettings { requireTenantAdmin(session); return settingsFromRow(database.prepare('SELECT * FROM tenant_settings WHERE tenant_id = ?').get(session.tenantId) as Record<string, unknown>); },
     updateTenantSettings(session: AppSession, input: TenantSettingsInput): TenantSettings { requireTenantAdmin(session); const error = validateSettings(input); if (error) throw new Error(error); const timestamp = now(); database.prepare(`UPDATE tenant_settings SET company_name=?, gstin=?, address=?, invoice_prefix=?, payment_terms_days=?, footer=?, invoice_template=?, email_subject=?, email_body=?, smtp_host=?, smtp_port=?, smtp_from=?, log_retention_days=?, logo_data_url=?, stamp_data_url=?, signature_data_url=?, updated_at=? WHERE tenant_id=?`).run(input.companyName.trim(), input.gstin.trim(), input.address.trim(), input.invoicePrefix.trim().toUpperCase(), input.paymentTermsDays, input.footer.trim(), input.invoiceTemplate.trim(), input.emailSubject.trim(), input.emailBody.trim(), input.smtpHost.trim(), input.smtpPort, input.smtpFrom.trim(), input.logRetentionDays, input.logoDataUrl, input.stampDataUrl, input.signatureDataUrl, timestamp, session.tenantId); database.prepare('DELETE FROM operational_logs WHERE tenant_id = ? AND created_at < ?').run(session.tenantId, new Date(Date.now() - input.logRetentionDays * 86400000).toISOString()); database.prepare('INSERT INTO operational_logs (id, tenant_id, kind, message, created_at) VALUES (?, ?, ?, ?, ?)').run(crypto.randomUUID(), session.tenantId, 'feature-flow', 'Tenant settings were updated.', timestamp); return this.getTenantSettings(session); },

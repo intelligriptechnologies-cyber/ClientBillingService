@@ -85,6 +85,34 @@ describe('tenant store', () => {
     expect(store.listContracts(evo, {}).items).toEqual([]);
   });
 
+  it('tracks renewals and settles a held deposit once without crossing tenant boundaries', () => {
+    const store = storeForTest();
+    const nexio = store.authenticate('nexio-admin');
+    const evo = store.authenticate('evo-admin');
+    if (!nexio || !evo) throw new Error('Expected seeded sessions');
+    const customer = store.listCustomers(nexio, {}).items[0];
+    const service = store.listServices(nexio)[0];
+    if (!customer || !service) throw new Error('Expected seeded customer and service');
+    const contract = store.createContract(nexio, {
+      customerId: customer.id, serviceIds: [service.id], name: 'Renewal and deposit contract', startDate: '2025-01-01', endDate: '2026-10-01',
+      valueMinor: 1200000, paymentTermsDays: 14, billingFrequency: 'monthly', invoiceMonths: [], cycleDay: 5,
+      escalationPercent: 0, escalationReviewDate: '', renewalNoticeDays: 45, securityDepositMinor: 250000,
+    });
+
+    expect(store.listRenewals(nexio, { status: 'expired' }).items).toEqual(expect.arrayContaining([
+      expect.objectContaining({ contractId: contract.id, renewalStatus: 'expired' }),
+    ]));
+    const renewed = store.renewContract(nexio, contract.id, { endDate: '2027-10-01', note: 'Customer confirmed another year.' });
+    expect(renewed.endDate).toBe('2027-10-01');
+    expect(store.listContractAudit(nexio, contract.id).map((event) => event.action)).toContain('renewed');
+
+    const deposit = store.listSecurityDeposits(nexio).find((item) => item.contractId === contract.id);
+    if (!deposit) throw new Error('Expected opening deposit');
+    expect(store.settleSecurityDeposit(nexio, deposit.id, { amountMinor: 250000, note: 'Customer closeout refund.' })).toMatchObject({ status: 'settled', settledMinor: 250000 });
+    expect(() => store.settleSecurityDeposit(nexio, deposit.id, { amountMinor: 1, note: 'Duplicate' })).toThrow('already been settled');
+    expect(() => store.settleSecurityDeposit(evo, deposit.id, { amountMinor: 250000, note: 'Cross-tenant' })).toThrow('tenant');
+  });
+
   it('rejects an invalid invoice-month schedule and cross-tenant contract references', () => {
     const store = storeForTest();
     const nexio = store.authenticate('nexio-admin');
