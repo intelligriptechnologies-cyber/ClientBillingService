@@ -25,7 +25,10 @@ function Pager({ total, page, pageSize, onPage, onPageSize }: { total: number; p
 export default function CustomersPage() {
   const [items, setItems] = useState<CustomerRecord[]>([]); const [total, setTotal] = useState(0); const [query, setQuery] = useState<CustomerQuery>({ page: 1, pageSize: 10 }); const [dialog, setDialog] = useState<'create' | CustomerRecord | null>(null); const [message, setMessage] = useState('');
   const load = useCallback(async () => { const params = new URLSearchParams(); Object.entries(query).forEach(([key, value]) => { if (value) params.set(key, String(value)); }); const response = await fetch(`/api/customers?${params}`); if (!response.ok) return; const data = await response.json() as { items: CustomerRecord[]; total: number }; setItems(data.items); setTotal(data.total); }, [query]);
-  useEffect(() => { void load(); }, [load]);
+  useEffect(() => {
+    const initialLoad = window.setTimeout(() => { void load(); }, 0);
+    return () => window.clearTimeout(initialLoad);
+  }, [load]);
   const setFilter = (field: keyof CustomerQuery, value: string) => setQuery((current) => ({ ...current, [field]: value || undefined, page: 1 }));
   async function toggleStatus(customer: CustomerRecord) { const status: CustomerStatus = customer.status === 'active' ? 'inactive' : 'active'; const response = await fetch(`/api/customers/${customer.id}`, { method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ status }) }); if (response.ok) { setMessage(`${customer.companyName} is now ${status}.`); void load(); } }
   const clear = () => setQuery({ page: 1, pageSize: query.pageSize });

@@ -14,7 +14,10 @@ function LogList({ title, logs }: { title: string; logs: OperationalLog[] }) { r
 export default function SettingsPage() {
   const [tab, setTab] = useState<Tab>('company'); const [settings, setSettings] = useState<TenantSettings | null>(null); const [logs, setLogs] = useState<OperationalLog[]>([]); const [message, setMessage] = useState(''); const [error, setError] = useState(''); const [preview, setPreview] = useState('');
   const load = async () => { const response = await fetch('/api/settings'); const body = await response.json(); if (!response.ok) { setError(body.message); return; } setSettings(body.settings); const logResponse = await fetch('/api/logs'); if (logResponse.ok) setLogs((await logResponse.json()).logs); };
-  useEffect(() => { void load(); }, []);
+  useEffect(() => {
+    const initialLoad = window.setTimeout(() => { void load(); }, 0);
+    return () => window.clearTimeout(initialLoad);
+  }, []);
   const change = <K extends keyof TenantSettings>(key: K, value: TenantSettings[K]) => setSettings((current) => current ? { ...current, [key]: value } : current);
   const save = async (event: FormEvent) => { event.preventDefault(); if (!settings) return; setMessage(''); setError(''); const { updatedAt, ...input } = settings; const response = await fetch('/api/settings', { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify(input) }); const body = await response.json(); if (!response.ok) { setError(body.message); return; } setSettings(body.settings); setMessage('Settings saved for this tenant.'); await load(); };
   const asset = (key: 'logoDataUrl' | 'stampDataUrl' | 'signatureDataUrl') => (event: ChangeEvent<HTMLInputElement>) => { const file = event.target.files?.[0]; if (!file) return; const reader = new FileReader(); reader.onload = () => change(key, String(reader.result)); reader.readAsDataURL(file); };
