@@ -101,6 +101,40 @@ describe('tenant store', () => {
     expect(() => store.updateTenantUser(nexioAdmin, 'evo-user', { status: 'disabled' })).toThrow('tenant');
   });
 
+  it('persists frequency-aware services and tenant-scoped quotations', () => {
+    const store = storeForTest();
+    const nexio = store.authenticate('nexio-admin');
+    const evo = store.authenticate('evo-admin');
+    if (!nexio || !evo) throw new Error('Expected seeded sessions');
+
+    const service = store.createService(nexio, {
+      name: 'Managed analytics',
+      description: 'Monthly reporting and advisory',
+      prices: { monthly: 150000, quarterly: 420000, halfYearly: 780000, annual: 1440000 },
+    });
+    const quotation = store.createQuotation(nexio, {
+      customerName: 'Acme Trading',
+      customerEmail: 'accounts@acme.example',
+      lines: [{ serviceId: service.id, frequency: 'monthly', quantity: 2 }],
+    });
+
+    expect(store.listServices(nexio)).toEqual(expect.arrayContaining([expect.objectContaining({ id: service.id, prices: { monthly: 150000, quarterly: 420000, halfYearly: 780000, annual: 1440000 } })]));
+    expect(quotation).toMatchObject({ customerName: 'Acme Trading', totalMinor: 300000, lines: [expect.objectContaining({ serviceName: 'Managed analytics', unitPriceMinor: 150000 })] });
+    expect(store.listQuotations(evo)).toEqual([]);
+    expect(() => store.getQuotation(evo, quotation.id)).toThrow('tenant');
+  });
+
+  it('rejects invalid service prices and quotation lines from another tenant', () => {
+    const store = storeForTest();
+    const nexio = store.authenticate('nexio-admin');
+    const evo = store.authenticate('evo-admin');
+    if (!nexio || !evo) throw new Error('Expected seeded sessions');
+    const service = store.createService(nexio, { name: 'Reporting', prices: { monthly: 1000, quarterly: 0, halfYearly: 0, annual: 0 } });
+
+    expect(() => store.createService(nexio, { name: 'Broken', prices: { monthly: -1, quarterly: 0, halfYearly: 0, annual: 0 } })).toThrow('non-negative');
+    expect(() => store.createQuotation(evo, { customerName: 'Other customer', lines: [{ serviceId: service.id, frequency: 'monthly', quantity: 1 }] })).toThrow('tenant');
+  });
+
   it('creates, filters, changes status, and scopes customers to the active tenant', () => {
     const store = storeForTest(); const nexio = store.authenticate('nexio-admin'); const evo = store.authenticate('evo-admin');
     if (!nexio || !evo) throw new Error('Expected seeded sessions');
@@ -118,11 +152,8 @@ describe('tenant store', () => {
   });
 
   it('persists complete tenant settings, template previews, and isolated operational logs', () => {
-    const store = storeForTest();
-    const nexio = store.authenticate('nexio-admin');
-    const evo = store.authenticate('evo-admin');
+    const store = storeForTest(); const nexio = store.authenticate('nexio-admin'); const evo = store.authenticate('evo-admin');
     if (!nexio || !evo) throw new Error('Expected seeded sessions');
-
     const saved = store.updateTenantSettings(nexio, {
       companyName: 'Nexio Billing Services', gstin: '29ABCDE1234F1Z5', address: '42 Ledger Lane, Bengaluru',
       invoicePrefix: 'NX', paymentTermsDays: 21, footer: 'Thank you for your business.',
