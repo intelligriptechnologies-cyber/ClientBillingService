@@ -14,7 +14,7 @@ test('a tenant can filter GST sales and download tenant-context exports', async 
   const csv = page.waitForEvent('download');
   await page.getByRole('link', { name: 'Download spreadsheet' }).click();
   await expect((await csv).suggestedFilename()).toBe('gst-sales-2026-10.csv');
-  const printable = page.waitForEvent('download');
-  await page.getByRole('link', { name: 'Download print-ready report' }).click();
-  await expect((await printable).suggestedFilename()).toBe('gst-sales-2026-10.html');
+  const pdf = page.waitForEvent('download');
+  await page.getByRole('link', { name: 'Download PDF report' }).click();
+  await expect((await pdf).suggestedFilename()).toBe('gst-sales-2026-10.pdf');
 });

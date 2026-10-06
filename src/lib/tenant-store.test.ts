@@ -221,6 +221,19 @@ describe('tenant store', () => {
     expect(() => store.createContract(nexio, input)).toThrow('3 invoice months');
     expect(() => store.createContract(evo, { ...input, invoiceMonths: [4, 7, 10] })).toThrow('customer');
   });
+  it('closes an outstanding tenant invoice with an auditable write-off allocation', () => {
+    const store = storeForTest();
+    const nexio = store.authenticate('nexio-admin'); const evo = store.authenticate('evo-admin');
+    if (!nexio || !evo) throw new Error('Expected seeded sessions');
+    const invoice = store.listPendingPayments(nexio)[0];
+    if (!invoice) throw new Error('Expected an outstanding invoice');
+    const payment = store.closeInvoice(nexio, invoice.id, 'Approved closeout');
+    expect(payment).toMatchObject({ invoiceId: invoice.id, amountMinor: 0, writeOffMinor: invoice.outstandingMinor, reference: 'CLOSEOUT' });
+    expect(store.listPendingPayments(nexio).map((item) => item.id)).not.toContain(invoice.id);
+    expect(store.listOperationalLogs(nexio).some((log) => log.message.includes(`Invoice ${invoice.invoiceNumber} was closed`))).toBe(true);
+    expect(() => store.closeInvoice(evo, invoice.id)).toThrow('tenant');
+  });
+
   it('seeds five tenants and two tenant-local users for each tenant', () => {
     const store = storeForTest();
 

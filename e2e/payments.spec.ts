@@ -13,6 +13,9 @@ test('a tenant records a partial payment and an auditable demo-only reminder', a
   await expect(page.getByText(/Payment allocation of/)).toBeVisible();
   await page.getByRole('button', { name: 'Email reminder' }).first().click();
   await expect(page.getByText(/no external message was sent/)).toBeVisible();
+  page.once('dialog', (dialog) => dialog.accept());
+  await page.getByRole('button', { name: 'Close invoice' }).first().click();
+  await expect(page.getByText(/Invoice closed and write-off recorded/)).toBeVisible();
   const download = page.waitForEvent('download');
   await page.getByRole('link', { name: 'Download register' }).click();
   await expect((await download).suggestedFilename()).toBe('payment-register.csv');

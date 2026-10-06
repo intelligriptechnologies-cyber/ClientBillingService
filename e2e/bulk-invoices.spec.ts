@@ -33,7 +33,7 @@ test('a tenant previews, downloads, and confirms a monthly bulk invoice run only
   await expect(page.getByText('Bulk run workshop')).toBeVisible();
   const download = page.waitForEvent('download');
   await page.getByRole('link', { name: 'Download preview' }).click();
-  await expect((await download).suggestedFilename()).toBe('bulk-invoice-preview-2026-10.csv');
+  await expect((await download).suggestedFilename()).toBe('bulk-invoice-preview-2026-10.pdf');
   await page.getByRole('button', { name: 'Issue reviewed invoices' }).click();
   await expect(page.getByText(/Issued \d+ invoices?\./)).toBeVisible();
   await page.getByRole('button', { name: 'Issue reviewed invoices' }).click();
