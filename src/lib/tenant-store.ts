@@ -55,6 +55,13 @@ export type TenantInvoice = { id: string; tenantId: string; contractId: string |
 export type InvoiceInput = { contractId?: string; customerId?: string; invoiceDate: string; dueDate: string; taxableMinor: number; gstRate?: number };
 export type InvoiceQuery = { search?: string; month?: string; status?: InvoiceStatus; page?: number; pageSize?: number };
 export type InvoiceList = { items: TenantInvoice[]; total: number };
+export type PaymentMethod = 'bank_transfer' | 'cash' | 'card' | 'cheque' | 'other';
+export type TenantPayment = { id: string; invoiceId: string; invoiceNumber: string; customerId: string; customerName: string; paymentDate: string; amountMinor: number; tdsMinor: number; writeOffMinor: number; appliedMinor: number; method: PaymentMethod; reference: string; notes: string; recordedAt: string };
+export type PaymentInput = { invoiceId: string; paymentDate: string; amountMinor: number; tdsMinor: number; writeOffMinor: number; method: PaymentMethod; reference?: string; notes?: string };
+export type PaymentQuery = { customerId?: string; month?: string; page?: number; pageSize?: number };
+export type PaymentList = { items: TenantPayment[]; total: number; totalAppliedMinor: number };
+export type PendingPayment = TenantInvoice & { outstandingMinor: number; daysOverdue: number; agingBucket: 'Current' | '1–30' | '31–60' | '61–90' | '90+'; reminders: PaymentReminder[] };
+export type PaymentReminder = { id: string; invoiceId: string; channel: 'email' | 'whatsapp'; note: string; createdAt: string };
 
 type TenantSeed = { id: string; name: string; adminEmail: string; userEmail: string };
 type TenantFilters = { query?: string; status?: TenantStatus | 'all'; page?: number; pageSize?: number };
@@ -89,6 +96,8 @@ function seed(database: DatabaseSync) {
     CREATE TABLE IF NOT EXISTS security_deposit_settlements (id TEXT PRIMARY KEY, deposit_id TEXT NOT NULL REFERENCES security_deposits(id), tenant_id TEXT NOT NULL REFERENCES tenants(id), amount_minor INTEGER NOT NULL, note TEXT NOT NULL, settled_at TEXT NOT NULL);
     CREATE TABLE IF NOT EXISTS contract_audit_events (id TEXT PRIMARY KEY, contract_id TEXT NOT NULL REFERENCES contracts(id) ON DELETE CASCADE, action TEXT NOT NULL, detail TEXT NOT NULL, occurred_at TEXT NOT NULL);
     CREATE TABLE IF NOT EXISTS invoices (id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL REFERENCES tenants(id), contract_id TEXT REFERENCES contracts(id), customer_id TEXT NOT NULL REFERENCES customers(id), invoice_number TEXT NOT NULL, invoice_date TEXT NOT NULL, due_date TEXT NOT NULL, taxable_minor INTEGER NOT NULL, gst_rate REAL NOT NULL, gst_minor INTEGER NOT NULL, total_minor INTEGER NOT NULL, paid_minor INTEGER NOT NULL DEFAULT 0, status TEXT NOT NULL CHECK(status IN ('issued', 'paid', 'partial', 'overdue', 'void')), snapshot TEXT NOT NULL, issued_at TEXT NOT NULL, UNIQUE(tenant_id, invoice_number));
+    CREATE TABLE IF NOT EXISTS payments (id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL REFERENCES tenants(id), invoice_id TEXT NOT NULL REFERENCES invoices(id), payment_date TEXT NOT NULL, amount_minor INTEGER NOT NULL, tds_minor INTEGER NOT NULL DEFAULT 0, write_off_minor INTEGER NOT NULL DEFAULT 0, method TEXT NOT NULL CHECK(method IN ('bank_transfer', 'cash', 'card', 'cheque', 'other')), reference TEXT NOT NULL DEFAULT '', notes TEXT NOT NULL DEFAULT '', recorded_at TEXT NOT NULL);
+    CREATE TABLE IF NOT EXISTS payment_reminders (id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL REFERENCES tenants(id), invoice_id TEXT NOT NULL REFERENCES invoices(id), channel TEXT NOT NULL CHECK(channel IN ('email', 'whatsapp')), note TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL);
     CREATE TABLE IF NOT EXISTS additional_services (id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL REFERENCES tenants(id), customer_id TEXT NOT NULL REFERENCES customers(id), contract_id TEXT NOT NULL REFERENCES contracts(id), service_date TEXT NOT NULL, description TEXT NOT NULL, price_minor INTEGER NOT NULL, notes TEXT NOT NULL DEFAULT '', status TEXT NOT NULL CHECK(status IN ('active', 'archived')), billed_at TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
   `);
   for (const statement of ["ALTER TABLE tenants ADD COLUMN created_at TEXT NOT NULL DEFAULT ''", "ALTER TABLE tenants ADD COLUMN updated_at TEXT NOT NULL DEFAULT ''", 'ALTER TABLE security_deposits ADD COLUMN settled_minor INTEGER NOT NULL DEFAULT 0', 'ALTER TABLE security_deposits ADD COLUMN settlement_note TEXT', 'ALTER TABLE security_deposits ADD COLUMN settled_at TEXT']) { try { database.exec(statement); } catch { /* Existing database. */ } }
@@ -196,6 +205,13 @@ function settingsFromRow(row: Record<string, unknown>): TenantSettings { return 
 function invoiceFromRow(row: Record<string, unknown>): TenantInvoice {
   return { id: String(row.id), tenantId: String(row.tenant_id), contractId: row.contract_id ? String(row.contract_id) : null, customerId: String(row.customer_id), customerName: String(row.customer_name), invoiceNumber: String(row.invoice_number), invoiceDate: String(row.invoice_date), dueDate: String(row.due_date), taxableMinor: Number(row.taxable_minor), gstRate: Number(row.gst_rate), gstMinor: Number(row.gst_minor), totalMinor: Number(row.total_minor), paidMinor: Number(row.paid_minor), status: row.status as InvoiceStatus, snapshot: JSON.parse(String(row.snapshot)) as InvoiceSnapshot, issuedAt: String(row.issued_at) };
 }
+function paymentFromRow(row: Record<string, unknown>): TenantPayment {
+  const amountMinor = Number(row.amount_minor); const tdsMinor = Number(row.tds_minor); const writeOffMinor = Number(row.write_off_minor);
+  return { id: String(row.id), invoiceId: String(row.invoice_id), invoiceNumber: String(row.invoice_number), customerId: String(row.customer_id), customerName: String(row.customer_name), paymentDate: String(row.payment_date), amountMinor, tdsMinor, writeOffMinor, appliedMinor: amountMinor + tdsMinor + writeOffMinor, method: row.method as PaymentMethod, reference: String(row.reference), notes: String(row.notes), recordedAt: String(row.recorded_at) };
+}
+function reminderFromRow(row: Record<string, unknown>): PaymentReminder { return { id: String(row.id), invoiceId: String(row.invoice_id), channel: row.channel as PaymentReminder['channel'], note: String(row.note), createdAt: String(row.created_at) }; }
+function daysLate(dueDate: string, today = new Date().toISOString().slice(0, 10)) { const [year, month, day] = dueDate.split('-').map(Number); const [todayYear, todayMonth, todayDay] = today.split('-').map(Number); return Math.max(0, Math.floor((Date.UTC(todayYear, todayMonth - 1, todayDay) - Date.UTC(year, month - 1, day)) / 86_400_000)); }
+function agingFor(days: number): PendingPayment['agingBucket'] { if (days === 0) return 'Current'; if (days <= 30) return '1–30'; if (days <= 60) return '31–60'; if (days <= 90) return '61–90'; return '90+'; }
 function validateSettings(input: TenantSettingsInput) { if (!input.companyName.trim()) return 'Company name is required.'; if (!input.invoicePrefix.trim()) return 'Invoice prefix is required.'; if (!Number.isInteger(input.paymentTermsDays) || input.paymentTermsDays < 0) return 'Payment terms must be zero or more days.'; if (!Number.isInteger(input.smtpPort) || input.smtpPort < 1 || input.smtpPort > 65535) return 'SMTP port must be between 1 and 65535.'; if (!Number.isInteger(input.logRetentionDays) || input.logRetentionDays < 1 || input.logRetentionDays > 3650) return 'Log retention must be between 1 and 3650 days.'; return null; }
 
 function requireTenantMember(session: AppSession): asserts session is AppSession & { tenantId: string } {
@@ -571,6 +587,60 @@ export function createTenantStore(filename = process.env.CLIENT_BILLING_DATABASE
       const number = `${settings.invoicePrefix}-${String(sequence).padStart(4, '0')}`;
       database.prepare('INSERT INTO invoices (id, tenant_id, contract_id, customer_id, invoice_number, invoice_date, due_date, taxable_minor, gst_rate, gst_minor, total_minor, paid_minor, status, snapshot, issued_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?)').run(id, session.tenantId, input.contractId ?? null, customerId, number, input.invoiceDate, input.dueDate, taxableMinor, gstRate, gstMinor, taxableMinor + gstMinor, 'issued', JSON.stringify(snapshot), timestamp);
       return this.getInvoice(session, id)!;
+    },
+    listPayments(session: AppSession, query: PaymentQuery = {}): PaymentList {
+      requireTenantMember(session);
+      const conditions = ['payments.tenant_id = ?']; const values: Array<string | number> = [session.tenantId];
+      if (query.customerId) { conditions.push('invoices.customer_id = ?'); values.push(query.customerId); }
+      if (query.month && /^\d{4}-\d{2}$/.test(query.month)) { conditions.push('substr(payments.payment_date, 1, 7) = ?'); values.push(query.month); }
+      const where = conditions.join(' AND '); const pageSize = Math.min(Math.max(query.pageSize ?? 20, 1), 100); const page = Math.max(query.page ?? 1, 1);
+      const joined = ` FROM payments JOIN invoices ON invoices.id = payments.invoice_id JOIN customers ON customers.id = invoices.customer_id WHERE ${where}`;
+      const total = Number((database.prepare(`SELECT COUNT(*) AS count${joined}`).get(...values) as { count: number }).count);
+      const applied = Number((database.prepare(`SELECT COALESCE(SUM(payments.amount_minor + payments.tds_minor + payments.write_off_minor), 0) AS amount${joined}`).get(...values) as { amount: number }).amount);
+      const rows = database.prepare(`SELECT payments.*, invoices.invoice_number, invoices.customer_id, customers.company_name AS customer_name${joined} ORDER BY payments.payment_date DESC, payments.recorded_at DESC LIMIT ? OFFSET ?`).all(...values, pageSize, (page - 1) * pageSize) as Record<string, unknown>[];
+      return { items: rows.map(paymentFromRow), total, totalAppliedMinor: applied };
+    },
+    recordPayment(session: AppSession, input: PaymentInput): TenantPayment {
+      requireTenantMember(session);
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(input.paymentDate)) throw new Error('Enter a valid payment date.');
+      for (const value of [input.amountMinor, input.tdsMinor, input.writeOffMinor]) if (!Number.isInteger(value) || value < 0) throw new Error('Payment, TDS, and write-off values must be non-negative whole minor amounts.');
+      const appliedMinor = input.amountMinor + input.tdsMinor + input.writeOffMinor;
+      if (appliedMinor <= 0) throw new Error('Enter a payment, TDS, or write-off amount.');
+      const invoiceRow = database.prepare('SELECT * FROM invoices WHERE id = ? AND tenant_id = ?').get(input.invoiceId, session.tenantId) as Record<string, unknown> | undefined;
+      if (!invoiceRow) throw new Error('This invoice does not belong to your tenant.');
+      if (invoiceRow.status === 'void' || invoiceRow.status === 'paid') throw new Error('Payments can only be allocated to an outstanding invoice.');
+      const outstanding = Number(invoiceRow.total_minor) - Number(invoiceRow.paid_minor);
+      if (appliedMinor > outstanding) throw new Error('Allocation cannot exceed the outstanding invoice balance.');
+      const id = crypto.randomUUID(); const timestamp = now(); const paidMinor = Number(invoiceRow.paid_minor) + appliedMinor; const status: InvoiceStatus = paidMinor === Number(invoiceRow.total_minor) ? 'paid' : 'partial';
+      database.exec('BEGIN');
+      try {
+        database.prepare('INSERT INTO payments (id, tenant_id, invoice_id, payment_date, amount_minor, tds_minor, write_off_minor, method, reference, notes, recorded_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').run(id, session.tenantId, input.invoiceId, input.paymentDate, input.amountMinor, input.tdsMinor, input.writeOffMinor, input.method, input.reference?.trim() ?? '', input.notes?.trim() ?? '', timestamp);
+        database.prepare('UPDATE invoices SET paid_minor = ?, status = ? WHERE id = ? AND tenant_id = ?').run(paidMinor, status, input.invoiceId, session.tenantId);
+        database.prepare('INSERT INTO operational_logs (id, tenant_id, kind, message, created_at) VALUES (?, ?, ?, ?, ?)').run(crypto.randomUUID(), session.tenantId, 'feature-flow', `Payment allocation recorded for ${String(invoiceRow.invoice_number)}.`, timestamp);
+        database.exec('COMMIT');
+      } catch (error) { database.exec('ROLLBACK'); throw error; }
+      return this.listPayments(session, { page: 1, pageSize: 100 }).items.find((payment) => payment.id === id)!;
+    },
+    listPendingPayments(session: AppSession): PendingPayment[] {
+      requireTenantMember(session);
+      const rows = database.prepare('SELECT invoices.*, customers.company_name AS customer_name FROM invoices JOIN customers ON customers.id = invoices.customer_id WHERE invoices.tenant_id = ? AND invoices.status != \'void\' AND invoices.paid_minor < invoices.total_minor ORDER BY invoices.due_date ASC').all(session.tenantId) as Record<string, unknown>[];
+      const reminderStatement = database.prepare('SELECT * FROM payment_reminders WHERE invoice_id = ? AND tenant_id = ? ORDER BY created_at DESC');
+      return rows.map((row) => { const invoice = invoiceFromRow(row); const daysOverdue = daysLate(invoice.dueDate); return { ...invoice, outstandingMinor: invoice.totalMinor - invoice.paidMinor, daysOverdue, agingBucket: agingFor(daysOverdue), reminders: (reminderStatement.all(invoice.id, session.tenantId) as Record<string, unknown>[]).map(reminderFromRow) }; });
+    },
+    recordPaymentReminder(session: AppSession, invoiceId: string, input: { channel: PaymentReminder['channel']; note?: string }): PaymentReminder {
+      requireTenantMember(session);
+      if (input.channel !== 'email' && input.channel !== 'whatsapp') throw new Error('Choose email or WhatsApp for the reminder.');
+      const invoice = database.prepare('SELECT id, invoice_number, paid_minor, total_minor FROM invoices WHERE id = ? AND tenant_id = ?').get(invoiceId, session.tenantId) as Record<string, unknown> | undefined;
+      if (!invoice) throw new Error('This invoice does not belong to your tenant.');
+      if (Number(invoice.paid_minor) >= Number(invoice.total_minor)) throw new Error('Paid invoices do not need payment reminders.');
+      const id = crypto.randomUUID(); const timestamp = now(); const note = input.note?.trim() ?? '';
+      database.exec('BEGIN');
+      try {
+        database.prepare('INSERT INTO payment_reminders (id, tenant_id, invoice_id, channel, note, created_at) VALUES (?, ?, ?, ?, ?, ?)').run(id, session.tenantId, invoiceId, input.channel, note, timestamp);
+        database.prepare('INSERT INTO operational_logs (id, tenant_id, kind, message, created_at) VALUES (?, ?, ?, ?, ?)').run(crypto.randomUUID(), session.tenantId, 'feature-flow', `${input.channel === 'email' ? 'Email' : 'WhatsApp'} payment reminder prepared for ${String(invoice.invoice_number)}; no external message was sent.`, timestamp);
+        database.exec('COMMIT');
+      } catch (error) { database.exec('ROLLBACK'); throw error; }
+      return reminderFromRow(database.prepare('SELECT * FROM payment_reminders WHERE id = ?').get(id) as Record<string, unknown>);
     },
     getTenantSettings(session: AppSession): TenantSettings { requireTenantAdmin(session); return settingsFromRow(database.prepare('SELECT * FROM tenant_settings WHERE tenant_id = ?').get(session.tenantId) as Record<string, unknown>); },
     updateTenantSettings(session: AppSession, input: TenantSettingsInput): TenantSettings { requireTenantAdmin(session); const error = validateSettings(input); if (error) throw new Error(error); const timestamp = now(); database.prepare(`UPDATE tenant_settings SET company_name=?, gstin=?, address=?, invoice_prefix=?, payment_terms_days=?, footer=?, invoice_template=?, email_subject=?, email_body=?, smtp_host=?, smtp_port=?, smtp_from=?, log_retention_days=?, logo_data_url=?, stamp_data_url=?, signature_data_url=?, updated_at=? WHERE tenant_id=?`).run(input.companyName.trim(), input.gstin.trim(), input.address.trim(), input.invoicePrefix.trim().toUpperCase(), input.paymentTermsDays, input.footer.trim(), input.invoiceTemplate.trim(), input.emailSubject.trim(), input.emailBody.trim(), input.smtpHost.trim(), input.smtpPort, input.smtpFrom.trim(), input.logRetentionDays, input.logoDataUrl, input.stampDataUrl, input.signatureDataUrl, timestamp, session.tenantId); database.prepare('DELETE FROM operational_logs WHERE tenant_id = ? AND created_at < ?').run(session.tenantId, new Date(Date.now() - input.logRetentionDays * 86400000).toISOString()); database.prepare('INSERT INTO operational_logs (id, tenant_id, kind, message, created_at) VALUES (?, ?, ?, ?, ?)').run(crypto.randomUUID(), session.tenantId, 'feature-flow', 'Tenant settings were updated.', timestamp); return this.getTenantSettings(session); },
