@@ -8,10 +8,12 @@ export async function GET(request: Request) {
   const session = await getCurrentSession();
   if (!session?.tenantId) return unauthorized();
   const params = new URL(request.url).searchParams;
+  const status = params.get('status');
+  const invoiceDelivery = params.get('invoiceDelivery');
   const query: CustomerQuery = {
     search: params.get('search') ?? undefined,
-    status: params.get('status') === 'active' || params.get('status') === 'inactive' ? params.get('status') : undefined,
-    invoiceDelivery: ['monthly', 'quarterly', 'email', 'manual'].includes(params.get('invoiceDelivery') ?? '') ? params.get('invoiceDelivery') as CustomerQuery['invoiceDelivery'] : undefined,
+    status: status === 'active' || status === 'inactive' ? status : undefined,
+    invoiceDelivery: invoiceDelivery && ['monthly', 'quarterly', 'email', 'manual'].includes(invoiceDelivery) ? invoiceDelivery as Exclude<CustomerQuery['invoiceDelivery'], undefined> : undefined,
     page: Number(params.get('page') ?? 1), pageSize: Number(params.get('pageSize') ?? 10),
   };
   return NextResponse.json(getTenantStore().listCustomers(session, query));
