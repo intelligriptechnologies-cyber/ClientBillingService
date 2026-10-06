@@ -4,7 +4,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import type { AppSession } from '@/lib/tenant-store';
 
-const tenantLinks = [{ href: '/dashboard', label: 'Dashboard' }, { href: '/customers', label: 'Customers' }, { href: '/services', label: 'Services' }, { href: '/contracts', label: 'Contracts' }, { href: '/renewals', label: 'Renewals & deposits' }, { href: '/invoices', label: 'Invoices' }, { href: '/payments', label: 'Payments' }, { href: '/reports', label: 'Reports' }];
+const tenantLinks = [{ href: '/dashboard', label: 'Dashboard' }, { href: '/customers', label: 'Customers' }, { href: '/services', label: 'Services' }, { href: '/contracts', label: 'Contracts' }, { href: '/renewals', label: 'Renewals & deposits' }, { href: '/additional-services', label: 'Additional services' }, { href: '/invoices', label: 'Invoices' }, { href: '/payments', label: 'Payments' }, { href: '/reports', label: 'Reports' }];
 export function AppShell({ session, children }: { session: AppSession; children: React.ReactNode }) {
   const router = useRouter();
   const links = session.role === 'superadmin' ? [{ href: '/dashboard', label: 'Platform dashboard' }, { href: '/tenants', label: 'Tenants' }] : [...tenantLinks, ...(session.role === 'admin' ? [{ href: '/users', label: 'Users' }, { href: '/settings', label: 'Settings' }] : [])];

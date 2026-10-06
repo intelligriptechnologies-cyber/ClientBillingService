@@ -44,6 +44,27 @@ describe('tenant lifecycle', () => {
 });
 
 describe('tenant store', () => {
+  it('records a dated additional service only against its customer contract and exposes it for that billing period', () => {
+    const store = storeForTest();
+    const nexio = store.authenticate('nexio-admin');
+    const evo = store.authenticate('evo-admin');
+    if (!nexio || !evo) throw new Error('Expected seeded sessions');
+    const customer = store.listCustomers(nexio, {}).items[0];
+    const service = store.listServices(nexio)[0];
+    if (!customer || !service) throw new Error('Expected seeded billing data');
+    const contract = store.createContract(nexio, {
+      customerId: customer.id, serviceIds: [service.id], name: 'Managed reporting', startDate: '2026-01-01', endDate: '2026-12-31',
+      valueMinor: 120000, paymentTermsDays: 14, billingFrequency: 'monthly', invoiceMonths: [], cycleDay: 1,
+      escalationPercent: 0, escalationReviewDate: '', renewalNoticeDays: 30, securityDepositMinor: 0,
+    });
+
+    const additional = store.createAdditionalService(nexio, { customerId: customer.id, contractId: contract.id, serviceDate: '2026-10-15', description: 'On-site reporting workshop', priceMinor: 250000, notes: 'Approved by finance.' });
+
+    expect(store.listAdditionalServices(nexio, { billingPeriod: '2026-10' }).items).toEqual(expect.arrayContaining([expect.objectContaining({ id: additional.id, contractId: contract.id, priceMinor: 250000 })]));
+    expect(store.listAdditionalServices(nexio, { billingPeriod: '2026-11' }).items).not.toEqual(expect.arrayContaining([expect.objectContaining({ id: additional.id })]));
+    expect(store.listAdditionalServices(evo, {}).items).toEqual([]);
+    expect(() => store.createAdditionalService(evo, { customerId: customer.id, contractId: contract.id, serviceDate: '2026-10-15', description: 'Cross tenant', priceMinor: 100, notes: '' })).toThrow('tenant');
+  });
   it('creates a tenant-scoped quarterly contract with its opening security deposit', () => {
     const store = storeForTest();
     const nexio = store.authenticate('nexio-admin');
