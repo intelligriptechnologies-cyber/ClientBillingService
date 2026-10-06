@@ -44,6 +44,28 @@ describe('tenant lifecycle', () => {
 });
 
 describe('tenant store', () => {
+  it('returns a tenant-scoped GST sales report with interstate and intrastate tax splits', () => {
+    const store = storeForTest();
+    const nexio = store.authenticate('nexio-admin');
+    const evo = store.authenticate('evo-admin');
+    if (!nexio || !evo) throw new Error('Expected seeded sessions');
+
+    store.updateTenantSettings(nexio, { ...store.getTenantSettings(nexio), gstin: '29ABCDE1234F1Z5' });
+    const customer = store.listCustomers(nexio, {}).items[0];
+    const interstate = store.createCustomer(nexio, { companyName: 'Interstate Buyer', contactName: 'Ravi', email: 'ravi@example.com', phone: '9000000000', gstin: '27ABCDE1234F1Z5', billingAddress: 'Mumbai', invoiceDelivery: 'email' });
+    store.createIssuedInvoice(nexio, { customerId: customer.id, invoiceDate: '2026-11-02', dueDate: '2026-11-16', taxableMinor: 10_000, gstRate: 18 });
+    store.createIssuedInvoice(nexio, { customerId: interstate.id, invoiceDate: '2026-11-03', dueDate: '2026-11-17', taxableMinor: 20_000, gstRate: 18 });
+
+    const report = store.getGstSalesReport(nexio, '2026-11');
+
+    expect(report).toMatchObject({ month: '2026-11', companyName: 'Nexio Hyper', gstin: '29ABCDE1234F1Z5', totals: { taxableMinor: 30_000, gstMinor: 5_400, totalMinor: 35_400, igstMinor: 3_600, cgstMinor: 900, sgstMinor: 900, netGstMinor: 5_400 } });
+    expect(report.items).toEqual(expect.arrayContaining([
+      expect.objectContaining({ customerName: customer.companyName, cgstMinor: 900, sgstMinor: 900, igstMinor: 0 }),
+      expect.objectContaining({ customerName: 'Interstate Buyer', igstMinor: 3_600, cgstMinor: 0, sgstMinor: 0 }),
+    ]));
+    expect(store.getGstSalesReport(evo, '2026-11').items).toEqual([]);
+  });
+
   it('keeps issued invoice snapshots stable, supports filters, and isolates invoices by tenant', () => {
     const store = storeForTest();
     const nexio = store.authenticate('nexio-admin');

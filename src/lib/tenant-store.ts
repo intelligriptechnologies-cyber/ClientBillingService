@@ -55,6 +55,8 @@ export type TenantInvoice = { id: string; tenantId: string; contractId: string |
 export type InvoiceInput = { contractId?: string; customerId?: string; invoiceDate: string; dueDate: string; taxableMinor: number; gstRate?: number };
 export type InvoiceQuery = { search?: string; month?: string; status?: InvoiceStatus; page?: number; pageSize?: number };
 export type InvoiceList = { items: TenantInvoice[]; total: number };
+export type GstSalesRow = { invoiceId: string; invoiceNumber: string; invoiceDate: string; customerName: string; customerGstin: string; taxableMinor: number; gstMinor: number; totalMinor: number; igstMinor: number; cgstMinor: number; sgstMinor: number; netGstMinor: number };
+export type GstSalesReport = { month: string; companyName: string; gstin: string; items: GstSalesRow[]; totals: { taxableMinor: number; gstMinor: number; totalMinor: number; igstMinor: number; cgstMinor: number; sgstMinor: number; netGstMinor: number } };
 
 type TenantSeed = { id: string; name: string; adminEmail: string; userEmail: string };
 type TenantFilters = { query?: string; status?: TenantStatus | 'all'; page?: number; pageSize?: number };
@@ -195,6 +197,12 @@ function requireTenantAdmin(session: AppSession): asserts session is AppSession 
 function settingsFromRow(row: Record<string, unknown>): TenantSettings { return { companyName: String(row.company_name), gstin: String(row.gstin), address: String(row.address), invoicePrefix: String(row.invoice_prefix), paymentTermsDays: Number(row.payment_terms_days), footer: String(row.footer), invoiceTemplate: String(row.invoice_template), emailSubject: String(row.email_subject), emailBody: String(row.email_body), smtpHost: String(row.smtp_host), smtpPort: Number(row.smtp_port), smtpFrom: String(row.smtp_from), logRetentionDays: Number(row.log_retention_days), logoDataUrl: String(row.logo_data_url), stampDataUrl: String(row.stamp_data_url), signatureDataUrl: String(row.signature_data_url), updatedAt: String(row.updated_at) }; }
 function invoiceFromRow(row: Record<string, unknown>): TenantInvoice {
   return { id: String(row.id), tenantId: String(row.tenant_id), contractId: row.contract_id ? String(row.contract_id) : null, customerId: String(row.customer_id), customerName: String(row.customer_name), invoiceNumber: String(row.invoice_number), invoiceDate: String(row.invoice_date), dueDate: String(row.due_date), taxableMinor: Number(row.taxable_minor), gstRate: Number(row.gst_rate), gstMinor: Number(row.gst_minor), totalMinor: Number(row.total_minor), paidMinor: Number(row.paid_minor), status: row.status as InvoiceStatus, snapshot: JSON.parse(String(row.snapshot)) as InvoiceSnapshot, issuedAt: String(row.issued_at) };
+}
+function gstState(gstin: string) { return /^\d{2}/.test(gstin.trim()) ? gstin.trim().slice(0, 2) : null; }
+function gstSalesRowFromInvoice(row: Record<string, unknown>, companyGstin: string): GstSalesRow {
+  const gstMinor = Number(row.gst_minor); const interstate = Boolean(gstState(companyGstin) && gstState(String(row.customer_gstin)) && gstState(companyGstin) !== gstState(String(row.customer_gstin)));
+  const cgstMinor = interstate ? 0 : Math.floor(gstMinor / 2); const sgstMinor = interstate ? 0 : gstMinor - cgstMinor;
+  return { invoiceId: String(row.id), invoiceNumber: String(row.invoice_number), invoiceDate: String(row.invoice_date), customerName: String(row.customer_name), customerGstin: String(row.customer_gstin), taxableMinor: Number(row.taxable_minor), gstMinor, totalMinor: Number(row.total_minor), igstMinor: interstate ? gstMinor : 0, cgstMinor, sgstMinor, netGstMinor: gstMinor };
 }
 function validateSettings(input: TenantSettingsInput) { if (!input.companyName.trim()) return 'Company name is required.'; if (!input.invoicePrefix.trim()) return 'Invoice prefix is required.'; if (!Number.isInteger(input.paymentTermsDays) || input.paymentTermsDays < 0) return 'Payment terms must be zero or more days.'; if (!Number.isInteger(input.smtpPort) || input.smtpPort < 1 || input.smtpPort > 65535) return 'SMTP port must be between 1 and 65535.'; if (!Number.isInteger(input.logRetentionDays) || input.logRetentionDays < 1 || input.logRetentionDays > 3650) return 'Log retention must be between 1 and 3650 days.'; return null; }
 
@@ -546,6 +554,18 @@ export function createTenantStore(filename = process.env.CLIENT_BILLING_DATABASE
       const total = Number((database.prepare(`SELECT COUNT(*) AS count FROM invoices JOIN customers ON customers.id = invoices.customer_id WHERE ${where}`).get(...values) as { count: number }).count);
       const rows = database.prepare(`SELECT invoices.*, customers.company_name AS customer_name FROM invoices JOIN customers ON customers.id = invoices.customer_id WHERE ${where} ORDER BY invoices.invoice_date DESC, invoices.invoice_number DESC LIMIT ? OFFSET ?`).all(...values, pageSize, (page - 1) * pageSize) as Record<string, unknown>[];
       return { items: rows.map(invoiceFromRow), total };
+    },
+    getGstSalesReport(session: AppSession, month: string): GstSalesReport {
+      requireTenantMember(session);
+      if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(month)) throw new Error('Choose a valid report month.');
+      const settings = settingsFromRow(database.prepare('SELECT * FROM tenant_settings WHERE tenant_id = ?').get(session.tenantId) as Record<string, unknown>);
+      const rows = database.prepare(`SELECT invoices.*, customers.company_name AS customer_name, customers.gstin AS customer_gstin
+        FROM invoices JOIN customers ON customers.id = invoices.customer_id
+        WHERE invoices.tenant_id = ? AND substr(invoices.invoice_date, 1, 7) = ? AND invoices.status != 'void'
+        ORDER BY invoices.invoice_date, invoices.invoice_number`).all(session.tenantId, month) as Record<string, unknown>[];
+      const items = rows.map((row) => gstSalesRowFromInvoice(row, settings.gstin));
+      const totals = items.reduce((total, item) => ({ taxableMinor: total.taxableMinor + item.taxableMinor, gstMinor: total.gstMinor + item.gstMinor, totalMinor: total.totalMinor + item.totalMinor, igstMinor: total.igstMinor + item.igstMinor, cgstMinor: total.cgstMinor + item.cgstMinor, sgstMinor: total.sgstMinor + item.sgstMinor, netGstMinor: total.netGstMinor + item.netGstMinor }), { taxableMinor: 0, gstMinor: 0, totalMinor: 0, igstMinor: 0, cgstMinor: 0, sgstMinor: 0, netGstMinor: 0 });
+      return { month, companyName: settings.companyName, gstin: settings.gstin, items, totals };
     },
     getInvoice(session: AppSession, invoiceId: string): TenantInvoice | null {
       requireTenantMember(session);
