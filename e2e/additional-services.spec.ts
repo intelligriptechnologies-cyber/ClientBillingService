@@ -11,7 +11,7 @@ async function enterNexio(page: import('@playwright/test').Page) {
   await page.getByLabel('Start date').fill('2026-01-01');
   await page.getByLabel('End date').fill('2026-12-31');
   await page.getByLabel('Contract value').fill('12000');
-  await page.getByRole('checkbox').first().check();
+  await page.getByRole('group', { name: 'Services' }).getByRole('checkbox').first().check();
   await page.getByRole('button', { name: 'Create contract' }).click();
   await page.getByRole('link', { name: 'Additional services' }).click();
 }

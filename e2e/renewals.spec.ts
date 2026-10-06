@@ -13,7 +13,7 @@ test('a tenant renews an expired contract and settles its security deposit', asy
   await page.getByLabel('End date').fill('2026-01-01');
   await page.getByLabel('Contract value').fill('12000');
   await page.getByLabel('Security deposit').fill('2500');
-  await page.getByRole('checkbox', { name: /Managed billing service|Analytics|Service/ }).first().check();
+  await page.getByRole('group', { name: 'Services' }).getByRole('checkbox').first().check();
   await page.getByRole('button', { name: 'Create contract' }).click();
   await page.getByRole('link', { name: 'Renewals & deposits' }).click();
   const renewalRow = page.getByRole('row', { name: new RegExp(contractName) });

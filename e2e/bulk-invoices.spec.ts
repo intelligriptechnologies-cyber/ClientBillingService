@@ -12,7 +12,7 @@ test('a tenant previews, downloads, and confirms a monthly bulk invoice run only
   await page.getByLabel('Start date').fill('2026-01-01');
   await page.getByLabel('End date').fill('2026-12-31');
   await page.getByLabel('Contract value').fill('1000');
-  await page.getByRole('checkbox', { name: /service/i }).first().check();
+  await page.getByRole('group', { name: 'Services' }).getByRole('checkbox').first().check();
   await page.getByRole('button', { name: 'Create contract' }).click();
   await expect(page.getByText(contractName, { exact: true })).toBeVisible();
   await page.getByRole('link', { name: 'Additional services' }).click();
@@ -35,7 +35,7 @@ test('a tenant previews, downloads, and confirms a monthly bulk invoice run only
   await page.getByRole('link', { name: 'Download preview' }).click();
   await expect((await download).suggestedFilename()).toBe('bulk-invoice-preview-2026-10.csv');
   await page.getByRole('button', { name: 'Issue reviewed invoices' }).click();
-  await expect(page.getByText('Issued 1 invoice.')).toBeVisible();
+  await expect(page.getByText(/Issued \d+ invoices?\./)).toBeVisible();
   await page.getByRole('button', { name: 'Issue reviewed invoices' }).click();
   await expect(page.getByText('This billing period was already issued.')).toBeVisible();
 });

@@ -178,7 +178,7 @@ describe('tenant store', () => {
 
     expect(contract).toMatchObject({ customerId: customer.id, billingFrequency: 'quarterly', invoiceMonths: [4, 7, 10], status: 'active' });
     expect(store.listSecurityDeposits(nexio)).toEqual(expect.arrayContaining([expect.objectContaining({ contractId: contract.id, amountMinor: 250000, status: 'held' })]));
-    expect(store.listContracts(evo, {}).items).toEqual([]);
+    expect(store.listContracts(evo, {}).items).not.toEqual(expect.arrayContaining([expect.objectContaining({ id: contract.id })]));
   });
 
   it('tracks renewals and settles a held deposit once without crossing tenant boundaries', () => {
@@ -232,6 +232,33 @@ describe('tenant store', () => {
       expect.objectContaining({ email: 'Admin@nexio.com', role: 'admin', tenantName: 'Nexio Hyper' }),
       expect.objectContaining({ email: 'user@od.com', role: 'user', tenantName: 'OD Badminton' }),
     ]));
+  });
+
+  it('seeds a complete billing scenario for every tenant', () => {
+    const store = storeForTest();
+
+    for (const tenantId of ['nexio', 'maasp', 'evo', 'gripdata', 'od']) {
+      const session = store.authenticate(`${tenantId}-admin`);
+      if (!session) throw new Error(`Expected ${tenantId} admin session`);
+
+      const customer = store.listCustomers(session, {}).items[0];
+      const contract = store.listContracts(session, {}).items[0];
+      const invoices = store.listInvoices(session, {}).items;
+      const payments = store.listPayments(session, {}).items;
+      const deposits = store.listSecurityDeposits(session);
+
+      expect(customer).toBeDefined();
+      expect(contract).toMatchObject({ customerId: customer?.id, status: 'active' });
+      expect(invoices).toEqual(expect.arrayContaining([
+        expect.objectContaining({ contractId: contract?.id, customerId: customer?.id }),
+      ]));
+      expect(payments).toEqual(expect.arrayContaining([
+        expect.objectContaining({ customerId: customer?.id, invoiceId: expect.any(String) }),
+      ]));
+      expect(deposits).toEqual(expect.arrayContaining([
+        expect.objectContaining({ contractId: contract?.id, customerId: customer?.id, status: 'held' }),
+      ]));
+    }
   });
 
   it('does not permit a tenant session to read or write another tenant’s records', () => {

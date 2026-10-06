@@ -13,14 +13,14 @@ test('a tenant can create, filter, edit, and deactivate its customer', async ({ 
   await page.getByRole('button', { name: 'Add customer' }).click();
   await page.getByLabel('Company name').fill('Orbit Labs');
   await page.getByLabel('Contact name').fill('Riya Rao');
-  await page.getByLabel('Email').fill('riya@orbit.example');
+  await page.getByRole('textbox', { name: 'Email', exact: true }).fill('riya@orbit.example');
   await page.getByLabel('Phone').fill('+91 98765 00000');
   await page.getByLabel('Billing address').fill('42 Orbit Road, Bengaluru');
   await page.getByRole('button', { name: 'Create customer' }).click();
   await expect(page.getByText('Orbit Labs', { exact: true })).toBeVisible();
   await page.getByLabel('Search customers').fill('Orbit');
   await expect(page.getByText('Orbit Labs', { exact: true })).toBeVisible();
-  await page.getByRole('button', { name: 'Edit' }).click();
+  await page.getByRole('row', { name: /Orbit Labs/ }).getByRole('button', { name: 'Edit' }).click();
   await page.getByLabel('GSTIN').fill('29ABCDE1234F1Z5');
   await page.getByRole('button', { name: 'Save changes' }).click();
   await expect(page.getByLabel('Set Orbit Labs inactive')).toBeVisible();

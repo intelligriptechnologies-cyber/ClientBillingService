@@ -20,7 +20,7 @@ test('a tenant creates a quarterly contract and its schedule is visible', async 
   await page.getByText('Apr', { exact: true }).click();
   await page.getByText('Jul', { exact: true }).click();
   await page.getByLabel('Security deposit').fill('2500');
-  await page.getByRole('checkbox', { name: /Seeded service|Analytics|Service/ }).first().check();
+  await page.getByRole('group', { name: 'Services' }).getByRole('checkbox').first().check();
   await page.getByRole('button', { name: 'Create contract' }).click();
   await expect(page.getByText('Quarterly reporting', { exact: true })).toBeVisible();
   await expect(page.getByText(/months 1, 4, 7/)).toBeVisible();
@@ -36,7 +36,7 @@ test('quarterly contracts require exactly three invoice months', async ({ page }
   await page.getByLabel('Contract value').fill('12000');
   await page.getByLabel('Billing frequency').selectOption('quarterly');
   await page.getByText('Jan', { exact: true }).click();
-  await page.getByRole('checkbox', { name: /Seeded service|Analytics|Service/ }).first().check();
+  await page.getByRole('group', { name: 'Services' }).getByRole('checkbox').first().check();
   await page.getByRole('button', { name: 'Create contract' }).click();
   await expect(page.getByText('Quarterly contracts require 3 invoice months.')).toBeVisible();
 });
