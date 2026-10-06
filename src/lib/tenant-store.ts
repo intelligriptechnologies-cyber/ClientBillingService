@@ -6,6 +6,9 @@ export type AppRole = 'superadmin' | 'admin' | 'user';
 export type DemoIdentity = { id: string; name: string; email: string; role: AppRole; tenantId: string | null; tenantName: string | null };
 export type AppSession = DemoIdentity;
 export type TenantRecord = { id: string; tenantId: string; label: string };
+export type TenantUser = { id: string; name: string; email: string; role: Extract<AppRole, 'admin' | 'user'>; status: 'active' | 'disabled' };
+export type TenantUserInput = { name: string; email: string; role: TenantUser['role'] };
+export type TenantUserUpdate = Partial<TenantUserInput> & { status?: TenantUser['status'] };
 
 type TenantSeed = { id: string; name: string; adminEmail: string; userEmail: string };
 
@@ -52,6 +55,21 @@ function identityFromRow(row: Record<string, unknown> | undefined): DemoIdentity
   return { id: String(row.id), name: String(row.name), email: String(row.email), role: row.role as AppRole, tenantId: row.tenant_id ? String(row.tenant_id) : null, tenantName: row.tenant_name ? String(row.tenant_name) : null };
 }
 
+function tenantUserFromRow(row: Record<string, unknown>): TenantUser {
+  return {
+    id: String(row.id),
+    name: String(row.name),
+    email: String(row.email),
+    role: row.role as TenantUser['role'],
+    status: row.status as TenantUser['status'],
+  };
+}
+
+function requireTenantAdmin(session: AppSession): asserts session is AppSession & { tenantId: string; role: 'admin' } {
+  if (!session.tenantId) throw new Error('Only a tenant admin can manage users.');
+  if (session.role !== 'admin') throw new Error('Only a tenant admin can manage users.');
+}
+
 export function createTenantStore(filename = process.env.CLIENT_BILLING_DATABASE ?? '.data/client-billing.sqlite') {
   mkdirSync(dirname(filename), { recursive: true });
   const database = new DatabaseSync(filename);
@@ -76,6 +94,45 @@ export function createTenantStore(filename = process.env.CLIENT_BILLING_DATABASE
       const id = `${tenantId}-${crypto.randomUUID()}`;
       database.prepare('INSERT INTO tenant_records (id, tenant_id, label) VALUES (?, ?, ?)').run(id, tenantId, label);
       return { id, tenantId, label };
+    },
+    listTenantUsers(session: AppSession): TenantUser[] {
+      requireTenantAdmin(session);
+      return (database.prepare(`SELECT id, name, email, role, status FROM users
+        WHERE tenant_id = ? ORDER BY name COLLATE NOCASE`).all(session.tenantId) as Record<string, unknown>[]).map(tenantUserFromRow);
+    },
+    createTenantUser(session: AppSession, input: TenantUserInput): TenantUser {
+      requireTenantAdmin(session);
+      const name = input.name.trim();
+      const email = input.email.trim();
+      if (!name || !email) throw new Error('A user name and email are required.');
+      if (input.role !== 'admin' && input.role !== 'user') throw new Error('Choose an admin or user role.');
+      const id = `${session.tenantId}-user-${crypto.randomUUID()}`;
+      try {
+        database.prepare('INSERT INTO users (id, tenant_id, name, email, role, password, status) VALUES (?, ?, ?, ?, ?, ?, ?)')
+          .run(id, session.tenantId, name, email, input.role, 'admin123', 'active');
+      } catch (error) {
+        if (String(error).includes('UNIQUE')) throw new Error('A user with that email already exists.');
+        throw error;
+      }
+      return tenantUserFromRow(database.prepare('SELECT id, name, email, role, status FROM users WHERE id = ?').get(id) as Record<string, unknown>);
+    },
+    updateTenantUser(session: AppSession, userId: string, update: TenantUserUpdate): TenantUser {
+      requireTenantAdmin(session);
+      const existing = database.prepare('SELECT id, name, email, role, status FROM users WHERE id = ? AND tenant_id = ?').get(userId, session.tenantId) as Record<string, unknown> | undefined;
+      if (!existing) throw new Error('This user does not belong to your tenant.');
+      const name = update.name === undefined ? String(existing.name) : update.name.trim();
+      const email = update.email === undefined ? String(existing.email) : update.email.trim();
+      const role = update.role === undefined ? existing.role as TenantUser['role'] : update.role;
+      const status = update.status === undefined ? existing.status as TenantUser['status'] : update.status;
+      if (!name || !email) throw new Error('A user name and email are required.');
+      if ((role !== 'admin' && role !== 'user') || (status !== 'active' && status !== 'disabled')) throw new Error('Invalid user role or status.');
+      try {
+        database.prepare('UPDATE users SET name = ?, email = ?, role = ?, status = ? WHERE id = ? AND tenant_id = ?').run(name, email, role, status, userId, session.tenantId);
+      } catch (error) {
+        if (String(error).includes('UNIQUE')) throw new Error('A user with that email already exists.');
+        throw error;
+      }
+      return tenantUserFromRow(database.prepare('SELECT id, name, email, role, status FROM users WHERE id = ?').get(userId) as Record<string, unknown>);
     },
     close() { database.close(); },
   };
