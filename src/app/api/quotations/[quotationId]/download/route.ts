@@ -8,6 +8,7 @@ export async function GET(_: Request, { params }: { params: Promise<{ quotationI
   try {
     const quotation = getTenantStore().getQuotation(session, (await params).quotationId);
     if (!quotation) return new Response('Quotation not found.', { status: 404 });
-    return pdfDownload(`${quotation.quoteNumber}.pdf`, `QUOTATION ${quotation.quoteNumber}`, [`Prepared for: ${quotation.customerName}`, quotation.customerEmail ?? '', '', ...quotation.lines.map((line) => `${line.serviceName} | ${line.frequency} | Qty ${line.quantity} | INR ${(line.lineTotalMinor / 100).toFixed(2)}`), '', `Total: INR ${(quotation.totalMinor / 100).toFixed(2)}`]);
+    const settings = getTenantStore().getTenantSettings(session);
+    return pdfDownload(`${quotation.quoteNumber}.pdf`, `QUOTATION ${quotation.quoteNumber}`, [`Prepared for: ${quotation.customerName}`, quotation.customerEmail ?? '', '', ...quotation.lines.map((line) => `${line.serviceName} | ${line.frequency} | Qty ${line.quantity} | INR ${(line.lineTotalMinor / 100).toFixed(2)}`), '', `Total: INR ${(quotation.totalMinor / 100).toFixed(2)}`], settings);
   } catch (error) { return new Response(error instanceof Error ? error.message : 'Quotation could not be downloaded.', { status: 403 }); }
 }
