@@ -1,3 +1,4 @@
+import { recordOperationException } from '@/lib/operational-error';
 import { NextResponse } from 'next/server';
 import { getCurrentSession } from '@/lib/session';
 import { getTenantStore } from '@/lib/tenant-store';
@@ -15,11 +16,12 @@ export async function GET(request: Request) {
     const requestedStatus = searchParams.get('status');
     return NextResponse.json(getTenantStore().listTenants(session, {
       query: searchParams.get('query') ?? undefined,
+      month: searchParams.get('month') ?? undefined,
       status: requestedStatus === 'active' || requestedStatus === 'disabled' ? requestedStatus : 'all',
       page: Number(searchParams.get('page')) || 1,
       pageSize: Number(searchParams.get('pageSize')) || 10,
     }));
-  } catch (error) { return failure(error); }
+  } catch (error) { recordOperationException(session, '/api/tenants', error); return failure(error); }
 }
 
 export async function POST(request: Request) {
@@ -28,5 +30,5 @@ export async function POST(request: Request) {
   try {
     const body = await request.json() as { name?: string };
     return NextResponse.json({ tenant: getTenantStore().createTenant(session, { name: body.name ?? '' }) }, { status: 201 });
-  } catch (error) { return failure(error); }
+  } catch (error) { recordOperationException(session, '/api/tenants', error); return failure(error); }
 }

@@ -1,3 +1,4 @@
+import { recordOperationException } from '@/lib/operational-error';
 import { NextResponse } from 'next/server';
 import { getCurrentSession } from '@/lib/session';
 import { getTenantStore, type TenantUserUpdate } from '@/lib/tenant-store';
@@ -10,7 +11,7 @@ export async function PATCH(request: Request, context: { params: Promise<{ userI
     const update = await request.json() as TenantUserUpdate;
     const user = getTenantStore().updateTenantUser(session, userId, update);
     return NextResponse.json({ user });
-  } catch (error) {
+  } catch (error) { recordOperationException(session, '/api/users/[userId]', error);
     const message = error instanceof Error ? error.message : 'Unable to update this user.';
     return NextResponse.json({ message }, { status: message.includes('admin') || message.includes('tenant') ? 403 : 400 });
   }

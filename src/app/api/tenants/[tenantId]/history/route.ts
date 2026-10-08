@@ -1,3 +1,4 @@
+import { recordOperationException } from '@/lib/operational-error';
 import { NextResponse } from 'next/server';
 import { getCurrentSession } from '@/lib/session';
 import { getTenantStore } from '@/lib/tenant-store';
@@ -8,7 +9,7 @@ export async function GET(_request: Request, context: { params: Promise<{ tenant
   try {
     const { tenantId } = await context.params;
     return NextResponse.json({ events: getTenantStore().listTenantHistory(session, tenantId) });
-  } catch (error) {
+  } catch (error) { recordOperationException(session, '/api/tenants/[tenantId]/history', error);
     const message = error instanceof Error ? error.message : 'Unable to load tenant history.';
     return NextResponse.json({ message }, { status: message.includes('superadmin') ? 403 : 400 });
   }

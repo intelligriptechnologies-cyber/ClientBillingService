@@ -1,3 +1,4 @@
+import { recordOperationException } from '@/lib/operational-error';
 import { NextResponse } from 'next/server';
 import { getCurrentSession } from '@/lib/session';
 import { getTenantStore, type ServiceUpdate } from '@/lib/tenant-store';
@@ -8,5 +9,5 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ se
   try {
     const { serviceId } = await params;
     return NextResponse.json({ service: getTenantStore().updateService(session, serviceId, await request.json() as ServiceUpdate) });
-  } catch (error) { return NextResponse.json({ message: error instanceof Error ? error.message : 'Service could not be updated.' }, { status: 400 }); }
+  } catch (error) { recordOperationException(session, '/api/services/[serviceId]', error); return NextResponse.json({ message: error instanceof Error ? error.message : 'Service could not be updated.' }, { status: 400 }); }
 }

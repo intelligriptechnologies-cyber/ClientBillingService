@@ -14,12 +14,16 @@ test('superadmin can create, filter, and disable a tenant', async ({ page }) => 
   await expect(page.getByRole('cell', { name: new RegExp(tenantName) })).toBeVisible();
 
   await page.getByLabel('Search tenants').fill(tenantName);
-  await page.getByRole('button', { name: 'Apply filters' }).click();
+  await Promise.all([
+    page.waitForResponse((response) => response.url().includes('/api/tenants?') && response.request().method() === 'GET'),
+    page.getByRole('button', { name: 'Apply filters' }).click(),
+  ]);
   await expect(page.getByRole('cell', { name: new RegExp(tenantName) })).toBeVisible();
-  await page.getByRole('row', { name: new RegExp(tenantName) }).getByRole('button', { name: 'Disable' }).click();
+  await page.getByRole('row', { name: new RegExp(tenantName) }).getByRole('button', { name: 'Archive' }).click();
+  await expect(page.getByRole('alertdialog', { name: 'Disable tenant?' })).toBeVisible();
   await Promise.all([
     page.waitForResponse((response) => response.url().includes('/api/tenants/') && response.request().method() === 'PATCH'),
-    page.getByRole('button', { name: 'Disable tenant' }).click(),
+    page.getByRole('alertdialog').getByRole('button', { name: 'Disable tenant' }).click(),
   ]);
   await expect(page.getByRole('row', { name: new RegExp(tenantName) }).getByText('disabled')).toBeVisible();
 });

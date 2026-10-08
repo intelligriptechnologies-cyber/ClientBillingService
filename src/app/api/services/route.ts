@@ -1,3 +1,4 @@
+import { recordOperationException } from '@/lib/operational-error';
 import { NextResponse } from 'next/server';
 import { getCurrentSession } from '@/lib/session';
 import { getTenantStore, type ServiceInput } from '@/lib/tenant-store';
@@ -8,12 +9,12 @@ export async function GET(request: Request) {
   const session = await getCurrentSession();
   if (!session) return NextResponse.json({ message: 'Sign in to view services.' }, { status: 401 });
   try { return NextResponse.json({ services: getTenantStore().listServices(session, new URL(request.url).searchParams.get('search') ?? '') }); }
-  catch (error) { return NextResponse.json({ message: messageFor(error) }, { status: 403 }); }
+  catch (error) { recordOperationException(session, '/api/services', error); return NextResponse.json({ message: messageFor(error) }, { status: 403 }); }
 }
 
 export async function POST(request: Request) {
   const session = await getCurrentSession();
   if (!session) return NextResponse.json({ message: 'Sign in to manage services.' }, { status: 401 });
   try { return NextResponse.json({ service: getTenantStore().createService(session, await request.json() as ServiceInput) }, { status: 201 }); }
-  catch (error) { return NextResponse.json({ message: messageFor(error) }, { status: 400 }); }
+  catch (error) { recordOperationException(session, '/api/services', error); return NextResponse.json({ message: messageFor(error) }, { status: 400 }); }
 }

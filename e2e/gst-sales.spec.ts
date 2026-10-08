@@ -4,11 +4,11 @@ test('a tenant can filter GST sales and download tenant-context exports', async 
   await page.goto('/');
   await page.getByLabel('Demo identity').selectOption('nexio-admin');
   await page.getByRole('button', { name: 'Enter demo' }).click();
-  await page.getByRole('link', { name: 'Reports' }).click();
-  await page.getByRole('link', { name: 'Open report' }).click();
+  await page.getByRole('button', { name: 'Reports' }).click();
+  await page.getByRole('link', { name: 'GST Sales' }).click();
 
   await expect(page.getByRole('heading', { name: 'GST invoice register' })).toBeVisible();
-  await page.getByLabel('GST report month').fill('2026-10');
+  await page.getByLabel('GST report month').selectOption('2026-10');
   await expect(page.getByText('NEX-2026-001')).toBeVisible();
   await expect(page.getByRole('article').filter({ hasText: 'Taxable value' }).getByRole('strong')).toHaveText(/₹[\d,]+\.\d{2}/);
   const csv = page.waitForEvent('download');

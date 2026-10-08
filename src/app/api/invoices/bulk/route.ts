@@ -1,3 +1,4 @@
+import { recordOperationException } from '@/lib/operational-error';
 import { NextResponse } from 'next/server';
 import { getCurrentSession } from '@/lib/session';
 import { getTenantStore } from '@/lib/tenant-store';
@@ -9,7 +10,7 @@ export async function GET(request: Request) {
   const session = await getCurrentSession();
   if (!session?.tenantId) return unauthorized();
   try { return NextResponse.json(getTenantStore().previewBulkInvoices(session, period(request))); }
-  catch (cause) { return NextResponse.json({ message: cause instanceof Error ? cause.message : 'Unable to preview bulk invoices.' }, { status: 400 }); }
+  catch (cause) { recordOperationException(session, '/api/invoices/bulk', cause); return NextResponse.json({ message: cause instanceof Error ? cause.message : 'Unable to preview bulk invoices.' }, { status: 400 }); }
 }
 
 export async function POST(request: Request) {
@@ -18,5 +19,5 @@ export async function POST(request: Request) {
   try {
     const body = await request.json() as { billingPeriod?: string };
     return NextResponse.json(getTenantStore().generateBulkInvoices(session, body.billingPeriod ?? ''));
-  } catch (cause) { return NextResponse.json({ message: cause instanceof Error ? cause.message : 'Unable to issue bulk invoices.' }, { status: 400 }); }
+  } catch (cause) { recordOperationException(session, '/api/invoices/bulk', cause); return NextResponse.json({ message: cause instanceof Error ? cause.message : 'Unable to issue bulk invoices.' }, { status: 400 }); }
 }

@@ -1,3 +1,4 @@
+import { clickMenuLink } from './navigation';
 import { expect, test } from '@playwright/test';
 
 test('a tenant user can save a frequency-priced service and download its quotation', async ({ page }) => {
@@ -5,7 +6,7 @@ test('a tenant user can save a frequency-priced service and download its quotati
   await page.goto('/');
   await page.getByLabel('Demo identity').selectOption('nexio-admin');
   await page.getByRole('button', { name: 'Enter demo' }).click();
-  await page.getByRole('link', { name: 'Services', exact: true }).click();
+  await clickMenuLink(page, 'Master Data', 'Services');
 
   await page.getByRole('button', { name: 'Add service' }).click();
   await page.getByLabel('Service name').fill(serviceName);
@@ -13,6 +14,9 @@ test('a tenant user can save a frequency-priced service and download its quotati
   await page.getByRole('button', { name: 'Save service' }).click();
   await expect(page.getByText(serviceName, { exact: true })).toBeVisible();
 
+  await expect(page.getByRole('heading', { name: 'Saved quotations' })).toHaveCount(0);
+  await page.getByRole('row', { name: new RegExp(serviceName) }).getByRole('button', { name: 'Edit' }).click();
+  await page.getByRole('tab', { name: 'Quotations' }).click();
   await page.getByRole('button', { name: 'New quotation' }).click();
   await page.getByLabel('Customer name').fill('E2E customer');
   await page.getByRole('button', { name: 'Save quotation' }).click();

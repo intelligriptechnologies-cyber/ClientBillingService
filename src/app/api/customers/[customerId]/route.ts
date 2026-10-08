@@ -1,3 +1,4 @@
+import { recordOperationException } from '@/lib/operational-error';
 import { NextResponse } from 'next/server';
 import { getCurrentSession } from '@/lib/session';
 import { getTenantStore, type CustomerInput, type CustomerStatus } from '@/lib/tenant-store';
@@ -11,5 +12,5 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ cu
     const store = getTenantStore();
     const customer = body.status ? store.setCustomerStatus(session, customerId, body.status) : store.updateCustomer(session, customerId, body);
     return NextResponse.json(customer);
-  } catch (error) { return NextResponse.json({ message: error instanceof Error ? error.message : 'Unable to update customer.' }, { status: 400 }); }
+  } catch (error) { recordOperationException(session, '/api/customers/[customerId]', error); return NextResponse.json({ message: error instanceof Error ? error.message : 'Unable to update customer.' }, { status: 400 }); }
 }

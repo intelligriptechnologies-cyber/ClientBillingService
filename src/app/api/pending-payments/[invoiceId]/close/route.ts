@@ -1,3 +1,4 @@
+import { recordOperationException } from '@/lib/operational-error';
 import { NextResponse } from 'next/server';
 import { getCurrentSession } from '@/lib/session';
 import { getTenantStore } from '@/lib/tenant-store';
@@ -8,5 +9,5 @@ export async function POST(request: Request, { params }: { params: Promise<{ inv
   try {
     const body = await request.json().catch(() => ({}));
     return NextResponse.json(getTenantStore().closeInvoice(session, (await params).invoiceId, String(body.note ?? '')));
-  } catch (cause) { return NextResponse.json({ message: cause instanceof Error ? cause.message : 'Unable to close invoice.' }, { status: 400 }); }
+  } catch (cause) { recordOperationException(session, '/api/pending-payments/[invoiceId]/close', cause); return NextResponse.json({ message: cause instanceof Error ? cause.message : 'Unable to close invoice.' }, { status: 400 }); }
 }

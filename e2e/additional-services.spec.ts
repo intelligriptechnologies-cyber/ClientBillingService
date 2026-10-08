@@ -1,19 +1,22 @@
+import { clickMenuLink } from './navigation';
 import { expect, test } from '@playwright/test';
 
 async function enterNexio(page: import('@playwright/test').Page) {
   await page.goto('/');
   await page.getByLabel('Demo identity').selectOption('nexio-admin');
   await page.getByRole('button', { name: 'Enter demo' }).click();
-  await page.getByRole('link', { name: 'Contracts' }).click();
+  await clickMenuLink(page, 'Master Data', 'Contracts');
   await page.getByRole('button', { name: 'Add contract' }).click();
   await page.getByLabel('Contract name').fill('Additional services contract');
   await page.getByLabel('Customer').selectOption({ index: 1 });
   await page.getByLabel('Start date').fill('2026-01-01');
   await page.getByLabel('End date').fill('2026-12-31');
   await page.getByLabel('Contract value').fill('12000');
+  await page.getByLabel('Select services').click();
   await page.getByRole('group', { name: 'Services' }).getByRole('checkbox').first().check();
+  await page.getByLabel('Select services').click();
   await page.getByRole('button', { name: 'Create contract' }).click();
-  await page.getByRole('link', { name: 'Additional services' }).click();
+  await clickMenuLink(page, 'Operational Records', 'Additional Services');
 }
 
 test('a tenant user records an additional service against the selected customer contract', async ({ page }) => {

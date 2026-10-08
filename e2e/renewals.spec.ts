@@ -1,3 +1,4 @@
+import { clickMenuLink } from './navigation';
 import { expect, test } from '@playwright/test';
 
 test('a tenant renews an expired contract and settles its security deposit', async ({ page }) => {
@@ -13,9 +14,11 @@ test('a tenant renews an expired contract and settles its security deposit', asy
   await page.getByLabel('End date').fill('2026-01-01');
   await page.getByLabel('Contract value').fill('12000');
   await page.getByLabel('Security deposit').fill('2500');
+  await page.getByLabel('Select services').click();
   await page.getByRole('group', { name: 'Services' }).getByRole('checkbox').first().check();
+  await page.getByLabel('Select services').click();
   await page.getByRole('button', { name: 'Create contract' }).click();
-  await page.getByRole('link', { name: 'Renewals & deposits' }).click();
+  await clickMenuLink(page, 'Master Data', 'Renewal Tracker');
   const renewalRow = page.getByRole('row', { name: new RegExp(contractName) });
   await expect(renewalRow).toBeVisible();
   await renewalRow.getByRole('button', { name: 'Renew' }).click();
@@ -23,6 +26,8 @@ test('a tenant renews an expired contract and settles its security deposit', asy
   await page.getByLabel('Renewal note').fill('Customer confirmed the renewal.');
   await page.getByRole('button', { name: 'Record renewal' }).click();
   await expect(renewalRow.getByText('2027-01-01', { exact: true })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Security-deposit ledger' })).toHaveCount(0);
+  await clickMenuLink(page, 'Billing', 'Security Deposits');
   await page.getByRole('button', { name: 'Settle' }).last().click();
   await page.getByLabel('Closeout note').fill('Returned during closeout.');
   await page.getByRole('button', { name: 'Record settlement' }).click();

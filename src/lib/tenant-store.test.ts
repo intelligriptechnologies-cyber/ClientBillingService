@@ -44,6 +44,81 @@ describe('tenant lifecycle', () => {
 });
 
 describe('tenant store', () => {
+  it('persists row-wise GST, billing details and corrected line items', () => {
+    const store = storeForTest(); const session = store.authenticate('nexio-admin');
+    if (!session) throw new Error('Expected tenant session');
+    const customer = store.listCustomers(session).items[0];
+    const details = { customerId: customer.id, invoiceDate: '2026-10-07', dueDate: '2026-10-21', venue: 'Bengaluru', billingAddress: 'New billing address', customerPan: 'ABCDE1234F', customerGstin: '29ABCDE1234F1Z5', gstApplicable: true, notes: 'Monthly booking' };
+    const first = store.createIssuedInvoice(session, { ...details, lines: [
+      { description: 'Venue booking', quantity: 2, rateMinor: 12500, taxType: 'igst', gstRate: 18 },
+      { description: 'Security deposit', quantity: 1, rateMinor: 5000, taxType: 'none', gstRate: 0 },
+    ] });
+    expect(first).toMatchObject({ taxableMinor: 30000, gstMinor: 4500, totalMinor: 34500, snapshot: { venue: 'Bengaluru', customerAddress: 'New billing address', notes: 'Monthly booking', lines: [{ amountMinor: 25000, gstMinor: 4500 }, { amountMinor: 5000, gstMinor: 0 }] } });
+    expect(store.getGstSalesReport(session, '2026-10').items.find((row) => row.invoiceId === first.id)).toMatchObject({ igstMinor: 4500, cgstMinor: 0, sgstMinor: 0 });
+    const corrected = store.correctInvoice(session, first.id, { ...details, lines: [{ description: 'Revised booking', quantity: 1, rateMinor: 20000, taxType: 'cgst_sgst', gstRate: 12 }] }, 'Reduced booking');
+    expect(corrected).toMatchObject({ taxableMinor: 20000, gstMinor: 2400, totalMinor: 22400, snapshot: { lines: [{ description: 'Revised booking', taxType: 'cgst_sgst' }] } });
+    expect(store.getGstSalesReport(session, '2026-10').items.find((row) => row.invoiceId === corrected.id)).toMatchObject({ igstMinor: 0, cgstMinor: 1200, sgstMinor: 1200 });
+    expect(store.getInvoice(session, first.id)?.status).toBe('void');
+    expect(() => store.createIssuedInvoice(session, { ...details, lines: [{ description: 'Invalid', quantity: 1, rateMinor: 100, taxType: 'none', gstRate: 18 }] })).toThrow('valid GST');
+  });
+  it('edits and archives a draft quotation without changing another tenant', () => {
+    const store = storeForTest(); const nexio = store.authenticate('nexio-admin'); const evo = store.authenticate('evo-admin');
+    if (!nexio || !evo) throw new Error('Expected tenant sessions');
+    const service = store.listServices(nexio).find((item) => item.status === 'active');
+    if (!service) throw new Error('Expected active service');
+    const quote = store.createQuotation(nexio, { customerName: 'First customer', lines: [{ serviceId: service.id, frequency: 'monthly', quantity: 1 }] });
+    expect(store.updateQuotation(nexio, quote.id, { customerName: 'Updated customer', lines: [{ serviceId: service.id, frequency: 'monthly', quantity: 2 }] }).totalMinor).toBe(service.prices.monthly * 2);
+    expect(store.updateQuotation(nexio, quote.id, { status: 'archived' }).status).toBe('archived');
+    expect(store.listQuotations(nexio).find((item) => item.id === quote.id)?.status).toBe('archived');
+    expect(() => store.updateQuotation(evo, quote.id, { status: 'draft' })).toThrow('does not belong');
+  });
+
+  it('voids an unpaid invoice with a reason and records operation errors for tenant admins', () => {
+    const store = storeForTest(); const nexio = store.authenticate('nexio-admin');
+    if (!nexio) throw new Error('Expected tenant session');
+    const customer = store.listCustomers(nexio).items[0];
+    const invoice = store.createIssuedInvoice(nexio, { customerId: customer.id, invoiceDate: '2026-10-07', dueDate: '2026-10-21', taxableMinor: 10000 });
+    expect(() => store.voidInvoice(nexio, invoice.id, '')).toThrow('reason');
+    expect(store.voidInvoice(nexio, invoice.id, 'Issued in error').status).toBe('void');
+    expect(() => store.voidInvoice(nexio, invoice.id, 'Again')).toThrow('already void');
+    store.recordOperationalError(nexio, 'Test operation', new Error('Test failure'));
+    expect(store.listOperationalLogs(nexio)).toEqual(expect.arrayContaining([expect.objectContaining({ kind: 'error', message: expect.stringContaining('Test failure') })]));
+  });
+
+  it('corrects an unpaid invoice by replacing it and edits payment details without changing allocations', () => {
+    const store = storeForTest(); const nexio = store.authenticate('nexio-admin');
+    if (!nexio) throw new Error('Expected tenant session');
+    const customer = store.listCustomers(nexio).items[0];
+    const original = store.createIssuedInvoice(nexio, { customerId: customer.id, invoiceDate: '2026-10-07', dueDate: '2026-10-21', taxableMinor: 10000, gstRate: 18 });
+    const corrected = store.correctInvoice(nexio, original.id, { invoiceDate: '2026-10-07', dueDate: '2026-10-24', taxableMinor: 12000, gstRate: 18 }, 'Corrected price');
+    expect(corrected.id).not.toBe(original.id);
+    expect(corrected.taxableMinor).toBe(12000);
+    expect(store.getInvoice(nexio, original.id)?.status).toBe('void');
+    const payment = store.recordPayment(nexio, { invoiceId: corrected.id, paymentDate: '2026-10-08', amountMinor: 5000, tdsMinor: 0, writeOffMinor: 0, method: 'bank_transfer', reference: 'OLD', notes: '' });
+    const edited = store.updatePaymentDetails(nexio, payment.id, { method: 'cheque', reference: 'NEW', notes: 'Reconciled' });
+    expect(edited).toMatchObject({ appliedMinor: 5000, method: 'cheque', reference: 'NEW', notes: 'Reconciled' });
+    expect(store.getInvoice(nexio, corrected.id)?.paidMinor).toBe(5000);
+    expect(() => store.correctInvoice(nexio, corrected.id, { invoiceDate: '2026-10-07', dueDate: '2026-10-24', taxableMinor: 12000, gstRate: 18 }, 'Again')).toThrow('payments');
+  });
+  it('creates, filters, edits, and deletes task notes within the tenant', () => {
+    const store = storeForTest();
+    const nexio = store.authenticate('nexio-admin'); const evo = store.authenticate('evo-admin');
+    if (!nexio || !evo) throw new Error('Expected tenant sessions');
+    const nexioCustomer = store.listCustomers(nexio).items[0]; const evoCustomer = store.listCustomers(evo).items[0];
+    const input = { customerId: nexioCustomer.id, date: '2026-10-07', note: 'Call customer about renewal' };
+    expect(() => store.createTaskNote(nexio, { ...input, customerId: evoCustomer.id })).toThrow('does not belong');
+    expect(() => store.createTaskNote(nexio, { ...input, date: '2026-02-30' })).toThrow('valid date');
+    const created = store.createTaskNote(nexio, input);
+    expect(store.listTaskNotes(nexio, { date: input.date, customerId: nexioCustomer.id })).toMatchObject([created]);
+    expect(store.listTaskNotes(nexio, { date: '2026-10-08' })).toEqual([]);
+    expect(store.listTaskNotes(evo)).toEqual([]);
+    expect(() => store.updateTaskNote(evo, created.id, { ...input, customerId: evoCustomer.id, note: 'Changed' })).toThrow('not found');
+    expect(() => store.updateTaskNote(nexio, created.id, { ...input, customerId: evoCustomer.id })).toThrow('does not belong');
+    expect(store.updateTaskNote(nexio, created.id, { ...input, note: 'Followed up' }).note).toBe('Followed up');
+    expect(() => store.deleteTaskNote(evo, created.id)).toThrow('not found');
+    store.deleteTaskNote(nexio, created.id);
+    expect(store.listTaskNotes(nexio)).toEqual([]);
+  });
   it('previews a period billing run with additional services, explains skips, and issues it only once', () => {
     const store = storeForTest();
     const nexio = store.authenticate('nexio-admin');
@@ -71,7 +146,7 @@ describe('tenant store', () => {
     const first = store.generateBulkInvoices(nexio, '2026-10');
     expect(first).toMatchObject({ alreadyGenerated: false, generatedCount: 1 });
     expect(store.listInvoices(nexio, { month: '2026-10' }).items).toEqual(expect.arrayContaining([expect.objectContaining({ contractId: eligible.id, taxableMinor: 125000, gstMinor: 22500 })]));
-    expect(store.listAdditionalServices(nexio, { billingPeriod: '2026-10' }).items).toEqual([]);
+    expect(store.listAdditionalServices(nexio, { billingPeriod: '2026-10' }).items).toEqual([expect.objectContaining({ description: 'On-site workshop', billedAt: expect.any(String) })]);
     expect(store.listBulkInvoiceRuns(nexio)).toEqual(expect.arrayContaining([expect.objectContaining({ billingPeriod: '2026-10', generatedCount: 1 })]));
 
     expect(store.generateBulkInvoices(nexio, '2026-10')).toMatchObject({ alreadyGenerated: true, generatedCount: 1 });

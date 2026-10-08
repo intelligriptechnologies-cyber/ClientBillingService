@@ -8,7 +8,7 @@ test('lets a reviewer enter a tenant-scoped session through soft login', async (
 
   await expect(page.getByRole('heading', { name: 'Nexio Hyper dashboard' })).toBeVisible();
   await expect(page.getByText('Admin@nexio.com', { exact: true })).toBeVisible();
-  await expect(page.getByRole('link', { name: 'Settings' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Admin Console' })).toBeVisible();
 });
 
 test('keeps superadmin navigation separate from tenant navigation', async ({ page }) => {
