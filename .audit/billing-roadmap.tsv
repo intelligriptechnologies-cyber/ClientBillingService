@@ -2,3 +2,4 @@ ts	phase	decision	why	evidence	result
 2026-10-17T14:14:26Z	start	new run, orchestrator	user approved local-first build with subagents and GH issues	branch roadmap/p0-foundations	open
 2026-10-17T14:14:26Z	frame	created GH issues #24-#37 for 14 P0 build rows plus 3 scaffold issues	one issue per unit so each can be closed as it lands	.audit/issues.tsv, scripts/roadmap-issues.py	issues open
 2026-10-17T14:15:04Z	harness	dispatched 3 parallel agents in separate worktrees: matrix checker+CI, pure GST lib, isolation tests	disjoint files so they can run together; store split waits until they merge	issues #38 #39 #24-#28 #32; baseline vitest 34 pass	running
+2026-10-17T14:16:31Z	harness	merged matrix checker and CI workflow, closed #38 #39	re-ran checker, vitest and read the workflow myself instead of trusting the agent report	commit 5738b83, scripts/check-matrix.mjs	tests green 37, checker exit 0; CI e2e not yet run on GitHub
