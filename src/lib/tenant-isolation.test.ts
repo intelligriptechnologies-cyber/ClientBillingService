@@ -13,6 +13,7 @@ import * as invoiceBulk from '../app/api/invoices/bulk/route';
 import * as invoiceBulkDownload from '../app/api/invoices/bulk/download/route';
 import * as invoice from '../app/api/invoices/[invoiceId]/route';
 import * as invoiceDownload from '../app/api/invoices/[invoiceId]/download/route';
+import * as invoiceHtml from '../app/api/invoices/[invoiceId]/html/route';
 import * as logs from '../app/api/logs/route';
 import * as payments from '../app/api/payments/route';
 import * as paymentsDownload from '../app/api/payments/download/route';
@@ -139,6 +140,7 @@ const cases: Case[] = [
   { kind: 'invoices', name: 'GET /api/invoices lists', owns: id('invoiceId'), run: (as) => call(invoices.GET, as, { url: '/?pageSize=100' }) },
   { kind: 'invoices', name: 'GET /api/invoices/[id] reads', run: (as, f) => call(invoice.GET, as, { params: { invoiceId: f.invoiceId } }) },
   { kind: 'invoices', name: 'GET /api/invoices/[id]/download reads pdf', run: (as, f) => call(invoiceDownload.GET, as, { params: { invoiceId: f.invoiceId } }) },
+  { kind: 'invoices', name: 'GET /api/invoices/[id]/html reads preview', run: (as, f) => call(invoiceHtml.GET, as, { params: { invoiceId: f.invoiceId } }) },
   { kind: 'invoices', name: 'PATCH /api/invoices/[id] voids', run: (as, f) => call(invoice.PATCH, as, { method: 'PATCH', body: { status: 'void', reason: 'hijack' }, params: { invoiceId: f.invoiceId } }) },
   { kind: 'invoices', name: 'PATCH /api/invoices/[id] corrects', run: (as, f) => call(invoice.PATCH, as, { method: 'PATCH', body: { reason: 'hijack', correction: { customerId: f.customerId, invoiceDate: '2026-10-07', dueDate: '2026-10-21', taxableMinor: 100 } }, params: { invoiceId: f.invoiceId } }) },
   { kind: 'invoices', name: 'POST /api/invoices with foreign customer', run: (as, f) => call(invoices.POST, as, { method: 'POST', body: { customerId: f.customerId, invoiceDate: '2026-10-07', dueDate: '2026-10-21', taxableMinor: 100 } }) },
