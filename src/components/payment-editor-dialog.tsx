@@ -1,5 +1,6 @@
 'use client';
 
+import { apiFetch } from '@/lib/api-client';
 import { useState } from 'react';
 import { reportClientException } from '@/lib/client-error';
 import type { PaymentMethod, TenantPayment } from '@/lib/tenant-store';
@@ -12,7 +13,7 @@ export function PaymentEditorDialog({ payment, onClose, onSaved }: { payment: Te
   async function submit(event: React.FormEvent) {
     event.preventDefault(); setError(''); setSaving(true);
     try {
-      const response = await fetch(`/api/payments/${payment.id}`, { method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ method, reference, notes }) });
+      const response = await apiFetch(`/api/payments/${payment.id}`, { method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ method, reference, notes }) });
       const body = await response.json() as { message?: string };
       if (!response.ok) throw new Error(body.message ?? 'Unable to update payment.');
       onSaved(); onClose();

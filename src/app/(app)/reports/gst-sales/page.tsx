@@ -1,5 +1,6 @@
 'use client';
 
+import { apiFetch } from '@/lib/api-client';
 import { useCallback, useEffect, useState } from 'react';
 import { PageTitle } from '@/components/ui';
 import { reportClientException } from '@/lib/client-error';
@@ -19,7 +20,7 @@ export default function GstSalesPage() {
   const [report, setReport] = useState<GstSalesReport | null>(null); const [error, setError] = useState('');
   const load = useCallback(async () => {
     try {
-      const response = await fetch(`/api/reports/gst?month=${encodeURIComponent(month)}`); const body = await response.json();
+      const response = await apiFetch(`/api/reports/gst?month=${encodeURIComponent(month)}`); const body = await response.json();
       if (!response.ok) { setError(body.message ?? 'Unable to load GST sales report.'); setReport(null); return; }
       setReport(body as GstSalesReport); setError('');
     } catch (cause) { reportClientException('Load GST sales report', cause); setError('Unable to load GST sales report.'); setReport(null); }

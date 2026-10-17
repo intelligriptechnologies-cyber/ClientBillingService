@@ -1,5 +1,6 @@
 'use client';
 
+import { apiFetch } from '@/lib/api-client';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useCallback, useEffect, useState } from 'react';
@@ -20,10 +21,10 @@ export function InvoiceRegister({ bulkOpen = false, onCloseBulk }: { bulkOpen?: 
   const [data, setData] = useState<InvoiceList>({ items: [], total: 0 });
   const [search, setSearch] = useState(''); const [month, setMonth] = useState(''); const [status, setStatus] = useState<'' | InvoiceStatus>('');
   const [page, setPage] = useState(1); const [pageSize, setPageSize] = useState(10); const [error, setError] = useState(''); const [voidId, setVoidId] = useState<string | null>(null); const [editor, setEditor] = useState<TenantInvoice | 'create' | null>(null);
-  async function voidInvoice(reason: string) { if (!voidId) return; try { const response = await fetch(`/api/invoices/${voidId}`, { method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ status: 'void', reason }) }); const body = await response.json(); if (!response.ok) throw new Error(body.message ?? 'Unable to void invoice.'); setVoidId(null); await load(); } catch (cause) { reportClientException('Void invoice', cause); setError(cause instanceof Error ? cause.message : 'Unable to void invoice.'); } }
+  async function voidInvoice(reason: string) { if (!voidId) return; try { const response = await apiFetch(`/api/invoices/${voidId}`, { method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ status: 'void', reason }) }); const body = await response.json(); if (!response.ok) throw new Error(body.message ?? 'Unable to void invoice.'); setVoidId(null); await load(); } catch (cause) { reportClientException('Void invoice', cause); setError(cause instanceof Error ? cause.message : 'Unable to void invoice.'); } }
   const load = useCallback(async () => {
     const params = new URLSearchParams({ page: String(page), pageSize: String(pageSize) }); if (search) params.set('search', search); if (month) params.set('month', month); if (status) params.set('status', status);
-    const response = await fetch(`/api/invoices?${params}`); const body = await response.json(); if (!response.ok) { setError(body.message ?? 'Unable to load invoices.'); return; } setData(body); setError('');
+    const response = await apiFetch(`/api/invoices?${params}`); const body = await response.json(); if (!response.ok) { setError(body.message ?? 'Unable to load invoices.'); return; } setData(body); setError('');
   }, [month, page, pageSize, search, status]);
   // This effect synchronizes the register with the route-handler query whenever a filter changes.
   useEffect(() => { void load(); }, [load]);

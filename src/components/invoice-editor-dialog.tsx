@@ -1,5 +1,6 @@
 ﻿'use client';
 
+import { apiFetch } from '@/lib/api-client';
 import { useEffect, useState } from 'react';
 import { calculateInvoiceLines, type InvoiceLineInput, type InvoiceTaxType } from '@/lib/invoice-lines';
 import { reportClientException } from '@/lib/client-error';
@@ -20,7 +21,7 @@ const money = (minor: number) => new Intl.NumberFormat('en-IN', { style: 'curren
 async function allRows<T>(path: string): Promise<T[]> {
   const rows: T[] = [];
   for (let page = 1; ; page++) {
-    const response = await fetch(`${path}?page=${page}&pageSize=100`);
+    const response = await apiFetch(`${path}?page=${page}&pageSize=100`);
     const body = await response.json() as List<T> & { message?: string };
     if (!response.ok) throw new Error(body.message ?? 'Unable to load choices.');
     rows.push(...body.items);
@@ -62,7 +63,7 @@ export function InvoiceEditorDialog({ invoice, onClose, onSaved }: Props) {
 
   useEffect(() => {
     let active = true;
-    void fetch('/api/services').then(async (response) => { const body = await response.json() as { services?: TenantService[] }; if (active && response.ok) setServices((body.services ?? []).filter((service) => service.status === 'active')); }).catch((cause: unknown) => reportClientException('Load invoice services', cause));
+    void apiFetch('/api/services').then(async (response) => { const body = await response.json() as { services?: TenantService[] }; if (active && response.ok) setServices((body.services ?? []).filter((service) => service.status === 'active')); }).catch((cause: unknown) => reportClientException('Load invoice services', cause));
     return () => { active = false; };
   }, []);
 
@@ -76,7 +77,7 @@ export function InvoiceEditorDialog({ invoice, onClose, onSaved }: Props) {
     if (source === 'existing') params.set('customerId', customerId);
     if (gstinInput) params.set('customerGstin', gstinInput);
     if (source === 'new' && newCustomer.stateCode) params.set('billingStateCode', newCustomer.stateCode);
-    void fetch(`/api/gst/supply?${params}`).then(async (response) => {
+    void apiFetch(`/api/gst/supply?${params}`).then(async (response) => {
       const body = await response.json() as { supply?: SupplyContext; message?: string };
       if (!active) return;
       if (!response.ok || !body.supply) { setSupplyResult({ key: supplyKey, supply: null, error: body.message ?? 'Unable to work out the place of supply.' }); return; }
@@ -127,13 +128,13 @@ export function InvoiceEditorDialog({ invoice, onClose, onSaved }: Props) {
     try {
       let chosenCustomerId = customerId;
       if (!invoice && source === 'new') {
-        const response = await fetch('/api/customers', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ...newCustomer, gstin: gstinInput, billingAddress: billingAddress.trim(), invoiceDelivery: 'manual' }) });
+        const response = await apiFetch('/api/customers', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ...newCustomer, gstin: gstinInput, billingAddress: billingAddress.trim(), invoiceDelivery: 'manual' }) });
         const body = await response.json() as CustomerRecord & { message?: string };
         if (!response.ok) throw new Error(body.message ?? 'Unable to create customer.');
         chosenCustomerId = body.id;
       }
       const input = { customerId: chosenCustomerId, contractId: contractId || undefined, invoiceDate, dueDate, venue: invoice?.snapshot.venue, gstApplicable, customerPan, customerGstin, billingAddress, notes, taxSplitOverrideReason: overridden ? overrideReason.trim() : undefined, lines: calculated.lines.map(({ description, quantity, rateMinor, taxType, gstRate, hsnSac }) => ({ description, quantity, rateMinor, taxType, gstRate, hsnSac })) };
-      const response = await fetch(invoice ? `/api/invoices/${invoice.id}` : '/api/invoices', { method: invoice ? 'PATCH' : 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(invoice ? { correction: input, reason: reason.trim() } : input) });
+      const response = await apiFetch(invoice ? `/api/invoices/${invoice.id}` : '/api/invoices', { method: invoice ? 'PATCH' : 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(invoice ? { correction: input, reason: reason.trim() } : input) });
       const body = await response.json() as { message?: string };
       if (!response.ok) throw new Error(body.message ?? 'Unable to save invoice.');
       onSaved(); onClose();
