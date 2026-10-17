@@ -11,3 +11,4 @@ test-results/
 .claude/worktrees/
 !.env.example
 deploy/proxy.env
+.next-*/

@@ -33,10 +33,13 @@
     "src/**/*.ts",
     "src/**/*.tsx",
     ".next/types/**/*.ts",
-    ".next/dev/types/**/*.ts"
+    ".next/dev/types/**/*.ts",
+    ".next-authelia/types/**/*.ts",
+    ".next-authelia/dev/types/**/*.ts"
   ],
   "exclude": [
     "node_modules",
-    ".next/dev/types/**/*.ts"
+    ".next/dev/types/**/*.ts",
+    ".next-authelia/dev/types/**/*.ts"
   ]
 }
