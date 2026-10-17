@@ -41,6 +41,67 @@ describe('tenant lifecycle', () => {
     expect(() => store.listTenants(tenantAdmin, {})).toThrow('superadmin');
     expect(() => store.createTenant(tenantAdmin, { name: 'Not allowed' })).toThrow('superadmin');
   });
+
+  it('lets the superadmin change only the capitalisation of a tenant name', () => {
+    const store = storeForTest();
+    const superadmin = store.authenticate('superadmin')!;
+    const created = store.createTenant(superadmin, { name: 'Harbour Works' });
+
+    expect(store.updateTenant(superadmin, created.id, { name: 'HARBOUR WORKS' }).name).toBe('HARBOUR WORKS');
+    const other = store.createTenant(superadmin, { name: 'Other Works' });
+    expect(() => store.updateTenant(superadmin, other.id, { name: 'harbour works' })).toThrow('already exists');
+  });
+
+  it('rejects empty, blank, duplicate and non-text tenant names with a readable message', () => {
+    const store = storeForTest();
+    const superadmin = store.authenticate('superadmin')!;
+    store.createTenant(superadmin, { name: 'Unique Co' });
+
+    expect(() => store.createTenant(superadmin, { name: '' })).toThrow('between 2 and 100');
+    expect(() => store.createTenant(superadmin, { name: '   ' })).toThrow('between 2 and 100');
+    expect(() => store.createTenant(superadmin, { name: ' unique   CO ' })).toThrow('already exists');
+    expect(() => store.createTenant(superadmin, { name: 42 as unknown as string })).toThrow('Tenant name is required');
+    expect(() => store.updateTenant(superadmin, 'missing-tenant', { name: 'Whatever' })).toThrow('not found');
+  });
+
+  it('treats the tenant search text literally rather than as a LIKE pattern', () => {
+    const store = storeForTest();
+    const superadmin = store.authenticate('superadmin')!;
+    expect(store.listTenants(superadmin, { query: '%' }).total).toBe(0);
+    expect(store.listTenants(superadmin, { query: '_' }).total).toBe(0);
+  });
+
+  it('suspends and reactivates a tenant, blocking its sign-in meanwhile, and records each step', () => {
+    const store = storeForTest();
+    const superadmin = store.authenticate('superadmin')!;
+    const created = store.createTenant(superadmin, { name: 'Pause Me' });
+    const adminId = `${created.id}-admin`;
+
+    store.updateTenant(superadmin, created.id, { status: 'disabled' });
+    expect(store.authenticate(adminId)).toBeNull();
+    store.updateTenant(superadmin, created.id, { status: 'disabled' });
+    store.updateTenant(superadmin, created.id, { status: 'active' });
+    expect(store.authenticate(adminId)).toMatchObject({ tenantId: created.id, role: 'admin' });
+    expect(() => store.updateTenant(superadmin, created.id, { status: 'archived' as never })).toThrow('status is invalid');
+    expect(store.listTenantHistory(superadmin, created.id).map((event) => event.action)).toEqual(['created', 'disabled', 'enabled']);
+  });
+
+  it('refuses to leave a tenant without an active admin', () => {
+    const store = storeForTest();
+    const superadmin = store.authenticate('superadmin')!;
+    const created = store.createTenant(superadmin, { name: 'Solo Admin' });
+    const admin = store.authenticate(`${created.id}-admin`)!;
+
+    expect(() => store.updateTenantUser(admin, admin.id, { status: 'disabled' })).toThrow('active admin');
+    expect(() => store.updateTenantUser(admin, admin.id, { role: 'user' })).toThrow('active admin');
+    expect(store.authenticate(admin.id)).toMatchObject({ role: 'admin' });
+
+    const second = store.createTenantUser(admin, { name: 'Second Admin', email: 'second@solo.demo', role: 'admin' });
+    expect(store.updateTenantUser(admin, second.id, { status: 'disabled' }).status).toBe('disabled');
+    expect(() => store.updateTenantUser(admin, admin.id, { status: 'disabled' })).toThrow('active admin');
+    store.updateTenantUser(admin, second.id, { status: 'active' });
+    expect(store.updateTenantUser(admin, admin.id, { role: 'user' }).role).toBe('user');
+  });
 });
 
 describe('tenant store', () => {
