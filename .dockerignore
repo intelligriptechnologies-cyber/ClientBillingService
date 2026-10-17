@@ -1,0 +1,16 @@
+.git
+.github
+.claude
+.audit
+.next
+node_modules
+.data
+.env*
+coverage
+test-results
+playwright-report
+e2e
+deploy
+graft
+*.tsbuildinfo
+npm-debug.log*
