@@ -28,13 +28,13 @@ test.describe.serial('invoice PDF prints what the preview shows', () => {
   let original: Settings;
 
   test.beforeEach(async ({ request }) => {
-    expect((await request.post('/api/auth/login', { data: { userId: 'nexio-admin' } })).ok()).toBeTruthy();
+    expect((await request.post('/api/auth/demo-login', { data: { userId: 'nexio-admin' } })).ok()).toBeTruthy();
     original ??= (await (await request.get('/api/settings')).json() as { settings: Settings }).settings;
   });
 
   test.afterAll(async ({ playwright }) => {
     const request = await playwright.request.newContext({ baseURL: `http://localhost:${Number(process.env.CLIENT_BILLING_TEST_PORT) || 3100}` });
-    await request.post('/api/auth/login', { data: { userId: 'nexio-admin' } });
+    await request.post('/api/auth/demo-login', { data: { userId: 'nexio-admin' } });
     if (original) await request.put('/api/settings', { data: original });
     await request.dispose();
   });
@@ -57,7 +57,7 @@ test.describe.serial('invoice PDF prints what the preview shows', () => {
     for (const expected of [invoice.invoiceNumber, 'TaxInvoice', 'NexioPrivateLimited', SELLER_GSTIN, 'HSN/SAC', '998311', 'IGST', '₹3,541.00', 'Roundoff', '-₹0.18', 'IndianRupeesThreeThousandFiveHundredFortyOneOnly']) expect(pdf.squashed, expected).toContain(expected.replace(/\s+/g, ''));
     expect(pdf.images).toBeGreaterThanOrEqual(3);
 
-    await page.request.post('/api/auth/login', { data: { userId: 'nexio-admin' } });
+    await page.request.post('/api/auth/demo-login', { data: { userId: 'nexio-admin' } });
     await page.goto(`/invoices/${invoice.id}`);
     const preview = page.frameLocator('iframe[title="Invoice preview"]');
     await expect(preview.getByRole('heading', { name: 'Tax Invoice' })).toBeVisible();
