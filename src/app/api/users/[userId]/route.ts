@@ -13,6 +13,6 @@ export async function PATCH(request: Request, context: { params: Promise<{ userI
     return NextResponse.json({ user });
   } catch (error) { recordOperationException(session, '/api/users/[userId]', error);
     const message = error instanceof Error ? error.message : 'Unable to update this user.';
-    return NextResponse.json({ message }, { status: message.includes('admin') || message.includes('tenant') ? 403 : 400 });
+    return NextResponse.json({ message }, { status: message.includes('at least one active admin') ? 409 : message.includes('admin') || message.includes('tenant') ? 403 : 400 });
   }
 }

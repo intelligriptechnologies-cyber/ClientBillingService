@@ -12,7 +12,7 @@ function identityFromRow(row: Record<string, unknown> | undefined): DemoIdentity
   return { id: String(row.id), name: String(row.name), email: String(row.email), role: row.role as AppRole, tenantId: row.tenant_id ? String(row.tenant_id) : null, tenantName: row.tenant_name ? String(row.tenant_name) : null };
 }
 function tenantFromRow(row: Record<string, unknown>): Tenant { return { id: String(row.id), name: String(row.name), status: row.status as TenantStatus, createdAt: String(row.created_at), updatedAt: String(row.updated_at), userCount: Number(row.user_count) }; }
-function cleanTenantName(name: string) { const value = name.trim().replace(/\s+/g, ' '); if (value.length < 2 || value.length > 100) throw new Error('Tenant name must be between 2 and 100 characters.'); return value; }
+function cleanTenantName(name: unknown) { if (typeof name !== 'string') throw new Error('Tenant name is required.'); const value = name.trim().replace(/\s+/g, ' '); if (value.length < 2 || value.length > 100) throw new Error('Tenant name must be between 2 and 100 characters.'); return value; }
 function tenantUserFromRow(row: Record<string, unknown>): TenantUser {
   return {
     id: String(row.id),
@@ -51,7 +51,7 @@ export function createTenantMethods(database: DatabaseSync) {
     },
     listTenants(session: AppSession, filters: TenantFilters): TenantList {
       requireSuperadmin(session); const pageSize = Math.min(Math.max(Number(filters.pageSize) || 10, 5), 50); const page = Math.max(Number(filters.page) || 1, 1); const query = filters.query?.trim() ?? ''; const conditions: string[] = []; const values: Array<string | number> = [];
-      if (query) { conditions.push('LOWER(tenants.name) LIKE ?'); values.push(`%${query.toLowerCase()}%`); } if (filters.status && filters.status !== 'all') { conditions.push('tenants.status = ?'); values.push(filters.status); }
+      if (query) { conditions.push("INSTR(LOWER(tenants.name), ?) > 0"); values.push(query.toLowerCase()); } if (filters.status && filters.status !== 'all') { conditions.push('tenants.status = ?'); values.push(filters.status); }
       if (filters.month) { conditions.push('substr(tenants.created_at, 1, 7) = ?'); values.push(filters.month); }
       const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : ''; const total = Number((database.prepare(`SELECT COUNT(*) AS count FROM tenants ${where}`).get(...values) as { count: number }).count);
       const rows = database.prepare(`SELECT tenants.id, tenants.name, tenants.status, tenants.created_at, tenants.updated_at, COUNT(users.id) AS user_count FROM tenants LEFT JOIN users ON users.tenant_id = tenants.id ${where} GROUP BY tenants.id ORDER BY tenants.name COLLATE NOCASE LIMIT ? OFFSET ?`).all(...values, pageSize, (page - 1) * pageSize) as Record<string, unknown>[];
@@ -64,7 +64,7 @@ export function createTenantMethods(database: DatabaseSync) {
       seedSettings(database); return getTenant(tenantId);
     },
     updateTenant(session: AppSession, tenantId: string, input: TenantUpdate): Tenant {
-      requireSuperadmin(session); const current = getTenant(tenantId); const name = input.name === undefined ? current.name : cleanTenantName(input.name); const status = input.status ?? current.status; if (status !== 'active' && status !== 'disabled') throw new Error('Tenant status is invalid.'); if (name !== current.name && database.prepare('SELECT 1 FROM tenants WHERE LOWER(name) = LOWER(?)').get(name)) throw new Error('A tenant with that name already exists.'); database.exec('BEGIN');
+      requireSuperadmin(session); const current = getTenant(tenantId); const name = input.name === undefined ? current.name : cleanTenantName(input.name); const status = input.status ?? current.status; if (status !== 'active' && status !== 'disabled') throw new Error('Tenant status is invalid.'); if (name !== current.name && database.prepare('SELECT 1 FROM tenants WHERE LOWER(name) = LOWER(?) AND id <> ?').get(name, tenantId)) throw new Error('A tenant with that name already exists.'); database.exec('BEGIN');
       try { if (name !== current.name) event(tenantId, 'updated', `Renamed from ${current.name} to ${name}.`); if (status !== current.status) event(tenantId, status === 'disabled' ? 'disabled' : 'enabled', status === 'disabled' ? 'Tenant disabled.' : 'Tenant enabled.'); database.prepare('UPDATE tenants SET name = ?, status = ?, updated_at = ? WHERE id = ?').run(name, status, now(), tenantId); database.exec('COMMIT'); } catch (error) { database.exec('ROLLBACK'); throw error; }
       return getTenant(tenantId);
     },
@@ -100,6 +100,11 @@ export function createTenantMethods(database: DatabaseSync) {
       const status = update.status === undefined ? existing.status as TenantUser['status'] : update.status;
       if (!name || !email) throw new Error('A user name and email are required.');
       if ((role !== 'admin' && role !== 'user') || (status !== 'active' && status !== 'disabled')) throw new Error('Invalid user role or status.');
+      const staysActiveAdmin = role === 'admin' && status === 'active';
+      if (existing.role === 'admin' && existing.status === 'active' && !staysActiveAdmin) {
+        const others = database.prepare("SELECT COUNT(*) AS count FROM users WHERE tenant_id = ? AND role = 'admin' AND status = 'active' AND id <> ?").get(session.tenantId, userId) as { count: number };
+        if (others.count === 0) throw new Error('A tenant must keep at least one active admin.');
+      }
       try {
         database.prepare('UPDATE users SET name = ?, email = ?, role = ?, status = ? WHERE id = ? AND tenant_id = ?').run(name, email, role, status, userId, session.tenantId);
       } catch (error) {
