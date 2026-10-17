@@ -95,6 +95,6 @@ currency,Platform and security,Other currencies,full,none,full,,none,INR only,,L
 expenses,Outside billing scope,"Expenses, vendors and purchase orders",full,full,none,,none,,,L,L,drop,P3,Not part of invoicing your clients.,drop,P3,,,2026-10-17T13:50:50.810Z
 inventory,Outside billing scope,Inventory and stock,partial,full,none,,none,,,L,L,drop,P3,Belongs in the ERPs.,drop,P3,,,2026-10-17T13:50:51.184Z
 time,Outside billing scope,Time tracking and projects,full,none,none,,partial,Follow-up task notes only,src/components/task-notes-register.tsx,L,L,drop,P3,Keep task notes for collections follow-up.,drop,P3,,,2026-10-17T13:50:51.666Z
-native,Outside billing scope,Native mobile apps,full,full,none,,partial,Responsive web,e2e/mobile-flow.spec.ts,L,L,drop,P3,Responsive web is enough. Add a PWA manifest if you want a home-screen icon.,build,P0,,"PWA
+native,Outside billing scope,Native mobile apps,full,full,none,,built,"Web app manifest, icons and theme colour make it installable. No service worker, nothing cached.",e2e/pwa.spec.ts,L,L,drop,P3,Responsive web is enough. Add a PWA manifest if you want a home-screen icon.,build,P0,,"PWA
 ",2026-10-17T13:59:39.354Z
 qbo,Outside billing scope,QuickBooks or Xero sync,full,none,none,,none,,,L,L,drop,P3,Tally covers your accounting.,drop,P3,,,2026-10-17T13:50:52.433Z
