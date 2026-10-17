@@ -1,0 +1,45 @@
+name: Deploy
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: Target environment
+        type: choice
+        options: [staging, production]
+        required: true
+
+concurrency:
+  group: client-billing-${{ inputs.environment }}
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment: ${{ inputs.environment }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check the image builds
+        run: docker build -t client-billing:ci .
+
+      - name: Deploy to Hetzner
+        env:
+          DEPLOY_KEY: ${{ secrets.HETZNER_DEPLOY_KEY }}
+          HOST: ${{ secrets.HETZNER_HOST }}
+          USER: ${{ secrets.HETZNER_USER }}
+          TARGET: ${{ inputs.environment }}
+          SHA: ${{ github.sha }}
+        run: |
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$DEPLOY_KEY" > ~/.ssh/client_billing_deploy
+          chmod 600 ~/.ssh/client_billing_deploy
+          ssh-keyscan -H "$HOST" >> ~/.ssh/known_hosts
+          ssh -i ~/.ssh/client_billing_deploy "$USER@$HOST" bash -s -- "$TARGET" "$SHA" <<'REMOTE'
+            set -euo pipefail
+            cd /opt/client-billing
+            git fetch origin
+            git checkout --detach "$2"
+            bash deploy/deploy-remote.sh "$1"
+          REMOTE
