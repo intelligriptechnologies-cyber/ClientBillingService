@@ -1,4 +1,5 @@
 import { expect, test, type APIRequestContext } from '@playwright/test';
+import { demoOrigin } from './test-ports';
 
 const PNG = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=';
 const SELLER_GSTIN = '29AAGCB7383J1Z4';
@@ -33,7 +34,7 @@ test.describe.serial('invoice PDF prints what the preview shows', () => {
   });
 
   test.afterAll(async ({ playwright }) => {
-    const request = await playwright.request.newContext({ baseURL: `http://localhost:${Number(process.env.CLIENT_BILLING_TEST_PORT) || 3100}` });
+    const request = await playwright.request.newContext({ baseURL: demoOrigin, extraHTTPHeaders: { Origin: demoOrigin } });
     await request.post('/api/auth/demo-login', { data: { userId: 'nexio-admin' } });
     if (original) await request.put('/api/settings', { data: original });
     await request.dispose();
