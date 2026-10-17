@@ -1,46 +1,61 @@
-# 0002. Real login with server-side sessions, and demo mode as a login method
+# 0002. Sign-in through Authelia forward-auth, with tenant membership kept in the app
 
-- Status: Proposed
+- Status: Proposed. Revised on 2026-10-17 after the owner chose Authelia. The earlier draft built password login and sessions in this repo. That design is withdrawn.
 - Date: 2026-10-17
 - Issue: #34 (matrix row `auth`). Also covers row `audit`, and fixes the seam for rows `api` and `check-api`.
-- Depends on: [0001](0001-postgres-store.md). The auth tables are Postgres migrations, not SQLite tables.
+- Depends on: [0001](0001-postgres-store.md) for the `users` columns and the audit table.
 
 ## Decision
 
-1. **Sessions are opaque and stored server-side in Postgres.** The cookie `__Host-cbs_session` holds 32 random bytes in base64url. The `sessions` table stores only the SHA-256 of that value, so a database leak does not hand out live sessions. The cookie is `HttpOnly`, `Secure`, `SameSite=Lax` and `Path=/`, with no `Domain`. Its `Max-Age` is the absolute lifetime.
-2. **Sessions expire, rotate and revoke on the server.** An idle timeout is enforced from `last_seen_at`, and route handlers bump that column at most once every 5 minutes. Every login and every password set issues a new token. Logout deletes the row. A change to a user's role, status or password deletes all of that user's other sessions. The proposed defaults are a 12-hour idle timeout and a 7-day absolute lifetime (owner question).
-3. **Passwords are hashed with Argon2id from `node:crypto`.** This needs Node 24.7 or later, so the `Dockerfile` and CI move from Node 22 to Node 24 LTS. The parameters are the OWASP minimum (`m=19456` KiB, `t=2`, `p=1`), stored as a PHC string. Verification uses `timingSafeEqual`, and a hash is redone at login when the parameters change. If the Node 24 move is blocked, use `@node-rs/argon2` 2.x instead. It runs on Node 22 and is already in Next's default `serverExternalPackages` list.
-4. **Demo mode is a login method, not a second session system.** `CLIENT_BILLING_AUTH_MODE` is `password` or `demo`. In demo mode the identity picker logs in without a password, but it creates the same `sessions` row. Every route then reads one session format. `GET /api/auth/identities` returns 404 unless the mode is `demo`.
-5. **Demo mode cannot start in production.** The guard reads a new `CLIENT_BILLING_ENV` (`local`, `demo`, `staging` or `production`), not `NODE_ENV`, because the Docker image sets `NODE_ENV=production` for staging too. The guard runs in two places. The `register()` hook in `instrumentation.ts` logs the refusal and calls `process.exit(1)` when `CLIENT_BILLING_ENV=production` and the mode is `demo`, so the container fails its health check and the deploy aborts. Next's docs say only that `register` must finish before the server handles requests. They do not say what a throw does, so the hook exits explicitly. The demo login handler and the identities handler also read the parsed config and refuse in production. A boot hook that only logged its error would then still not open the picker.
-6. **CSRF protection is `SameSite=Lax` plus an `Origin` check in `proxy.ts`.** A `POST`, `PUT`, `PATCH` or `DELETE` to `/api/*` that carries the session cookie must send an `Origin` listed in `APP_ORIGINS`. Otherwise it gets a 403. Requests with a bearer token on `/api/v1/*` skip the check, because those routes never read cookies. `GET` handlers stay read-only.
-7. **Rate limits and lockout live in Postgres.** The `login_attempts` table holds attempts per email and per client IP. Five failures for one email in 15 minutes lock that email for 15 minutes. Fifty failures from one IP in 15 minutes block that IP. Both return 429 with `Retry-After` and the same generic message. An unknown email still runs one hash, so response time does not reveal which emails exist. The app reads the client IP from `X-Forwarded-For` only when `TRUST_PROXY=caddy`. Nothing locks an account permanently.
-8. **No account has a default password.** `npm run auth:bootstrap -- --email <address>` creates the first superadmin and prints a one-time set-password link. Creating a tenant creates an invite link for its first admin, not the `admin123` users that `createTenant` makes today. A tenant admin invites users and issues reset links. Links are single-use and stored as hashes. Invite links last 24 hours and reset links last 1 hour. Self-serve reset by email waits for row `email`.
-9. **Every request resolves to a typed principal.** `Actor` is a union: `{ kind: 'user' }`, `{ kind: 'apiToken' }` or `{ kind: 'system' }`. Store methods take `TenantContext = { tenantId, actor }` (ADR 0001, D5). A superadmin is a user with `tenant_id` null and role `superadmin`. A superadmin can call platform operations only and can never hold a `TenantContext`.
-10. **API tokens for client ERPs fit this design without changing it.** The `api_tokens` table holds `tenant_id`, an optional `customer_id`, `scopes`, `secret_hash`, `last_used_at`, `expires_at` and `revoked_at`. The token format is `cbs_<id>_<secret>`, and the secret is shown once. Only `/api/v1/*` accepts it, as `Authorization: Bearer`. A token resolves to a `TenantContext` with an `apiToken` actor, so RLS and the store treat it like any other principal. The bearer lookup happens before any tenant is known, so `api_tokens` has no RLS. It is in ADR 0001's pre-tenant allowlist, and `cbs_app` has no grant on it. A tenant admin manages tokens through `withPlatform` methods that filter on the session's tenant. The table is built when row `api` starts. This ADR fixes only its shape.
-11. **The audit trail is one append-only table.** Each `audit_events` row has `tenant_id`, `actor_kind`, `actor_id`, `action`, `entity_type`, `entity_id`, `reason`, `before` and `after` as `jsonb`, `request_id`, `ip` and `occurred_at`. The row is written in the same transaction as the change it records. `cbs_app` gets `INSERT` and `SELECT` only. The table replaces `contract_audit_events`, `tenant_lifecycle_events` and the `feature-flow` rows in `operational_logs`. Login successes and failures, logouts, password sets and token changes are audit events too.
-12. **Plain-text passwords are discarded, not hashed.** All 11 users in `seed/initial-data.sqlite` have the password `admin123`, which `src/components/demo-login.tsx` prints on the login page. Hashing a published password keeps it working. The import in ADR 0001 (D10) sets `password_hash` to null, and the auth migration drops the `password` column. Each real user gets a set-password link.
-13. **Emails are unique per tenant.** The key is `UNIQUE (tenant_id, lower(email))`, plus a partial unique index for platform users. At login the app finds every account with that email through `withPlatform`, verifies the password against each one, and logs in when exactly one matches. When more than one matches, it shows a tenant choice, but only after the password check passes. This closes the two `it.fails` email leaks in `src/lib/tenant-isolation.test.ts` (owner question).
+1. **Authelia signs people in. The app never sees a password.** Caddy calls Authelia's forward-auth endpoint (`/api/authz/forward-auth`) before each request to the app. When Authelia answers 200, Caddy copies `Remote-User`, `Remote-Groups`, `Remote-Email` and `Remote-Name` onto the request. The app trusts those headers, so a user signs in once at the Authelia portal and lands in the app already signed in. This is the mode cwerp's test site runs. cwerp, though, still asks for its own password behind Authelia. Trusting the headers so that users sign in only once is a step past cwerp, and it is owner question 1.
+2. **The key is the Authelia username, not the email.** `users.authelia_username` links a `users` row to `Remote-User`. Each `users` row is one membership: one person in one tenant with one role. A person in two tenants has two rows with the same username. Roles (`admin`, `user`), status and tenant stay in the app database, because tenant admins manage them and Authelia's users file is edited by hand.
+3. **Superadmin is an Authelia group.** A request whose `Remote-Groups` contains `CBS_AUTH_SUPERADMIN_GROUP` resolves to the platform principal. It never holds a `TenantContext`, and it has no `users` row. The same group drives an Authelia `two_factor` rule. The group that grants the power is therefore the group that forces TOTP. A superadmin who also works inside a tenant uses a second Authelia username.
+4. **Every request resolves to one of four outcomes.** It runs once per request in `getPrincipal(request)`.
+   - `platform`: the superadmin.
+   - `member`: a `TenantContext` for the selected tenant.
+   - `chooseTenant`: the person is active in more than one tenant and has not picked one yet.
+   - `noAccess`: Authelia knows the person, but no active `users` row matches.
+
+   The selected tenant is stored in the cookie `__Host-cbs_tenant`, which holds a tenant id. It is not a credential. Each request checks it against the person's active rows, so a forged value at most opens the tenant chooser. One active row selects its tenant automatically. A disabled row loses access on the next request, because nothing is cached.
+5. **First arrival binds by email.** A tenant admin adds a user by email and role. The row's `authelia_username` stays null until that person first arrives through Authelia. The app then sets the username on every unbound active row whose `lower(email)` equals `Remote-Email`, and it writes an audit event. Only the operator writes emails into Authelia's users file, so `Remote-Email` is trusted.
+6. **Three layers make the headers trustworthy.** A forged header must get past all three.
+   1. *Network.* The app publishes no port. Its only networks are `cbs-<env>-edge`, shared with Caddy alone, and its own internal database network (ADR 0001, D11). Other apps' containers on the host cannot reach it.
+   2. *Caddy strips first.* Every CBS site block runs `request_header -Remote-*` before `forward_auth`, including the routes that skip Authelia. Authelia's docs say Caddy drops fabricated headers by default. This ADR did not check that claim, so the explicit strip stays.
+   3. *Shared secret.* Caddy adds `X-CBS-Proxy-Secret` on every proxied request. `proxy.ts` compares it with `timingSafeEqual` and returns 401 when it is missing or wrong. `/api/health` is the one exception, because the container health check calls it directly and it reads no tenant data.
+
+   mTLS between Caddy and the app is not used. The hop never leaves the host, and the secret plus the network give the same "only Caddy can call the app" property without certificates to rotate.
+7. **Access is granted by group, so other apps' users stop at the gate.** The CBS domains get `default_policy: deny`. The superadmin group gets `two_factor` and `CBS_AUTH_MEMBER_GROUP` gets `one_factor`. Group names differ per environment (`cbs-users`, `cbs-superadmin`, `cbs-staging-users`, `cbs-staging-superadmin`). The app checks the member group as well, so an access rule written wrongly does not admit a cwerp user.
+8. **Machine routes skip Authelia.** ERP clients cannot use a login portal. Caddy sends `/api/v1/*` to the app without `forward_auth`, still strips `Remote-*`, and still adds the secret. Only bearer tokens are accepted there (decision 11).
+9. **Sessions, lockout, 2FA and password reset belong to Authelia.** The accepted lifetimes (12-hour idle, 7-day absolute) become the CBS cookie's `inactivity: 12h` and `expiration: 7d`, with `remember_me` disabled. Lockout is Authelia's `regulation`. Password reset stays disabled until row `email` gives Authelia an SMTP notifier, as on cwerp's portal. Until then, the operator resets passwords with the provisioning script. To register TOTP, Authelia sends a one-time code through its notifier. With the filesystem notifier, the operator reads that code from the notifier file on the server.
+10. **Logout ends both sessions.** `POST /api/auth/logout` clears `__Host-cbs_tenant` and returns the Authelia logout URL (`CBS_AUTHELIA_LOGOUT_URL`, for example `https://auth.<domain>/logout`). The client then navigates there. Whether Authelia honours an `rd` return address on `/logout` is not checked here.
+11. **API tokens stay in the app, because Authelia has no tenant-scoped machine credentials.** The shape is unchanged from the first draft. `api_tokens` holds `tenant_id`, an optional `customer_id`, `scopes`, `secret_hash`, `last_used_at`, `expires_at` and `revoked_at`. The token format is `cbs_<id>_<secret>`, and only `/api/v1/*` accepts it as `Authorization: Bearer`. A token resolves to a `TenantContext` with an `apiToken` actor. `api_tokens` is in ADR 0001's pre-tenant allowlist.
+12. **The audit trail stays one append-only table.** It records `actor_kind`, `actor_id` (`users.id`, a token id, or the Authelia username for the superadmin), `actor_username`, and the change itself. The trail covers money mutations, membership changes, first-arrival binding, tenant selection and token changes. Sign-in and sign-out events live in Authelia's log, not in the app.
+13. **Demo mode stays, and the local password mode goes.** `CLIENT_BILLING_AUTH_MODE` is `authelia` or `demo`. In demo mode the identity picker sets `__Host-cbs_demo` to a `users.id`, or to the fixed value `platform` for its one superadmin entry, and the same resolver produces the same four outcomes. The superadmin has no `users` row, so the picker adds that entry itself. `CLIENT_BILLING_ENV=production` with `demo` makes `register()` in `instrumentation.ts` exit, and the demo handlers refuse it too. No `password` mode exists, because Authelia already does passwords, lockout and 2FA. A second password system would be security code that has no user.
+14. **CSRF protection is unchanged.** `SameSite=Lax` on Authelia's cookie, plus the `Origin` check in `proxy.ts` for cookie-bearing `POST`, `PUT`, `PATCH` and `DELETE` to `/api/*`. Bearer requests to `/api/v1/*` skip it.
+15. **Expired sessions on `fetch` calls are handled in one place.** Authelia answers 401 when it detects an XHR, 302 for `GET`, and 303 otherwise. A cross-origin redirect to the portal makes `fetch` fail without a usable error. `src/lib/api-client.ts` sends `X-Requested-With: XMLHttpRequest` and uses `redirect: 'manual'`. On a 401 or an `opaqueredirect` it reloads the page, so Authelia's normal 302 sends the browser to the portal. That Authelia detects XHR from this header is an inference, so the wrapper handles both cases.
 
 ## Context
 
-- `src/lib/session.ts` reads the cookie `client-billing-demo-session`, whose value is the raw user id, and passes it to `authenticate(userId)`. Anyone who knows or guesses an id such as `nexio-admin` is that user.
-- `POST /api/auth/login` takes `{ userId }` and no password. `GET /api/auth/identities` lists every active user with email and role, with no authentication.
-- `users.password` holds plain text. `createTenant` and `createTenantUser` in `src/lib/store/tenants.ts` hardcode `admin123`.
-- `users.email` is globally `UNIQUE`. Two tests in `src/lib/tenant-isolation.test.ts` are marked `it.fails` because adding or renaming a user to another tenant's email is refused, which reveals that the email exists.
-- The app writes through Route Handlers called with JSON `fetch`, not Server Actions. Next's guide says Server Actions compare `Origin` with `Host`. It describes no such check for Route Handlers (`node_modules/next/dist/docs/01-app/02-guides/data-security.md`). Server Components can read cookies but cannot set them (`.../04-functions/cookies.md`). In Next 16, `proxy.ts` replaces `middleware.ts` and runs on the Node runtime (`.../03-file-conventions/proxy.md`).
-- nexio_stock issues HS256 JWTs and hashes with bcrypt. cwerp uses `jsonwebtoken` and `bcrypt`. The matrix suggests reusing a pattern from servez or PrepVault, but neither repo is on this machine, so this ADR could not inspect them.
+- **How cwerp uses Authelia.** No repository in the org holds the Authelia configuration. A sweep of every branch of `cwerp`, `nexio_stock`, `servez`, `PrepVault`, `workshop-os`, `sitegrid`, `nexios_garageflow` and `nexiohyper_website`, and of the upstream `Premdeepm/cwerp`, found no file named or containing `authelia`, `configuration.yml`, `users_database` or `Caddyfile.production`. `Cowork-Web`, `intelligrip-web` and `erp_master` are empty. The configuration lives only on the server, so the facts below come from the live site and from cwerp's app code.
+- **The live test site.** A `GET https://test-erp.coworkvenue.in/` answers `302` to `https://auth.test-erp.coworkvenue.in/?rd=https%3A%2F%2Ftest-erp.coworkvenue.in%2F&rm=GET` with `Via: 1.1 Caddy`. That redirect matches the forward-auth response in Authelia's docs. `/api/health` is gated the same way. The response sets the session cookie `cowork_trial_session` for `domain=test-erp.coworkvenue.in`, `HttpOnly`, `Secure` and `SameSite=Lax`, with a 4-hour expiry. `https://auth.test-erp.coworkvenue.in/.well-known/openid-configuration` returns 404, so the OIDC provider is off. The portal page marks the build as Authelia's and sets `data-resetpassword="false"`, `data-rememberme="false"` and `data-passkeylogin="false"`.
+- **cwerp's app ignores the headers.** At `payment_pgsql@8c8e2336f` and `nexio_multivendor@87181d43b`, `backend/src/services/auth.service.ts` checks a bcrypt hash (line 53 and line 52) and signs a JWT (lines 62 to 69). `backend/src/middleware/auth.middleware.ts` on `nexio_multivendor` accepts only `Authorization: Bearer` JWTs (lines 48 to 71). No downloaded cwerp auth file mentions `Remote-User`, `Remote-Groups` or `authelia`. cwerp's `docker-compose.yml` runs no Authelia, so local cwerp development has no gate. On cwerp, then, Authelia is a gate in front of a second login. This is inferred from the branches on GitHub. The commit deployed at `test-erp` is not known.
+- **The shared host.** `test-erp.coworkvenue.in`, `auth.test-erp.coworkvenue.in` and `workshopos-staging.nexiohyper.com` all resolve to `89.167.40.86`. workshop-os's `docs/superpowers/specs/2026-09-22-workshopos-hetzner-staging-design.md` (lines 29 to 35 and 46 to 82, branch `prem-dev-fbb-backend`) names that box `nexiolabs`. There, Barstock's Caddy (`barstock-production-proxy-1`) binds ports 80 and 443 from `/opt/barstock/deploy/Caddyfile.production`. Other apps never bind 80 or 443. They join Caddy through an external Docker network. This repo's `deploy/docker-compose.yml` starts its own Caddy on 80 and 443, which would collide on that box.
+- **This repo today.** `src/lib/session.ts` reads the cookie `client-billing-demo-session`, whose value is a raw user id. `POST /api/auth/login` takes `{ userId }` with no password. `users.password` is plain text, and `createTenant` hardcodes `admin123`. `users.email` is globally `UNIQUE`, which makes two `it.fails` email-leak tests in `src/lib/tenant-isolation.test.ts` fail.
 
 ### Facts checked for this ADR
 
 | Claim | How it was checked |
 | --- | --- |
-| `crypto.argon2` was added in Node v24.7.0 and takes `message`, `nonce`, `parallelism`, `tagLength`, `memory` and `passes`. No experimental marker appears in its section | `doc/api/crypto.md` on the `v24.x` and `main` branches |
-| `crypto.argon2` is undefined on the `node:22-bookworm-slim` image (v22.23.3) and present on local Node v24.11.1 | Ran both |
-| `crypto.argon2Sync` reproduces the RFC 9106 Argon2id test vector (`0d640df5...6b01e659`). At `m=19456`, `t=2`, `p=1` one hash takes about 49 ms on the development laptop | Ran on Node v24.11.1, mean of 20 hashes. The Hetzner box is not measured |
-| OWASP minimum for Argon2id is 19 MiB, 2 iterations and parallelism 1 | OWASP Password Storage Cheat Sheet |
-| Chromium sends a `__Host-` cookie with `Secure` over `http://localhost` and `http://127.0.0.1`, so Playwright e2e can use the production cookie name | Probe with the repo's Playwright Chromium |
-| `better-auth` 1.7.10, `jose` 6.2.12, `@node-rs/argon2` 2.2.2 and `argon2` 0.45.1 are current. `@node-rs/argon2` and `argon2` are in Next's default `serverExternalPackages` | `npm view`, 2026-10-17, and `server-external-packages.jsonc` |
-| Better Auth hashes with scrypt by default, keeps passwords in its `account` table, keeps its rate-limit counters in memory by default, and uses the session `token` column as the cookie value | Context7, `/better-auth/better-auth` |
+| The test site redirects to the Authelia portal with `rd` and `rm`, through Caddy, and sets `cowork_trial_session` for 4 hours on its own domain | `curl -D -` with no redirects followed, 2026-10-17. No login was attempted |
+| OIDC discovery on the cwerp Authelia returns 404 | The same `curl` |
+| No org repo or branch contains Authelia configuration | Tree listings of every branch through `gh api`, grepped for the file names above |
+| cwerp's backend reads only Bearer JWTs | Downloaded `auth.middleware.ts`, `auth.service.ts` and `routes/auth.ts` from two branches, and grepped them in full |
+| The three hostnames share `89.167.40.86` | `Resolve-DnsName` |
+| Authelia's Caddy integration is `forward_auth authelia:9091 { uri /api/authz/forward-auth; copy_headers Remote-User Remote-Groups Remote-Email Remote-Name }`. `Remote-Groups` is comma-separated (`admin,dev`). It answers 401 for a detected XHR, 302 for `GET` and `OPTIONS`, 303 otherwise, and 403 when denied | Authelia docs through Context7 (`integration/proxies/caddy.md`, `integration/proxies/introduction.md`, `integration/trusted-header-sso/introduction.md`) |
+| Access rules are first-match, take `subject: group:<name>` and `policy: bypass, one_factor, two_factor or deny`, and `default_policy: deny` refuses anything unmatched | `configuration/security/access-control.md` and the architecture decision log, through Context7 |
+| The file backend takes `watch` and `refresh_interval` (`always`, `disable` or a duration). Users carry `disabled`, `displayname`, `password` (argon2id), `email` and `groups`. `password_reset.disable` exists | `configuration/first-factor/file.md` and `introduction.md`, through Context7 |
+| Session cookies are per domain, with `authelia_url`, `inactivity`, `expiration` and `remember_me` | `configuration/session/introduction.md`, through Context7 |
+| Elevation one-time codes go through the notifier, and the filesystem notifier writes them to a file | `handler_session_elevation.go` and `file_notifier.go`, through Context7 |
 
 ## Options considered
 
@@ -48,80 +63,129 @@ The arena ran as one labelled sequential pass in this session. No cross-judge ra
 
 ### Rubric
 
-1. **Revocation and expiry.** Can a stolen or stale session be killed at once, and do idle and absolute limits hold?
-2. **Fit with the tenant model.** Does it work with `tenant_id` on users, the platform role, RLS context and demo mode?
-3. **API-token path.** Can rows `api` and `check-api` add machine principals without reworking sessions?
-4. **Code to own.** How much security-critical code and schema does this repo maintain, and how much of it is someone else's moving target?
-5. **Team familiarity.** How close is it to what nexio_stock and cwerp already run?
+1. **One sign-in.** Does a user sign in once?
+2. **Revocation.** Does a disabled membership lose access on its next request?
+3. **Trust surface.** What does an attacker have to forge, and what stops them?
+4. **Code to own.** How much security-critical code stays in this repo?
+5. **Fit with the running Authelia.** Does it work with cwerp's instance as it is configured today?
+6. **Machine path.** Can ERP clients reach `/api/v1/*`?
 
 ### Candidates
 
-- **A. Opaque database sessions, built in this repo on `node:crypto`.**
-- **B. Stateless signed cookie.** A JWT signed with `jose`, as in Next's authentication guide and the team's other apps. A `session_version` column on `users` handles revocation.
-- **C. Better Auth 1.7.** Its email and password provider, its `pg` adapter and its API-key plugin, with tenant and role added as extra user fields.
-- **D. Keep the picker and put each environment behind Caddy basic auth.** This is the premise attack. Maybe the real need is only "strangers cannot get in".
+- **A. Forward-auth with trusted headers.** Authelia in front, and the app maps `Remote-User` to its memberships.
+- **B. Authelia as an OIDC provider.** The app is an OIDC client, using a library such as `openid-client`. It handles the callback, PKCE and state, validates the ID token, and keeps its own `sessions` table.
+- **C. Gate only, as cwerp runs today.** Authelia in front, and the first draft's password login and sessions behind it.
+- **D. Separate Authelia instances per environment, shipped in this repo's Compose.** A deployment variant of A rather than a different app contract.
 
 | Criterion | A | B | C | D |
 | --- | --- | --- | --- | --- |
-| Revocation and expiry | Delete the row. Takes effect on the next request | Needs a `users` read on every request to check `session_version`, which removes the stateless benefit | Built in | No per-user sessions |
-| Tenant model fit | Tables and RLS from ADR 0001, one session format for both login methods | Tenant and role live inside the token and go stale until it expires | Second schema owner (`user`, `session`, `account`, `verification`) next to ours. Tenant and role become plugin fields | No user identity, so no audit actor |
-| API-token path | `api_tokens` resolves to the same `TenantContext` | Separate bearer path still needed | API-key plugin is user-owned. Tokens for a tenant's customer do not match that model | None |
-| Code to own | A few hundred lines (estimate) on standard primitives, no new dependency on Node 24 | Same size plus key rotation | Least code, but frequent releases (1.7.10 shipped 2026-10-15) and its own migration CLI | Almost none |
-| Team familiarity | New pattern for the team | Matches nexio_stock and cwerp | New library | Known Caddy feature |
+| One sign-in | Yes | Yes | No. Users sign in twice | Yes |
+| Revocation | Membership read on every request | Same, plus the app session table | Same | Same as A |
+| Trust surface | Headers. Covered by network, strip and secret | A signed token. No header trust needed | Two password systems | Same as A |
+| Code to own | A header parser and a resolver | A callback flow, a session store and key handling | Everything from the first draft | A, plus a second Authelia to run, update and back up |
+| Fit with running Authelia | A cookie entry and rules added to its config | The provider must be switched on and a client registered | Nothing to change | Leaves the shared config alone, but adds a container, storage and backups to run |
+| Machine path | Caddy route that skips forward-auth | Same | Same | Same |
 
 ### Recommendation
 
-Pick A. Revocation is the deciding criterion for a billing app, because a disabled accountant must lose access on their next click. B can do that only by reading the database on every request. Once it does, it is A with a signed blob in the cookie. C would give 2FA, passkeys and OAuth later. It would also bring a second set of user tables and a second migration tool into a schema that ADR 0001 builds around RLS. Its key model is user-owned, which does not fit tokens issued to a tenant's ERP customer. D answers a smaller question than row `auth` asks.
+Pick A, deployed into the existing Authelia (not D) if CBS shares the `nexiolabs` host. A is the only option that gives one sign-in without the app taking on a session store. Authelia already does lockout, TOTP, session expiry and password hashing. B buys freedom from header trust. Here the app is reachable only through Caddy, so the three layers in decision 6 cover that risk for less code. B also needs OIDC switched on in a shared configuration that this ADR cannot see. C keeps every line the owner's choice was meant to remove. D gives CBS a separate user list and a second auth server to patch. The owner asked for Authelia "the way cwerp does", which points at the instance already running.
 
-Grafts from the other candidates:
+Grafts:
 
-- From C, keep `ip_address` and `user_agent` on each session row. A later "signed-in devices" list and the audit trail can then show them. Rate-limit rules are also written as a table of path, window and maximum, not as scattered `if` blocks.
-- From D, a public demo environment can sit behind Caddy basic auth, so search engines and strangers do not wander into the sales demo. This needs no app code.
-- From B, nothing is taken. Tokens in cookies are the part this decision rejects.
+- From B, the app never learns or stores a password, and principal resolution sits behind one function (`getPrincipal`). A later move to OIDC changes only that function and the Caddy block.
+- From C, demo mode and its production guard stay.
+- From D, the repo ships a complete standalone Authelia configuration for the smoke test (A5). If the owner picks another host, it becomes the production configuration with only values changed.
 
 ### What would change this decision
 
-- If the owner wants SSO, OAuth sign-in or passkeys for tenant users within two quarters, Better Auth's plugins outweigh its schema cost. Re-run this comparison with C as the base.
-- If session lookup becomes a measurable share of request time, add a short in-process cache keyed by token hash. Revocation would then wait for the cache to expire, so cap it at 30 seconds. Nobody has measured this. The lookup is one indexed primary-key read.
-- If Node 24 cannot ship, use `@node-rs/argon2` with the same parameters and PHC strings. Stored hashes stay compatible.
+- If the app must be reachable without Caddy in front, for example by a native mobile client, switch to B. Only `getPrincipal` and the Caddy block change.
+- If tenant admins must create sign-ins themselves, without the operator, put `lldap` behind Authelia's LDAP backend and let the app create users through it. The header contract stays the same.
+- If CBS does not deploy to the shared host, use D with the smoke configuration.
 
 ## Consequences
 
-- Units that touch no storage (A1, A2, A3) can land before the Postgres switch. The rest wait for ADR 0001 unit D11, so no auth table is built on SQLite and then ported.
-- `getCurrentSession()` becomes `getPrincipal(request)`. The page layouts in `src/app/(app)/layout.tsx` and `src/app/page.tsx` read it but never refresh the cookie, because Server Components cannot set cookies. Only route handlers bump `last_seen_at`.
-- The demo picker keeps its current look and behavior in demo mode. Its `admin123` hint goes away, because password mode never shows the picker.
-- `seed/initial-data.sqlite` users arrive with no usable password. Before production use, the owner runs `auth:bootstrap` and sends set-password links.
-- Once audit lands, the logs page and the tenant history panel read `audit_events`. `operational_logs` keeps only `error` rows.
+- **Subtracted from the first draft.** The password module and the Node 24 move for Argon2 are gone, along with the `sessions`, `login_attempts` and `auth_tokens` tables, invite and reset links, `auth:bootstrap`, and the per-email and per-IP lockout. `users.password` is dropped and nothing replaces it. ADR 0001's pre-tenant allowlist shrinks to `tenants` and `api_tokens`.
+- **Deploy changes.** Each bullet is described here and built in unit A5.
+  - When CBS shares the host, `deploy/docker-compose.yml` drops its `caddy` service. Each app joins an external network, `cbs-staging-edge` or `cbs-production-edge`, and Barstock's Compose declares those networks for its Caddy, as workshop-os did.
+  - `deploy/caddy/cbs.caddy` holds the CBS site blocks that the server's Caddyfile imports. Each block has the strip, `forward_auth`, the `/api/v1/*` route and the secret. It also rewrites Authelia's cookie to a dummy value on the hop to the app, as Authelia's Caddy guide shows. The block for the portal hostname (`auth.<cbs-domain>`) proxies to the Authelia container.
+  - `deploy/authelia/cbs-session-cookies.yml` and `cbs-access-control.yml` are snippets the operator merges into the server's Authelia configuration.
+  - `proxy.env.example` gains the per-environment proxy secrets. `.env.example` gains `CBS_PROXY_SECRET`, both group names and `CBS_AUTHELIA_LOGOUT_URL`.
+- **Domains must not nest.** An Authelia cookie for `billing.example.com` is also sent to `staging.billing.example.com`. That would hand production sessions to staging. `proxy.env.example` uses exactly that pair today, so staging moves to a sibling name such as `billing-staging.example.com`.
+- **Who creates sign-ins.** The superadmin adds a tenant and its first admin's email in the app. A tenant admin adds users by email. The operator then runs `deploy/authelia-user.sh add <username> <email> "<name>" <group>` over SSH. The script hashes a random password with `authelia crypto hash generate argon2` inside the Authelia container and edits the users file. It keeps a dated `.bak`, validates the file, and prints the password once for the operator to send. `disable` and `reset` work the same way. With `watch: true` and `refresh_interval: 1m`, Authelia picks up the change without a restart. The app never writes that file, because other apps share it. The superadmin console lists rows still waiting for an Authelia account.
+- **Local development uses demo mode,** as cwerp runs no Authelia locally. Authelia mode is exercised in two places. A Playwright project starts the app in `authelia` mode and sends the secret and `Remote-*` headers through `extraHTTPHeaders`. The A5 smoke stack runs real Caddy and Authelia. Neither binds port 3000.
+- **The identity source moves outside this repo.** Authelia's users file and its storage (TOTP secrets) now decide who can reach CBS. Their backup is not covered by ADR 0001's database dumps (owner question 2).
+- **The seed's users** arrive with `authelia_username` null and bind on first arrival (ADR 0001, D10). The seed's `superadmin` row is not imported. The superadmin is a group member in Authelia.
 
 ## Implementation plan
 
-Each unit lands alone and keeps lint, typecheck, Vitest and Playwright green. A1 to A3 can land any time. A4 needs ADR 0001 D11. A5 to A8 need A4. A9 waits for row `api`.
+Each unit lands alone and keeps lint, typecheck, Vitest and Playwright green. **A1 to A6 have no dependency on Postgres and can land now.** A7 and later need ADR 0001 D11.
 
-1. **A1. Add the auth config and principal types.** `src/lib/auth/config.ts` parses `CLIENT_BILLING_ENV` and `CLIENT_BILLING_AUTH_MODE` once. `instrumentation.ts` calls it from `register()`. `src/lib/auth/principal.ts` defines `Actor` and `TenantContext`. `/api/auth/identities` returns 404 outside demo mode.
-   - **Check.** A table test covers every env and mode pair, and `production` with `demo` is refused. Route tests call the identities and demo login handlers with a production config and get 404. A CI step runs `next start` with `CLIENT_BILLING_ENV=production` and `CLIENT_BILLING_AUTH_MODE=demo` and asserts that the process exits non-zero. `e2e/soft-login.spec.ts` passes unchanged in demo mode.
-2. **A2. Add the `Origin` check in `proxy.ts`.**
-   - **Check.** A Vitest test calls the proxy function directly. A cookie `POST` with a foreign `Origin` gets 403. A cookie `POST` with no `Origin` gets 403. A same-origin `POST` passes. A bearer `POST` with no cookie passes. All e2e specs pass.
-3. **A3. Move to Node 24 and add the password module.** Update the `Dockerfile` base images, `node-version` in `ci.yml`, and `engines` in `package.json`. `src/lib/auth/password.ts` exports `hashPassword`, `verifyPassword` and `needsRehash`.
-   - **Check.** The RFC 9106 Argon2id test vector, which uses secret and associated data, matches through `crypto.argon2`. Hash and verify round-trips. A wrong password and an edited PHC string both fail. `needsRehash` is true for a hash with lower `m`. `docker build` succeeds on the new base.
-4. **A4. Write the auth schema migration.** `db/migrations/0002_auth.sql` adds `users.password_hash` (null means the user must set a password), drops `users.password`, replaces the global email key with the per-tenant key, and adds `sessions`, `login_attempts` and `auth_tokens` (invite and reset). It grants these tables to `cbs_platform` only.
-   - **Check.** The D3 isolation catalog test still passes. The two `it.fails` email-leak tests in `tenant-isolation.test.ts` become plain `it` and pass.
-5. **A5. Add password login and sessions.** Add `src/lib/auth/session.ts`, a password form shown when the mode is `password`, and new `login` and `logout` routes. The demo picker now creates session rows. Delete `authenticate(userId)`, the `client-billing-demo-session` cookie and the `userId` login body.
-   - **Check.** `src/lib/auth/session.test.ts` covers expired, idle, revoked and rotated sessions, and a role change killing other sessions. A route test asserts the exact `Set-Cookie` attributes. The new `e2e/password-login.spec.ts` runs in a Playwright project whose web server has `CLIENT_BILLING_AUTH_MODE=password`. The soft-login spec still passes in demo mode. Then point row `auth` at `src/lib/auth/session.test.ts`, set it to `built`, and close #34.
-6. **A6. Add rate limits and lockout.**
-   - **Check.** The sixth failure for one email inside 15 minutes returns 429 with `Retry-After`. A success clears the email's count. A login with an unknown email still calls `verifyPassword` once. Without `TRUST_PROXY`, the IP check ignores a spoofed `X-Forwarded-For`.
-7. **A7. Add bootstrap, invites and admin-issued resets.** Add the `auth:bootstrap` script and the set-password page. Remove the `admin123` literals from `src/lib/store/tenants.ts`.
-   - **Check.** A link works once and fails the second time. An expired link fails. Setting a password ends the user's other sessions. `e2e/tenants.spec.ts` creates a tenant and opens its invite link.
-8. **A8. Add the audit trail.** Add `audit_events`, write it inside every money mutation (issue, correct and void invoice, record and edit payment, close pending, contract and plan changes) and every auth event. Move the logs page and tenant history to the new table. The migration that copies the old rows runs as `cbs_owner`, which has `BYPASSRLS` (ADR 0001). It then drops `contract_audit_events` and `tenant_lifecycle_events`.
-   - **Check.** Inside the migration, the copied row count equals the source row count before the drop, and a mismatch aborts the migration. Each money mutation writes exactly one audit row. A mutation that fails writes none. `UPDATE` and `DELETE` on `audit_events` as `cbs_app` fail with `42501`. Row `audit` moves to `built`.
-9. **A9. Add API tokens when row `api` starts.** Create `api_tokens`, the `/api/v1/*` bearer resolver and a token admin screen.
-   - **Check.** A token reads only its own tenant under RLS. A revoked or expired token gets 401. A session cookie sent to `/api/v1/*` is ignored. The database holds only the hash of the secret.
+1. **A1. Auth config and principal types.** `src/lib/auth/config.ts` parses `CLIENT_BILLING_ENV`, `CLIENT_BILLING_AUTH_MODE` (`authelia` or `demo`) and, in `authelia` mode, `CBS_PROXY_SECRET` (at least 32 bytes), both group names and the logout URL. `register()` exits on a refused config. `src/lib/auth/principal.ts` defines `Actor`, `TenantContext` and the `Resolution` union from decision 4. `POST /api/auth/login`, which takes a raw `{ userId }`, moves to `POST /api/auth/demo-login`. That route and `/api/auth/identities` return 404 outside demo mode. Until A7 lands, `authelia` mode serves nothing but 404s from those routes and has no working sign-in, so no environment serves real users between A1 and A7.
+   - **Check.** A table test covers every env and mode pair. `production` with `demo` is refused. `authelia` with no secret or a short secret is refused. Route tests call `/api/auth/demo-login` with `{ "userId": "superadmin" }` and `/api/auth/identities` under an `authelia` config and under a `production` config, and get 404 each time. Searching `src/` for `/api/auth/login` returns nothing. A CI step runs `next start` on a port other than 3000 with `production` and `demo`, and asserts a non-zero exit. `e2e/soft-login.spec.ts` passes with the new route.
+2. **A2. `Origin` check in `proxy.ts`.**
+   - **Check.** A cookie `POST` with a foreign `Origin` or no `Origin` gets 403. A same-origin `POST` passes. A bearer `POST` to `/api/v1/*` with no cookie passes. All e2e specs pass.
+3. **A3. Forwarded-identity parser and the secret gate.** `src/lib/auth/forwarded.ts` exports the pure function `parseForwardedIdentity(headers, config)`. It returns `{ username, email, name, groups }` or a refusal. `proxy.ts` enforces the secret in `authelia` mode and deletes `Remote-*` on `/api/v1/*`. `GET /api/auth/me` returns the parsed identity, for the smoke test.
+   - **Check.** Table tests give these results.
+     - A missing secret, a same-length wrong secret and a different-length secret each get 401, and `/api/health` still answers 200 without one.
+     - An empty `Remote-User` gets 401.
+     - A username outside `[a-z0-9._-]{1,64}` is refused.
+     - `Remote-Groups: "cbs-users, other"` parses to two trimmed groups.
+     - No member group and no superadmin group gets 403.
+     - The superadmin group resolves to `platform`.
+     - On `/api/v1/*`, a forged `Remote-User` never reaches the handler.
+4. **A4. One fetch wrapper for expired sessions.** Every client `fetch` goes through `src/lib/api-client.ts` (decision 15).
+   - **Check.** A unit test feeds the wrapper a 401 with `Location` and an `opaqueredirect`. Each calls the injected `reload` once, and a 200 does not. A lint rule (`no-restricted-globals` on `fetch` in `src/components` and `src/app`) leaves zero direct calls.
+5. **A5. Deploy edge, Authelia snippets and the smoke stack.** Add the files listed under Consequences. `deploy/smoke/compose.yml` runs Caddy, a standalone Authelia (SQLite storage, filesystem notifier, a test users file) and the app in `authelia` mode, on a host port other than 3000. `deploy/smoke/run.sh` drives it with `curl`. It signs in through Authelia's first-factor API (`/api/firstfactor`, the endpoint the portal is expected to call; not checked here).
+   - **Check.** `caddy validate` passes on the snippet imported into a stock Caddyfile. `authelia validate-config` passes on the smoke configuration and on the snippets merged into it. `run.sh` asserts each of the following.
+     - An unauthenticated `GET /` gets 302 to the portal with `rd`.
+     - After sign-in as `alice`, `/api/auth/me` returns `alice`.
+     - An unauthenticated request carrying `Remote-User: admin` still gets 302.
+     - Signed in as `alice`, a forged `Remote-User: bob` still yields `alice`.
+     - `/api/v1/ping` reaches the app without Authelia, and a forged `Remote-User` there is absent.
+     - A container on another network cannot connect to the app.
+     - From the edge network, a request with no secret gets 401.
+     - `docker compose port app 3000` prints nothing.
+
+     A CI job runs the smoke test.
+6. **A6. Operator provisioning script.** `deploy/authelia-user.sh` with `add`, `disable`, `reset` and `list`.
+   - **Check.** Against the smoke stack, `add` creates a user who can sign in. `add` refuses an email already present in the users file, case-insensitively, and leaves the file unchanged, so first-arrival binding never sees two accounts with one email. `disable` makes that user's next sign-in fail. `reset` makes the old password fail and the new one work. A malformed edit is caught by validation and the `.bak` is restored. Running `add` twice for one username exits non-zero and leaves the file unchanged.
+7. **A7. Memberships, binding and tenant selection.** Needs D11. ADR 0001's D3 baseline already carries `users.authelia_username`, per-tenant keys and no `password` column. `getPrincipal(request)` replaces `getCurrentSession()`. Add the chooser page `/select-tenant`, the tenant switcher in the menu, first-arrival binding, and logout through Authelia. Move `/api/auth/demo-login` onto `__Host-cbs_demo`. Delete `authenticate(userId)` and the `client-billing-demo-session` cookie.
+   - **Check.** `src/lib/auth/resolve.test.ts` covers every case below.
+     - A person with one active row gets `member` with no chooser.
+     - A person with two rows gets `chooseTenant`. Choosing sets the cookie. A forged tenant cookie for a tenant without a row returns to `chooseTenant`, with no 403 that would reveal the tenant.
+     - Disabling one row removes that tenant on the next request and keeps the other.
+     - First arrival binds every unbound row whose email matches, and writes one audit or operational row per binding.
+     - After one username has bound to an email, a later arrival with that email and a different username binds nothing.
+     - The superadmin group gets `platform` and cannot reach a tenant route.
+     - Demo mode resolves to the same outcomes. The picker's superadmin entry resolves to `platform`, and `e2e/tenants.spec.ts` uses it.
+
+     The two `it.fails` email tests become plain `it` and pass. The new `e2e/authelia-headers.spec.ts` passes in the Playwright project with `authelia` mode. Point row `auth` at `resolve.test.ts`, set it to `built`, and close #34.
+8. **A8. In-app user provisioning.** `createTenant` takes the first admin's email instead of creating `admin123` users. Tenant admins add users by email and role. The superadmin console lists rows awaiting an Authelia account.
+   - **Check.** Searching `src/` for `admin123` returns nothing. `e2e/tenants.spec.ts` creates a tenant with an admin email and sees it listed as awaiting an account.
+9. **A9. Audit trail.** As in the first draft. Add `audit_events`, write it in the same transaction as every money mutation and every event in decision 12, move the logs page and tenant history to it, and drop `contract_audit_events` and `tenant_lifecycle_events` in a migration run as `cbs_owner`.
+   - **Check.** Inside the migration, the copied count equals the source count, and a mismatch aborts it. Each money mutation writes exactly one row. A failed mutation writes none. `UPDATE` and `DELETE` as `cbs_app` fail with `42501`. Row `audit` moves to `built`.
+10. **A10. API tokens when row `api` starts.** Create `api_tokens`, the `/api/v1/*` bearer resolver and a token admin screen.
+    - **Check.** A token reads only its own tenant under RLS. A revoked or expired token gets 401. An Authelia cookie or `Remote-*` header sent to `/api/v1/*` grants nothing. The database holds only the hash of the secret.
+
+## Owner decisions (accepted 2026-10-17)
+
+The owner accepted every recommended default from the first draft. Each is restated in its Authelia form.
+
+1. **Where demo mode runs.** Locally, and in a dedicated `demo` environment behind Caddy basic auth. Staging runs `authelia` mode.
+2. **One email in several tenants.** Allowed. Emails are unique per tenant, and the person picks a tenant after sign-in (decision 4).
+3. **Password reset before email ships.** The operator resets with `deploy/authelia-user.sh reset`. Authelia's self-service reset is switched on once row `email` provides SMTP.
+4. **Session lifetimes.** A 12-hour idle timeout and a 7-day absolute lifetime, set on the CBS Authelia cookie.
+5. **Two-factor for the superadmin.** TOTP is required for the superadmin through the `two_factor` rule before the first paying tenant. It is optional for tenant users.
+6. **Superadmin access to tenant billing data.** None. A time-boxed, audited support session can come later.
+7. **servez and PrepVault.** Their file trees and Compose files were read through `gh api`. Neither has an Authelia file or an auth service in Compose. Each signs its own tokens. servez has `backend/app/auth/` and `frontend/src/auth/jwt.ts`. PrepVault has `src/server/auth.ts` and a `session_version` migration. Authelia replaces that pattern here, so nothing from them is reused. Their auth code was not read line by line.
 
 ## Needs owner decision
 
-1. **Where demo mode runs.** Recommended default. Locally, and later in a dedicated `demo` environment behind Caddy basic auth. Staging runs `password` mode so it rehearses production.
-2. **One email in several tenants.** Should one person, such as an accountant, be able to hold accounts in two tenants with the same email? Recommended default. Yes. Keep emails unique per tenant and offer the tenant choice after the password check. This also closes the two known email leaks.
-3. **Password reset before email ships.** Recommended default. Links issued by an admin. A tenant admin resets users, the superadmin resets tenant admins, and `auth:bootstrap` resets the superadmin. Switch to self-serve email reset when row `email` lands.
-4. **Session lifetimes.** Recommended default. A 12-hour idle timeout and a 7-day absolute lifetime.
-5. **Two-factor sign-in for the superadmin.** Recommended default. Add TOTP for the superadmin before the first paying tenant goes live. It is optional for tenant users and can come later.
-6. **Superadmin access to tenant billing data.** Recommended default. None, as today. If support needs it, add a time-boxed support session that writes audit events and that the tenant can see.
-7. **servez and PrepVault.** Row `auth` says to reuse their pattern, but this ADR could not read them. Recommended default. Go ahead with this design. Point to those repos if a specific part of them must be reused.
+1. **Trust the headers so users sign in once.** cwerp keeps its own login behind Authelia. Recommended default: trust `Remote-User`, as in decision 1. Choose C instead only if a second password inside the app is wanted on purpose.
+2. **Host and Authelia instance.** Does CBS deploy to `nexiolabs` (`89.167.40.86`) and join its Caddy and Authelia? The only instance seen fronts a trial site, judging by its cookie name `cowork_trial_session`. Is there, or will there be, a production-grade instance? Who owns its upgrades, restarts and configuration edits, now that production billing sign-in depends on them? Recommended default: yes, join it, with one named owner for that instance. The operator then needs to supply four things.
+   - The paths to the Authelia configuration and users file.
+   - The Authelia version, which must be 4.38 or later for per-domain cookies. The `rm` parameter suggests it is.
+   - Its session and storage backends.
+   - Whether its users file and storage are backed up anywhere today.
+3. **Real domains.** Recommended default: a production domain and a sibling staging domain that is not under it. Each gets an `auth.` subdomain for the portal.
+4. **Who provisions sign-ins, and how fast.** Recommended default: whoever holds SSH to the host runs `authelia-user.sh` when the console shows a waiting row. Move to `lldap` once tenant admins need to add users without waiting for the operator.
