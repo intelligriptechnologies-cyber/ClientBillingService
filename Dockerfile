@@ -16,7 +16,13 @@ ENV NODE_ENV=production \
     NEXT_TELEMETRY_DISABLED=1 \
     PORT=3000 \
     HOSTNAME=0.0.0.0 \
-    CLIENT_BILLING_DATABASE=/data/client-billing.sqlite
+    CLIENT_BILLING_DATABASE=/data/client-billing.sqlite \
+    PLAYWRIGHT_BROWSERS_PATH=/ms-playwright \
+    CLIENT_BILLING_CHROMIUM_NO_SANDBOX=1
+# Invoice PDFs are printed by headless Chromium. This installs the browser and the system libraries and fonts it needs.
+COPY --from=deps /app/node_modules/playwright-core /opt/playwright-core
+RUN node /opt/playwright-core/cli.js install --with-deps chromium-headless-shell \
+    && rm -rf /opt/playwright-core /var/lib/apt/lists/*
 RUN mkdir -p /data && chown node:node /data
 COPY --from=build --chown=node:node /app/.next/standalone ./
 COPY --from=build --chown=node:node /app/.next/static ./.next/static

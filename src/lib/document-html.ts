@@ -1,0 +1,87 @@
+/** Building blocks shared by every printable document. The on-screen preview and the PDF both receive this exact markup. */
+
+const ESCAPES: Record<string, string> = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
+
+/** Every user supplied string goes through this before it reaches the markup. */
+export function escapeHtml(value: string): string {
+  return value.replace(/[&<>"']/g, (character) => ESCAPES[character]);
+}
+
+const INLINE_IMAGE = /^data:image\/(?:png|jpe?g|gif|webp|bmp|avif|svg\+xml);base64,[A-Za-z0-9+/]+={0,2}$/;
+
+/** Stored branding is a data URL. Anything else is dropped so a document can never fetch from the network. */
+export function inlineImageSource(dataUrl: string | undefined): string | null {
+  return dataUrl && INLINE_IMAGE.test(dataUrl) ? dataUrl : null;
+}
+
+export function imageHtml(dataUrl: string | undefined, alt: string, className: string): string {
+  const source = inlineImageSource(dataUrl);
+  return source ? `<img class="${className}" src="${source}" alt="${escapeHtml(alt)}">` : '';
+}
+
+const STYLES = `
+@page { size: A4; margin: 14mm; }
+* { box-sizing: border-box; }
+html { background: #fff; }
+body { margin: 0; color: #17232d; background: #fff; font: 11px/1.45 "Segoe UI", "Noto Sans", "DejaVu Sans", "Liberation Sans", Arial, sans-serif; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+.sheet { width: 210mm; max-width: 100%; margin: 0 auto; padding: 14mm; }
+@media print { .sheet { width: auto; max-width: none; margin: 0; padding: 0; } }
+h1, h2, h3, p, dl, dd { margin: 0; }
+h1 { font-size: 22px; line-height: 1.2; letter-spacing: 0.04em; text-transform: none; }
+h2 { font-size: 14px; }
+h3 { font-size: 9px; letter-spacing: 0.08em; text-transform: uppercase; color: #66757f; font-weight: 600; margin-bottom: 3px; }
+.masthead { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; padding-bottom: 12px; border-bottom: 2px solid #11756c; }
+.seller { display: flex; gap: 12px; align-items: flex-start; min-width: 0; }
+.logo { max-width: 130px; max-height: 56px; object-fit: contain; }
+.company { font-weight: 700; }
+.muted { color: #66757f; }
+.multiline { white-space: pre-line; overflow-wrap: anywhere; }
+.doc { text-align: right; flex: none; }
+.doc dl { margin-top: 6px; display: grid; grid-template-columns: auto auto; gap: 1px 10px; justify-content: end; }
+.doc dt { color: #66757f; }
+.doc dd { font-weight: 600; }
+.heading { margin-top: 10px; font-weight: 600; overflow-wrap: anywhere; }
+.parties { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-top: 12px; }
+.parties div { overflow-wrap: anywhere; }
+table { width: 100%; border-collapse: collapse; }
+.lines { margin-top: 14px; }
+.lines th { text-align: left; font-size: 9px; letter-spacing: 0.06em; text-transform: uppercase; color: #fff; background: #11756c; padding: 5px 6px; font-weight: 600; }
+.lines td { padding: 6px; border-bottom: 1px solid #dce5e5; vertical-align: top; overflow-wrap: anywhere; }
+.lines thead { display: table-header-group; }
+.lines tr { break-inside: avoid; }
+.num { text-align: right !important; white-space: nowrap; }
+.tax-amount { display: block; color: #66757f; }
+.summary { display: flex; justify-content: space-between; align-items: flex-start; gap: 20px; margin-top: 12px; break-inside: avoid; }
+.words { flex: 1; min-width: 0; }
+.words p { font-weight: 600; }
+.totals { width: 250px; flex: none; }
+.totals th { text-align: left; font-weight: 400; color: #66757f; padding: 3px 0; }
+.totals td { text-align: right; padding: 3px 0; white-space: nowrap; }
+.totals .payable th, .totals .payable td { color: #17232d; font-weight: 700; font-size: 13px; border-top: 1px solid #17232d; padding-top: 6px; }
+.notes { margin-top: 12px; }
+.closing { display: flex; justify-content: space-between; align-items: flex-end; gap: 16px; margin-top: 18px; break-inside: avoid; }
+.footer { flex: 1; min-width: 0; color: #66757f; overflow-wrap: anywhere; }
+.signatory { text-align: center; flex: none; min-width: 160px; }
+.marks { display: flex; justify-content: center; align-items: flex-end; gap: 10px; min-height: 60px; }
+.stamp { max-width: 90px; max-height: 70px; object-fit: contain; }
+.signature { max-width: 120px; max-height: 50px; object-fit: contain; }
+.signatory p { border-top: 1px solid #17232d; margin-top: 4px; padding-top: 3px; }
+`;
+
+export function documentShell(title: string, body: string): string {
+  return `<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>${escapeHtml(title)}</title>
+<style>${STYLES}</style>
+</head>
+<body>
+<main class="sheet">
+${body}
+</main>
+</body>
+</html>
+`;
+}

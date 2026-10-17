@@ -4,7 +4,7 @@ This mirrors the nexio_stock flow: a manually dispatched GitHub Actions workflow
 
 ## Layout
 
-- `Dockerfile` is a multi-stage Next.js `standalone` build on `node:22-bookworm-slim`. The app uses `node:sqlite`, which needs Node 22.
+- `Dockerfile` is a multi-stage Next.js `standalone` build on `node:22-bookworm-slim`. The app uses `node:sqlite`, which needs Node 22. The runner stage also installs headless Chromium (see PDF rendering).
 - `deploy/docker-compose.yml` has `app-staging`, `app-production` and `caddy`. Each app has its own named volume mounted at `/data`.
 - `deploy/Caddyfile` terminates TLS (automatic certificates) and proxies each domain to its app on port 3000.
 - `deploy/deploy-remote.sh <staging|production>` runs on the server.
@@ -22,6 +22,16 @@ This mirrors the nexio_stock flow: a manually dispatched GitHub Actions workflow
 Run the Deploy workflow from the Actions tab and pick the environment. The workflow deploys the commit of the ref you dispatch it on. A deploy builds the image, backs up the database, replaces only that environment's app container, starts Caddy if it is not running, and fails unless `/api/health` reports healthy.
 
 `GET /api/health` returns `{"ok":true}` with no authentication and reads no tenant data.
+
+## PDF rendering
+
+Invoice and bulk-preview PDFs are printed by headless Chromium through `playwright-core`, from the same HTML the invoice page previews. `playwright-core` is a production dependency. The runner stage of the `Dockerfile` runs `playwright-core install --with-deps chromium-headless-shell` as root, which installs the browser into `/ms-playwright` and the Debian libraries and fonts it needs (the fonts include the rupee sign). This adds a few hundred MB to the image and about a minute to the build.
+
+- One Chromium is started on the first PDF request and reused. At most two pages render at once, and a render that takes over 35 seconds is abandoned and the browser is replaced.
+- If Chromium cannot start, the download route answers `503` with a message saying so. The rest of the app is unaffected.
+- `CLIENT_BILLING_CHROMIUM_NO_SANDBOX=1` is set in the image because the container runs as the unprivileged `node` user, and many Linux hosts' default Docker profile blocks Chromium's sandbox. Set it to `0` to turn the sandbox back on. It rendered both ways on Docker Desktop, but nobody has run the image on the Hetzner host. The browser only prints HTML the app generated and escaped, with JavaScript disabled and the network offline.
+- `CLIENT_BILLING_CHROMIUM_PATH` points the app at a different Chromium executable. Outside Docker run `npx playwright install chromium` once.
+- Budget roughly 300 MB of RAM for the browser while a PDF renders.
 
 ## Database and backups
 

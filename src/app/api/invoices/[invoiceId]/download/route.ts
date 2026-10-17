@@ -1,8 +1,8 @@
 import { recordOperationException } from '@/lib/operational-error';
 import { getCurrentSession } from '@/lib/session';
 import { getTenantStore } from '@/lib/tenant-store';
-import { pdfDownload } from '@/lib/pdf';
-import { invoicePdfContent } from '@/lib/invoice-document';
+import { pdfResponse } from '@/lib/pdf-renderer';
+import { renderInvoiceHtml } from '@/lib/invoice-html';
 
 export async function GET(_: Request, context: { params: Promise<{ invoiceId: string }> }) {
   const session = await getCurrentSession();
@@ -10,7 +10,6 @@ export async function GET(_: Request, context: { params: Promise<{ invoiceId: st
   try {
     const invoice = getTenantStore().getInvoice(session, (await context.params).invoiceId);
     if (!invoice) return new Response('Invoice not found.', { status: 404 });
-    const { title, lines } = invoicePdfContent(invoice);
-    return pdfDownload(`${invoice.invoiceNumber}.pdf`, title, lines, invoice.snapshot);
+    return await pdfResponse(`${invoice.invoiceNumber}.pdf`, renderInvoiceHtml(invoice));
   } catch (cause) { recordOperationException(session, '/api/invoices/[invoiceId]/download', cause); return new Response(cause instanceof Error ? cause.message : 'Unable to download invoice.', { status: 403 }); }
 }
