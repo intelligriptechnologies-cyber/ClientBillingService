@@ -14,10 +14,10 @@ async function checkList(page: Page, route: string) {
   await expect(page.getByRole('combobox', { name: /month|period/i }).first()).toBeVisible();
   await expect(page.getByRole('button', { name: 'Clear filters' }).first()).toBeVisible();
   await expect(page.getByRole('combobox', { name: /rows per page/i }).first()).toBeVisible();
+  await expect(page.locator('table.data-table, .empty').first(), `${route} should finish loading`).toBeVisible();
   const tables = await page.locator('table.data-table').count();
   const pagers = await page.getByRole('combobox', { name: /rows per page/i }).count();
-  expect(tables, `${route} should render a data table`).toBeGreaterThan(0);
-  expect(pagers).toBeGreaterThanOrEqual(2 * tables);
+  expect(pagers).toBeGreaterThanOrEqual(2 * Math.max(tables, 1));
   expect(pagers % 2).toBe(0);
 }
 

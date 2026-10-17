@@ -26,7 +26,7 @@ test('every demo tenant exposes its seeded contract, invoice, payment, and depos
     await expect(page.getByRole('cell', { name: `${tenantName} Customer`, exact: true }).first()).toBeVisible();
 
     await clickMenuLink(page, 'Master Data', 'Renewal Tracker');
-    await expect(page.getByRole('heading', { name: 'Renewal tracker' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Renewal tracker', level: 1 })).toBeVisible();
     await clickMenuLink(page, 'Billing', 'Security Deposits');
     await expect(page.getByRole('heading', { name: 'Security-deposit ledger' })).toBeVisible();
     await expect(page.getByText(`${tenantName} Customer`, { exact: true }).last()).toBeVisible();
