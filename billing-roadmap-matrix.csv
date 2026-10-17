@@ -83,7 +83,7 @@ shared-engine,Client ERP integration,Billing as the licence and invoice source f
 auth,Platform and security,Real login and sessions,full,full,full,,stub,Demo identity picker. The cookie is the raw user id. Passwords are stored in plain text.,src/lib/session.ts,H,M,build,P0,Blocks real use. Reuse the pattern from servez or PrepVault.,build,P0,,"demo mode keeps current behavior. can byuild real login and session as well.
 ",2026-10-17T14:03:47.106Z
 db,Platform and security,Production database and migrations,full,full,full,,partial,"One SQLite file, schema created on start",src/lib/tenant-store.ts:95,H,M,build,P0,Managed Postgres gives durability and backups.,build,P0,,,2026-10-17T13:21:37.903Z
-deploy,Platform and security,Hosted deploy with staging,full,full,full,,none,No deploy config,,H,S,build,P0,Use the same target as the other apps.,build,P0,,"we will use hetzner and keep similar flow like nexio_stock + cwerp
+deploy,Platform and security,Hosted deploy with staging,full,full,full,,partial,"Docker image, compose with staging and production, Caddy, health check and manual deploy workflow exist. Built and smoke-tested locally only; never run against a Hetzner host. Database is still SQLite.",deploy/deploy-remote.sh,H,S,build,P0,Use the same target as the other apps.,build,P0,,"we will use hetzner and keep similar flow like nexio_stock + cwerp
 ",2026-10-17T13:25:28.288Z
 jobs,Platform and security,Scheduled jobs,full,full,full,,none,Everything runs on click,,H,M,build,P1,"Subscription runs, reminders and dunning depend on it.",build,P1,,"lets also keep enable disable of schedule including manual as well
 ",2026-10-17T14:01:58.017Z
