@@ -1,4 +1,5 @@
 import type { DatabaseSync } from 'node:sqlite';
+import { stateFromGstin } from '../gst';
 import { now } from './shared';
 
 type TenantSeed = { id: string; name: string; adminEmail: string; userEmail: string };
@@ -37,7 +38,8 @@ export function seed(database: DatabaseSync) {
     CREATE INDEX IF NOT EXISTS task_notes_tenant_date ON task_notes(tenant_id, note_date DESC);
     CREATE TABLE IF NOT EXISTS bulk_invoice_runs (id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL REFERENCES tenants(id), billing_period TEXT NOT NULL, generated_count INTEGER NOT NULL, skipped_count INTEGER NOT NULL, details TEXT NOT NULL, created_at TEXT NOT NULL, UNIQUE(tenant_id, billing_period));
   `);
-  for (const statement of ["ALTER TABLE tenants ADD COLUMN created_at TEXT NOT NULL DEFAULT ''", "ALTER TABLE tenants ADD COLUMN updated_at TEXT NOT NULL DEFAULT ''", "ALTER TABLE users ADD COLUMN created_at TEXT NOT NULL DEFAULT ''", "ALTER TABLE quotations ADD COLUMN archived_at TEXT", 'ALTER TABLE security_deposits ADD COLUMN settled_minor INTEGER NOT NULL DEFAULT 0', 'ALTER TABLE security_deposits ADD COLUMN settlement_note TEXT', 'ALTER TABLE security_deposits ADD COLUMN settled_at TEXT']) { try { database.exec(statement); } catch { /* Existing database. */ } }
+  for (const statement of ["ALTER TABLE tenants ADD COLUMN created_at TEXT NOT NULL DEFAULT ''", "ALTER TABLE tenants ADD COLUMN updated_at TEXT NOT NULL DEFAULT ''", "ALTER TABLE users ADD COLUMN created_at TEXT NOT NULL DEFAULT ''", "ALTER TABLE quotations ADD COLUMN archived_at TEXT", 'ALTER TABLE security_deposits ADD COLUMN settled_minor INTEGER NOT NULL DEFAULT 0', 'ALTER TABLE security_deposits ADD COLUMN settlement_note TEXT', 'ALTER TABLE security_deposits ADD COLUMN settled_at TEXT', "ALTER TABLE tenant_settings ADD COLUMN legal_name TEXT NOT NULL DEFAULT ''", "ALTER TABLE tenant_settings ADD COLUMN state_code TEXT NOT NULL DEFAULT ''", "ALTER TABLE customers ADD COLUMN state_code TEXT NOT NULL DEFAULT ''", "ALTER TABLE services ADD COLUMN hsn_sac TEXT NOT NULL DEFAULT ''"]) { try { database.exec(statement); } catch { /* Existing database. */ } }
+  backfillStateCodes(database);
   database.prepare("UPDATE users SET created_at = COALESCE((SELECT NULLIF(tenants.created_at, '') FROM tenants WHERE tenants.id = users.tenant_id), ?) WHERE created_at = ''").run(now());
 
   const tenantCount = database.prepare('SELECT COUNT(*) AS count FROM tenants').get() as { count: number };
@@ -50,7 +52,7 @@ export function seed(database: DatabaseSync) {
     const insertTenant = database.prepare('INSERT INTO tenants (id, name, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?)');
     const insertUser = database.prepare('INSERT INTO users (id, tenant_id, name, email, role, password, status) VALUES (?, ?, ?, ?, ?, ?, ?)');
     const insertRecord = database.prepare('INSERT INTO tenant_records (id, tenant_id, label) VALUES (?, ?, ?)');
-    const insertCustomer = database.prepare('INSERT INTO customers (id, tenant_id, company_name, contact_name, email, phone, gstin, billing_address, invoice_delivery, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
+    const insertCustomer = database.prepare('INSERT INTO customers (id, tenant_id, company_name, contact_name, email, phone, gstin, state_code, billing_address, invoice_delivery, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
     const insertService = database.prepare('INSERT INTO services (id, tenant_id, name, description, status, monthly_minor, quarterly_minor, half_yearly_minor, annual_minor, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
     for (const tenant of tenantSeeds) {
       insertTenant.run(tenant.id, tenant.name, 'active', timestamp, timestamp);
@@ -58,7 +60,7 @@ export function seed(database: DatabaseSync) {
       insertUser.run(`${tenant.id}-user`, tenant.id, `${tenant.name} User`, tenant.userEmail, 'user', 'admin123', 'active');
       insertRecord.run(`${tenant.id}-baseline`, tenant.id, `${tenant.name} baseline demo record`);
       const now = '2026-10-01T09:00:00.000Z';
-      insertCustomer.run(`${tenant.id}-customer`, tenant.id, `${tenant.name} Customer`, 'Billing Contact', `billing@${tenant.id}.example`, '+91 90000 00000', '29ABCDE1234F1Z5', 'Demo billing address, Bengaluru', 'monthly', 'active', now, now);
+      insertCustomer.run(`${tenant.id}-customer`, tenant.id, `${tenant.name} Customer`, 'Billing Contact', `billing@${tenant.id}.example`, '+91 90000 00000', '29AAGCB7383J1Z4', '29', 'Demo billing address, Bengaluru', 'monthly', 'active', now, now);
       insertService.run(`${tenant.id}-service`, tenant.id, 'Managed billing service', 'Seeded recurring billing service', 'active', 100000, 280000, 540000, 1000000, now, now);
     }
     database.exec('COMMIT');
@@ -66,6 +68,15 @@ export function seed(database: DatabaseSync) {
   } catch (error) {
     database.exec('ROLLBACK');
     throw error;
+  }
+}
+/** Older rows kept free-text GSTINs. Fill the state from every one that passes validation and leave the rest blank. */
+export function backfillStateCodes(database: DatabaseSync) {
+  for (const table of ['customers', 'tenant_settings'] as const) {
+    const key = table === 'customers' ? 'id' : 'tenant_id';
+    const rows = database.prepare(`SELECT ${key} AS key, gstin FROM ${table} WHERE state_code = '' AND gstin != ''`).all() as Array<{ key: string; gstin: string }>;
+    const update = database.prepare(`UPDATE ${table} SET state_code = ? WHERE ${key} = ?`);
+    for (const row of rows) { const state = stateFromGstin(row.gstin); if (state) update.run(state.stateCode, row.key); }
   }
 }
 export function seedSettings(database: DatabaseSync) { const rows = database.prepare('SELECT id, name FROM tenants').all() as Array<{ id: string; name: string }>; const insert = database.prepare(`INSERT OR IGNORE INTO tenant_settings (tenant_id, company_name, gstin, address, invoice_prefix, payment_terms_days, footer, invoice_template, email_subject, email_body, smtp_host, smtp_port, smtp_from, log_retention_days, logo_data_url, stamp_data_url, signature_data_url, updated_at) VALUES (?, ?, '', '', ?, 14, 'Thank you for your business.', 'Invoice {{invoiceNumber}} for {{customerName}}', 'Your invoice {{invoiceNumber}}', 'Hello {{customerName}}, please find your invoice attached.', '', 587, '', 30, '', '', '', ?)`); for (const row of rows) insert.run(row.id, row.name, row.name.slice(0, 3).toUpperCase(), '2026-10-01T09:00:00.000Z'); }

@@ -1,5 +1,6 @@
 import type { DatabaseSync } from 'node:sqlite';
 import { now, requireTenantMember } from './shared';
+import { gstSnapshotFields, resolveSupply } from '../invoice-gst';
 import { contractFromRow } from './contracts';
 import { settingsFromRow } from './settings';
 import type { AppSession, Contract, InvoiceSnapshot, BulkInvoiceAdditionalLine, BulkInvoiceProposal, BulkInvoiceSkip, BulkInvoicePreview, BulkInvoiceRun, BulkInvoiceGeneration } from './types';
@@ -57,8 +58,10 @@ export function createBulkInvoiceMethods(database: DatabaseSync) {
         const insertInvoice = database.prepare('INSERT INTO invoices (id, tenant_id, contract_id, customer_id, invoice_number, invoice_date, due_date, taxable_minor, gst_rate, gst_minor, total_minor, paid_minor, status, snapshot, issued_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?)');
         const markAdditionalBilled = database.prepare('UPDATE additional_services SET billed_at = ?, updated_at = ? WHERE id = ? AND tenant_id = ? AND billed_at IS NULL');
         for (const [index, proposal] of preview.proposed.entries()) {
-          const customer = database.prepare('SELECT company_name, email, billing_address FROM customers WHERE id = ? AND tenant_id = ?').get(proposal.customerId, session.tenantId) as Record<string, unknown>;
-          const snapshot: InvoiceSnapshot = { companyName: settings.companyName, gstin: settings.gstin, address: settings.address, logoDataUrl: settings.logoDataUrl, stampDataUrl: settings.stampDataUrl, signatureDataUrl: settings.signatureDataUrl, customerName: String(customer.company_name), customerEmail: String(customer.email), customerAddress: String(customer.billing_address), gstRate: proposal.gstRate, footer: settings.footer };
+          const customer = database.prepare('SELECT company_name, email, billing_address, gstin, state_code FROM customers WHERE id = ? AND tenant_id = ?').get(proposal.customerId, session.tenantId) as Record<string, unknown>;
+          const supply = resolveSupply(settings.stateCode, { gstin: String(customer.gstin), stateCode: String(customer.state_code) });
+          const gstFields = gstSnapshotFields({ seller: settings, supply, lines: [{ taxType: proposal.gstRate > 0 ? supply.expectedTaxType ?? 'igst' : 'none', gstRate: proposal.gstRate }], requireHsn: false });
+          const snapshot: InvoiceSnapshot = { companyName: settings.companyName, gstin: settings.gstin, address: settings.address, logoDataUrl: settings.logoDataUrl, stampDataUrl: settings.stampDataUrl, signatureDataUrl: settings.signatureDataUrl, customerName: String(customer.company_name), customerEmail: String(customer.email), customerAddress: String(customer.billing_address), customerGstin: String(customer.gstin), gstRate: proposal.gstRate, footer: settings.footer, ...gstFields };
           const number = `${settings.invoicePrefix}-${String(sequenceStart + index + 1).padStart(4, '0')}`;
           insertInvoice.run(`${session.tenantId}-invoice-${crypto.randomUUID()}`, session.tenantId, proposal.contractId, proposal.customerId, number, proposal.invoiceDate, proposal.dueDate, proposal.taxableMinor, proposal.gstRate, proposal.gstMinor, proposal.totalMinor, 'issued', JSON.stringify(snapshot), timestamp);
           for (const line of proposal.additionalLines) markAdditionalBilled.run(timestamp, timestamp, line.id, session.tenantId);

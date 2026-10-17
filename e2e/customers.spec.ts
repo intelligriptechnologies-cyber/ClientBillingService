@@ -29,7 +29,7 @@ test('a tenant can create, filter, edit, and deactivate its customer', async ({ 
   await expect(page.getByText('Orbit Labs', { exact: true })).toBeVisible();
   customerRow = page.getByRole('row', { name: /Orbit Labs/ });
   await customerRow.getByRole('button', { name: 'Edit' }).click();
-  await page.getByLabel('GSTIN').fill('29ABCDE1234F1Z5');
+  await page.getByLabel('GSTIN').fill('29AAGCB7383J1Z4');
   await page.getByLabel('Billing address').fill(longAddress);
   await page.getByRole('button', { name: 'Save changes' }).click();
   await expect(customerRow.getByRole('cell').nth(0).locator('.subtle')).toHaveText(`${longAddress.slice(0, 30)}...`);

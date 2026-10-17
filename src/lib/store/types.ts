@@ -1,4 +1,6 @@
 import type { InvoiceLine, InvoiceLineInput } from '../invoice-lines';
+import type { Gstr1Section } from '../gst';
+import type { GstSnapshotFields } from '../invoice-gst';
 
 export type AppRole = 'superadmin' | 'admin' | 'user';
 export type DemoIdentity = { id: string; name: string; email: string; role: AppRole; tenantId: string | null; tenantName: string | null };
@@ -13,16 +15,16 @@ export type TenantUserInput = { name: string; email: string; role: TenantUser['r
 export type TenantUserUpdate = Partial<TenantUserInput> & { status?: TenantUser['status'] };
 export type BillingFrequency = 'monthly' | 'quarterly' | 'halfYearly' | 'annual';
 export type ServicePrices = Record<BillingFrequency, number>;
-export type TenantService = { id: string; name: string; description: string; status: 'active' | 'inactive'; prices: ServicePrices; createdAt: string; updatedAt: string };
-export type ServiceInput = { name: string; description?: string; prices: ServicePrices };
+export type TenantService = { id: string; name: string; description: string; hsnSac: string; status: 'active' | 'inactive'; prices: ServicePrices; createdAt: string; updatedAt: string };
+export type ServiceInput = { name: string; description?: string; hsnSac?: string; prices: ServicePrices };
 export type ServiceUpdate = Partial<ServiceInput> & { status?: TenantService['status'] };
 export type QuotationLine = { id: string; serviceId: string; serviceName: string; frequency: BillingFrequency; quantity: number; unitPriceMinor: number; lineTotalMinor: number };
 export type Quotation = { id: string; quoteNumber: string; customerName: string; customerEmail: string | null; status: 'draft' | 'archived'; lines: QuotationLine[]; totalMinor: number; createdAt: string };
 export type QuotationInput = { customerName: string; customerEmail?: string; lines: Array<{ serviceId: string; frequency: BillingFrequency; quantity: number }> };
 export type CustomerStatus = 'active' | 'inactive';
 export type InvoiceDelivery = 'monthly' | 'quarterly' | 'email' | 'manual';
-export type CustomerRecord = { id: string; tenantId: string; companyName: string; contactName: string; email: string; phone: string; gstin: string; billingAddress: string; invoiceDelivery: InvoiceDelivery; status: CustomerStatus; createdAt: string; updatedAt: string };
-export type CustomerInput = Pick<CustomerRecord, 'companyName' | 'contactName' | 'email' | 'phone' | 'gstin' | 'billingAddress' | 'invoiceDelivery'>;
+export type CustomerRecord = { id: string; tenantId: string; companyName: string; contactName: string; email: string; phone: string; gstin: string; stateCode: string; billingAddress: string; invoiceDelivery: InvoiceDelivery; status: CustomerStatus; createdAt: string; updatedAt: string };
+export type CustomerInput = Pick<CustomerRecord, 'companyName' | 'contactName' | 'email' | 'phone' | 'gstin' | 'billingAddress' | 'invoiceDelivery'> & { stateCode?: string };
 export type CustomerQuery = { search?: string; month?: string; status?: CustomerStatus; invoiceDelivery?: InvoiceDelivery; page?: number; pageSize?: number };
 export type ContractStatus = 'active' | 'inactive';
 export type Contract = { id: string; tenantId: string; customerId: string; customerName: string; name: string; serviceIds: string[]; services: string[]; startDate: string; endDate: string; valueMinor: number; paymentTermsDays: number; billingFrequency: BillingFrequency; invoiceMonths: number[]; cycleDay: number; escalationPercent: number; escalationReviewDate: string | null; renewalNoticeDays: number; securityDepositMinor: number; status: ContractStatus; createdAt: string; updatedAt: string };
@@ -47,13 +49,13 @@ export type AdditionalServiceList = { items: AdditionalService[]; total: number 
 export type TaskNote = { id: string; tenantId: string; customerId: string; customerName: string; date: string; note: string; createdAt: string; updatedAt: string };
 export type TaskNoteInput = { customerId: string; date: string; note: string };
 export type TaskNoteQuery = { customerId?: string; date?: string };
-export type TenantSettings = { companyName: string; gstin: string; address: string; invoicePrefix: string; paymentTermsDays: number; footer: string; invoiceTemplate: string; emailSubject: string; emailBody: string; smtpHost: string; smtpPort: number; smtpFrom: string; logRetentionDays: number; logoDataUrl: string; stampDataUrl: string; signatureDataUrl: string; updatedAt: string };
-export type TenantSettingsInput = Omit<TenantSettings, 'updatedAt'>;
+export type TenantSettings = { companyName: string; legalName: string; gstin: string; stateCode: string; address: string; invoicePrefix: string; paymentTermsDays: number; footer: string; invoiceTemplate: string; emailSubject: string; emailBody: string; smtpHost: string; smtpPort: number; smtpFrom: string; logRetentionDays: number; logoDataUrl: string; stampDataUrl: string; signatureDataUrl: string; updatedAt: string };
+export type TenantSettingsInput = Omit<TenantSettings, 'updatedAt' | 'stateCode' | 'legalName'> & { legalName?: string };
 export type OperationalLog = { id: string; kind: 'feature-flow' | 'error'; message: string; createdAt: string };
 export type InvoiceStatus = 'issued' | 'paid' | 'partial' | 'overdue' | 'void';
-export type InvoiceSnapshot = { companyName: string; gstin: string; address: string; logoDataUrl: string; stampDataUrl: string; signatureDataUrl: string; customerName: string; customerEmail: string; customerAddress: string; gstRate: number; footer: string; venue?: string; customerPan?: string; customerGstin?: string; gstApplicable?: boolean; notes?: string; lines?: InvoiceLine[] };
+export type InvoiceSnapshot = { companyName: string; gstin: string; address: string; logoDataUrl: string; stampDataUrl: string; signatureDataUrl: string; customerName: string; customerEmail: string; customerAddress: string; gstRate: number; footer: string; venue?: string; customerPan?: string; customerGstin?: string; gstApplicable?: boolean; notes?: string; lines?: InvoiceLine[] } & Partial<GstSnapshotFields>;
 export type TenantInvoice = { id: string; tenantId: string; contractId: string | null; customerId: string; customerName: string; invoiceNumber: string; invoiceDate: string; dueDate: string; taxableMinor: number; gstRate: number; gstMinor: number; totalMinor: number; paidMinor: number; status: InvoiceStatus; snapshot: InvoiceSnapshot; issuedAt: string };
-export type InvoiceInput = { contractId?: string; customerId?: string; invoiceDate: string; dueDate: string; taxableMinor?: number; gstRate?: number; venue?: string; customerPan?: string; customerGstin?: string; billingAddress?: string; gstApplicable?: boolean; notes?: string; lines?: InvoiceLineInput[] };
+export type InvoiceInput = { contractId?: string; customerId?: string; invoiceDate: string; dueDate: string; taxableMinor?: number; gstRate?: number; venue?: string; customerPan?: string; customerGstin?: string; billingAddress?: string; gstApplicable?: boolean; notes?: string; lines?: InvoiceLineInput[]; taxSplitOverrideReason?: string };
 export type InvoiceQuery = { search?: string; month?: string; status?: InvoiceStatus; page?: number; pageSize?: number };
 export type InvoiceList = { items: TenantInvoice[]; total: number };
 export type BulkInvoiceAdditionalLine = { id: string; description: string; priceMinor: number; serviceDate: string };
@@ -69,5 +71,6 @@ export type PaymentQuery = { customerId?: string; search?: string; month?: strin
 export type PaymentList = { items: TenantPayment[]; total: number; totalAppliedMinor: number };
 export type PendingPayment = TenantInvoice & { outstandingMinor: number; daysOverdue: number; agingBucket: 'Current' | '1–30' | '31–60' | '61–90' | '90+'; reminders: PaymentReminder[] };
 export type PaymentReminder = { id: string; invoiceId: string; channel: 'email' | 'whatsapp'; note: string; createdAt: string };
-export type GstSalesRow = { invoiceId: string; invoiceNumber: string; invoiceDate: string; customerName: string; customerGstin: string; taxableMinor: number; gstMinor: number; totalMinor: number; igstMinor: number; cgstMinor: number; sgstMinor: number; netGstMinor: number };
-export type GstSalesReport = { month: string; companyName: string; gstin: string; items: GstSalesRow[]; totals: { taxableMinor: number; gstMinor: number; totalMinor: number; igstMinor: number; cgstMinor: number; sgstMinor: number; netGstMinor: number } };
+export type GstSalesRow = { section: Gstr1Section; invoiceId: string; invoiceNumber: string; invoiceDate: string; customerName: string; customerGstin: string; taxableMinor: number; gstMinor: number; totalMinor: number; igstMinor: number; cgstMinor: number; sgstMinor: number; netGstMinor: number };
+export type HsnSummaryRow = { hsn: string; description: string; quantity: number; taxableMinor: number; taxMinor: number };
+export type GstSalesReport = { month: string; companyName: string; gstin: string; items: GstSalesRow[]; hsnSummary: HsnSummaryRow[]; totals: { taxableMinor: number; gstMinor: number; totalMinor: number; igstMinor: number; cgstMinor: number; sgstMinor: number; netGstMinor: number } };

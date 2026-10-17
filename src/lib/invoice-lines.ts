@@ -1,5 +1,5 @@
 export type InvoiceTaxType = 'none' | 'igst' | 'cgst_sgst';
-export type InvoiceLineInput = { description: string; quantity: number; rateMinor: number; taxType: InvoiceTaxType; gstRate: number };
+export type InvoiceLineInput = { description: string; quantity: number; rateMinor: number; taxType: InvoiceTaxType; gstRate: number; hsnSac?: string };
 export type InvoiceLine = InvoiceLineInput & { amountMinor: number; gstMinor: number; totalMinor: number };
 
 export function calculateInvoiceLines(lines: InvoiceLineInput[]): { lines: InvoiceLine[]; taxableMinor: number; gstMinor: number; totalMinor: number } {
@@ -13,7 +13,7 @@ export function calculateInvoiceLines(lines: InvoiceLineInput[]): { lines: Invoi
     const amountMinor = Math.round(line.quantity * line.rateMinor);
     if (!Number.isSafeInteger(amountMinor)) throw new Error('Line amount is too large.');
     const gstMinor = line.taxType === 'none' ? 0 : Math.round(amountMinor * line.gstRate / 100);
-    return { ...line, description: line.description.trim(), amountMinor, gstMinor, totalMinor: amountMinor + gstMinor };
+    return { ...line, description: line.description.trim(), ...(line.hsnSac === undefined ? {} : { hsnSac: line.hsnSac.trim() }), amountMinor, gstMinor, totalMinor: amountMinor + gstMinor };
   });
   const taxableMinor = calculated.reduce((sum, line) => sum + line.amountMinor, 0);
   const gstMinor = calculated.reduce((sum, line) => sum + line.gstMinor, 0);

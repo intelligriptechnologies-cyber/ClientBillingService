@@ -73,6 +73,10 @@ export function stateName(code: string): string | undefined {
   return Object.hasOwn(STATE_NAMES, code) ? STATE_NAMES[code] : undefined;
 }
 
+export function listStates(): Array<{ code: string; name: string }> {
+  return Object.entries(STATE_NAMES).map(([code, name]) => ({ code, name }));
+}
+
 function asStateCode(code: string | undefined): StateCode | undefined {
   return code !== undefined && stateName(code) !== undefined ? (code as StateCode) : undefined;
 }

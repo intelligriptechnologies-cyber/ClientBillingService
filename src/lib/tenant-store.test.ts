@@ -48,7 +48,7 @@ describe('tenant store', () => {
     const store = storeForTest(); const session = store.authenticate('nexio-admin');
     if (!session) throw new Error('Expected tenant session');
     const customer = store.listCustomers(session).items[0];
-    const details = { customerId: customer.id, invoiceDate: '2026-10-07', dueDate: '2026-10-21', venue: 'Bengaluru', billingAddress: 'New billing address', customerPan: 'ABCDE1234F', customerGstin: '29ABCDE1234F1Z5', gstApplicable: true, notes: 'Monthly booking' };
+    const details = { customerId: customer.id, invoiceDate: '2026-10-07', dueDate: '2026-10-21', venue: 'Bengaluru', billingAddress: 'New billing address', customerPan: 'ABCDE1234F', customerGstin: '29AAGCB7383J1Z4', gstApplicable: true, notes: 'Monthly booking' };
     const first = store.createIssuedInvoice(session, { ...details, lines: [
       { description: 'Venue booking', quantity: 2, rateMinor: 12500, taxType: 'igst', gstRate: 18 },
       { description: 'Security deposit', quantity: 1, rateMinor: 5000, taxType: 'none', gstRate: 0 },
@@ -181,15 +181,15 @@ describe('tenant store', () => {
     const evo = store.authenticate('evo-admin');
     if (!nexio || !evo) throw new Error('Expected seeded sessions');
 
-    store.updateTenantSettings(nexio, { ...store.getTenantSettings(nexio), gstin: '29ABCDE1234F1Z5' });
+    store.updateTenantSettings(nexio, { ...store.getTenantSettings(nexio), gstin: '29AAGCB7383J1Z4' });
     const customer = store.listCustomers(nexio, {}).items[0];
-    const interstate = store.createCustomer(nexio, { companyName: 'Interstate Buyer', contactName: 'Ravi', email: 'ravi@example.com', phone: '9000000000', gstin: '27ABCDE1234F1Z5', billingAddress: 'Mumbai', invoiceDelivery: 'email' });
+    const interstate = store.createCustomer(nexio, { companyName: 'Interstate Buyer', contactName: 'Ravi', email: 'ravi@example.com', phone: '9000000000', gstin: '27AAPFU0939F1ZV', billingAddress: 'Mumbai', invoiceDelivery: 'email' });
     store.createIssuedInvoice(nexio, { customerId: customer.id, invoiceDate: '2026-11-02', dueDate: '2026-11-16', taxableMinor: 10_000, gstRate: 18 });
     store.createIssuedInvoice(nexio, { customerId: interstate.id, invoiceDate: '2026-11-03', dueDate: '2026-11-17', taxableMinor: 20_000, gstRate: 18 });
 
     const report = store.getGstSalesReport(nexio, '2026-11');
 
-    expect(report).toMatchObject({ month: '2026-11', companyName: 'Nexio Hyper', gstin: '29ABCDE1234F1Z5', totals: { taxableMinor: 30_000, gstMinor: 5_400, totalMinor: 35_400, igstMinor: 3_600, cgstMinor: 900, sgstMinor: 900, netGstMinor: 5_400 } });
+    expect(report).toMatchObject({ month: '2026-11', companyName: 'Nexio Hyper', gstin: '29AAGCB7383J1Z4', totals: { taxableMinor: 30_000, gstMinor: 5_400, totalMinor: 35_400, igstMinor: 3_600, cgstMinor: 900, sgstMinor: 900, netGstMinor: 5_400 } });
     expect(report.items).toEqual(expect.arrayContaining([
       expect.objectContaining({ customerName: customer.companyName, cgstMinor: 900, sgstMinor: 900, igstMinor: 0 }),
       expect.objectContaining({ customerName: 'Interstate Buyer', igstMinor: 3_600, cgstMinor: 0, sgstMinor: 0 }),
@@ -430,7 +430,7 @@ describe('tenant store', () => {
   it('creates, filters, changes status, and scopes customers to the active tenant', () => {
     const store = storeForTest(); const nexio = store.authenticate('nexio-admin'); const evo = store.authenticate('evo-admin');
     if (!nexio || !evo) throw new Error('Expected seeded sessions');
-    const created = store.createCustomer(nexio, { companyName: 'Meridian Labs', contactName: 'Aarav Mehta', email: 'aarav@meridian.example', phone: '+91 98765 43210', gstin: '29ABCDE1234F1Z5', billingAddress: '18 Meridian Road', invoiceDelivery: 'monthly' });
+    const created = store.createCustomer(nexio, { companyName: 'Meridian Labs', contactName: 'Aarav Mehta', email: 'aarav@meridian.example', phone: '+91 98765 43210', gstin: '29AAGCB7383J1Z4', billingAddress: '18 Meridian Road', invoiceDelivery: 'monthly' });
     expect(store.listCustomers(nexio, { search: 'meridian' }).items).toEqual([expect.objectContaining({ id: created.id })]);
     expect(store.listCustomers(evo, { search: 'meridian' }).total).toBe(0);
     store.setCustomerStatus(nexio, created.id, 'inactive');
@@ -447,7 +447,7 @@ describe('tenant store', () => {
     const store = storeForTest(); const nexio = store.authenticate('nexio-admin'); const evo = store.authenticate('evo-admin');
     if (!nexio || !evo) throw new Error('Expected seeded sessions');
     const saved = store.updateTenantSettings(nexio, {
-      companyName: 'Nexio Billing Services', gstin: '29ABCDE1234F1Z5', address: '42 Ledger Lane, Bengaluru',
+      companyName: 'Nexio Billing Services', gstin: '29AAGCB7383J1Z4', address: '42 Ledger Lane, Bengaluru',
       invoicePrefix: 'NX', paymentTermsDays: 21, footer: 'Thank you for your business.',
       invoiceTemplate: 'Invoice {{invoiceNumber}} for {{customerName}}', emailSubject: 'Your invoice {{invoiceNumber}}',
       emailBody: 'Hello {{customerName}}, please find your invoice attached.', smtpHost: 'smtp.demo.local', smtpPort: 2525,
