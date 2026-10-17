@@ -1,3 +1,5 @@
+import { DEFAULT_ACCENT } from './invoice-format';
+
 /** Building blocks shared by every printable document. The on-screen preview and the PDF both receive this exact markup. */
 
 const ESCAPES: Record<string, string> = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
@@ -68,17 +70,39 @@ table { width: 100%; border-collapse: collapse; }
 .signatory p { border-top: 1px solid #17232d; margin-top: 4px; padding-top: 3px; }
 `;
 
-export function documentShell(title: string, body: string): string {
+/** Tighter spacing and type for the compact layout. Appended after the base styles, so a classic document is byte for byte what it was. */
+const COMPACT_STYLES = `
+@page { size: A4; margin: 10mm; }
+.compact { padding: 10mm; font-size: 10px; line-height: 1.3; }
+@media print { .compact { padding: 0; } }
+.compact h1 { font-size: 17px; }
+.compact h2 { font-size: 12px; }
+.compact .masthead { padding-bottom: 8px; border-bottom-width: 1px; }
+.compact .logo { max-height: 38px; }
+.compact .parties { margin-top: 8px; gap: 12px; }
+.compact .lines { margin-top: 8px; }
+.compact .lines th { padding: 3px 5px; }
+.compact .lines td { padding: 3px 5px; }
+.compact .summary { margin-top: 8px; }
+.compact .totals th, .compact .totals td { padding: 1px 0; }
+.compact .closing { margin-top: 10px; }
+.compact .marks { min-height: 44px; }
+`;
+
+export type ShellOptions = { accent?: string; compact?: boolean; extraStyles?: string };
+
+export function documentShell(title: string, body: string, { accent = DEFAULT_ACCENT, compact = false, extraStyles = '' }: ShellOptions = {}): string {
+  const styles = STYLES.replaceAll(DEFAULT_ACCENT, accent) + (compact ? COMPACT_STYLES : '') + extraStyles;
   return `<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>${escapeHtml(title)}</title>
-<style>${STYLES}</style>
+<style>${styles}</style>
 </head>
 <body>
-<main class="sheet">
+<main class="sheet${compact ? ' compact' : ''}">
 ${body}
 </main>
 </body>

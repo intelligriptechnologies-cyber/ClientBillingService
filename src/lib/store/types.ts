@@ -1,6 +1,7 @@
 import type { InvoiceLine, InvoiceLineInput } from '../invoice-lines';
 import type { Gstr1Section } from '../gst';
 import type { GstSnapshotFields } from '../invoice-gst';
+import type { SnapshotFormat } from '../invoice-format';
 
 export type AppRole = 'superadmin' | 'admin' | 'user';
 export type DemoIdentity = { id: string; name: string; email: string; role: AppRole; tenantId: string | null; tenantName: string | null };
@@ -53,9 +54,9 @@ export type TenantSettings = { companyName: string; legalName: string; gstin: st
 export type TenantSettingsInput = Omit<TenantSettings, 'updatedAt' | 'stateCode' | 'legalName'> & { legalName?: string };
 export type OperationalLog = { id: string; kind: 'feature-flow' | 'error'; message: string; createdAt: string };
 export type InvoiceStatus = 'issued' | 'paid' | 'partial' | 'overdue' | 'void';
-export type InvoiceSnapshot = { companyName: string; gstin: string; address: string; logoDataUrl: string; stampDataUrl: string; signatureDataUrl: string; customerName: string; customerEmail: string; customerAddress: string; gstRate: number; footer: string; invoiceTemplate?: string; venue?: string; customerPan?: string; customerGstin?: string; gstApplicable?: boolean; notes?: string; lines?: InvoiceLine[] } & Partial<GstSnapshotFields>;
+export type InvoiceSnapshot = { companyName: string; gstin: string; address: string; logoDataUrl: string; stampDataUrl: string; signatureDataUrl: string; customerName: string; customerEmail: string; customerAddress: string; gstRate: number; footer: string; invoiceTemplate?: string; venue?: string; customerPan?: string; customerGstin?: string; gstApplicable?: boolean; notes?: string; lines?: InvoiceLine[]; format?: SnapshotFormat } & Partial<GstSnapshotFields>;
 export type TenantInvoice = { id: string; tenantId: string; contractId: string | null; customerId: string; customerName: string; invoiceNumber: string; invoiceDate: string; dueDate: string; taxableMinor: number; gstRate: number; gstMinor: number; totalMinor: number; paidMinor: number; status: InvoiceStatus; snapshot: InvoiceSnapshot; issuedAt: string };
-export type InvoiceInput = { contractId?: string; customerId?: string; invoiceDate: string; dueDate: string; taxableMinor?: number; gstRate?: number; venue?: string; customerPan?: string; customerGstin?: string; billingAddress?: string; gstApplicable?: boolean; notes?: string; lines?: InvoiceLineInput[]; taxSplitOverrideReason?: string };
+export type InvoiceInput = { contractId?: string; customerId?: string; invoiceDate: string; dueDate: string; taxableMinor?: number; gstRate?: number; venue?: string; customerPan?: string; customerGstin?: string; billingAddress?: string; gstApplicable?: boolean; notes?: string; lines?: InvoiceLineInput[]; taxSplitOverrideReason?: string; formatId?: string };
 export type InvoiceQuery = { search?: string; month?: string; status?: InvoiceStatus; page?: number; pageSize?: number };
 export type InvoiceList = { items: TenantInvoice[]; total: number };
 export type BulkInvoiceAdditionalLine = { id: string; description: string; priceMinor: number; serviceDate: string };

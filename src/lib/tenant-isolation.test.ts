@@ -8,6 +8,9 @@ import * as contract from '../app/api/contracts/[contractId]/route';
 import * as customers from '../app/api/customers/route';
 import * as customer from '../app/api/customers/[customerId]/route';
 import * as deposits from '../app/api/deposits/route';
+import * as invoiceFormats from '../app/api/invoice-formats/route';
+import * as invoiceFormat from '../app/api/invoice-formats/[formatId]/route';
+import * as invoiceFormatDefault from '../app/api/invoice-formats/[formatId]/default/route';
 import * as invoices from '../app/api/invoices/route';
 import * as invoiceBulk from '../app/api/invoices/bulk/route';
 import * as invoiceBulkDownload from '../app/api/invoices/bulk/download/route';
@@ -41,6 +44,8 @@ import * as user from '../app/api/users/[userId]/route';
 
 type Store = ReturnType<typeof createTenantStore>;
 
+const formatDefinition = { layout: 'compact', blocks: { hsnSac: false, bankDetails: true, upiQr: false, signature: true, stamp: true, terms: true, amountInWords: true }, accent: '#1f3a5f', logo: 'show', bankDetails: '', terms: '' };
+
 const world = vi.hoisted(() => ({ store: undefined as unknown, session: null as unknown }));
 
 vi.mock('@/lib/session', () => ({ sessionCookie: 'test', getCurrentSession: async () => world.session }));
@@ -72,9 +77,10 @@ function seedTenantA(session: AppSession) {
   const noteId = store.createTaskNote(session, { customerId, date: '2026-10-05', note: 'Nexio-secret note' }).id;
   const quotationId = store.createQuotation(session, { customerName: 'Nexio-secret prospect', lines: [{ serviceId, frequency: 'monthly', quantity: 1 }] }).id;
   const userId = store.createTenantUser(session, { name: 'Nexio-secret colleague', email: 'secret@nexio.example', role: 'user' }).id;
+  const formatId = store.createInvoiceFormat(session, { name: 'Nexio-secret format', definition: formatDefinition }).id;
   store.recordOperationalError(session, 'nexio-secret-operation', new Error('Nexio-secret failure'));
   return {
-    customerId, contractId, serviceId, additionalServiceId, noteId, quotationId, userId,
+    customerId, contractId, serviceId, additionalServiceId, noteId, quotationId, userId, formatId,
     invoiceId: pending.id,
     invoiceNumber: pending.invoiceNumber,
     paymentId: must(store.listPayments(session).items[0]).id,
@@ -90,7 +96,7 @@ function snapshot(session: AppSession) {
     payments: store.listPayments(session, query), pending: store.listPendingPayments(session), deposits: store.listSecurityDeposits(session),
     renewals: store.listRenewals(session, query), services: store.listServices(session), additional: store.listAdditionalServices(session, query),
     quotations: store.listQuotations(session), notes: store.listTaskNotes(session), users: store.listTenantUsers(session),
-    logs: store.listOperationalLogs(session), settings: store.getTenantSettings(session), bulkRuns: store.listBulkInvoiceRuns(session),
+    logs: store.listOperationalLogs(session), settings: store.getTenantSettings(session), bulkRuns: store.listBulkInvoiceRuns(session), formats: store.listInvoiceFormats(session),
     audit: contractItems.map((item) => store.listContractAudit(session, item.id)),
   };
 }
@@ -125,7 +131,7 @@ afterEach(() => { store.close(); });
 const customerBody = { companyName: 'Hijacked Co', contactName: 'Mallory', email: 'm@evil.example', phone: '1', gstin: '', billingAddress: 'Evil street', invoiceDelivery: 'manual' };
 const contractBody = (f: Fixtures) => ({ name: 'Cross-tenant contract', customerId: f.customerId, serviceIds: [f.serviceId], startDate: '2026-01-01', endDate: '2026-12-31', valueMinor: 1000, paymentTermsDays: 14, billingFrequency: 'monthly', invoiceMonths: [], cycleDay: 1, escalationPercent: 0, escalationReviewDate: '', renewalNoticeDays: 30, securityDepositMinor: 0 });
 
-type Kind = 'customers' | 'contracts' | 'invoices' | 'payments' | 'deposits' | 'renewals' | 'services' | 'additional services' | 'quotations' | 'task notes' | 'users' | 'logs';
+type Kind = 'invoice formats' | 'customers' | 'contracts' | 'invoices' | 'payments' | 'deposits' | 'renewals' | 'services' | 'additional services' | 'quotations' | 'task notes' | 'users' | 'logs';
 type Case = { kind: Kind; name: string; run: (as: AppSession, f: Fixtures) => Promise<Reply>; owns?: (f: Fixtures) => string; read?: boolean; leak?: string };
 
 const id = (key: keyof Fixtures) => (f: Fixtures) => String(f[key]);
@@ -145,6 +151,11 @@ const cases: Case[] = [
   { kind: 'invoices', name: 'PATCH /api/invoices/[id] corrects', run: (as, f) => call(invoice.PATCH, as, { method: 'PATCH', body: { reason: 'hijack', correction: { customerId: f.customerId, invoiceDate: '2026-10-07', dueDate: '2026-10-21', taxableMinor: 100 } }, params: { invoiceId: f.invoiceId } }) },
   { kind: 'invoices', name: 'POST /api/invoices with foreign customer', run: (as, f) => call(invoices.POST, as, { method: 'POST', body: { customerId: f.customerId, invoiceDate: '2026-10-07', dueDate: '2026-10-21', taxableMinor: 100 } }) },
   { kind: 'invoices', name: 'POST /api/invoices with foreign contract', run: (as, f) => call(invoices.POST, as, { method: 'POST', body: { contractId: f.contractId, invoiceDate: '2026-10-07', dueDate: '2026-10-21', taxableMinor: 100 } }) },
+  { kind: 'invoice formats', name: 'GET /api/invoice-formats lists', owns: id('formatId'), run: (as) => call(invoiceFormats.GET, as) },
+  { kind: 'invoice formats', name: 'PUT /api/invoice-formats/[id] updates', run: (as, f) => call(invoiceFormat.PUT, as, { method: 'PUT', body: { name: 'Hijacked', definition: formatDefinition }, params: { formatId: f.formatId } }) },
+  { kind: 'invoice formats', name: 'DELETE /api/invoice-formats/[id] deletes', run: (as, f) => call(invoiceFormat.DELETE, as, { method: 'DELETE', params: { formatId: f.formatId } }) },
+  { kind: 'invoice formats', name: 'POST /api/invoice-formats/[id]/default makes default', run: (as, f) => call(invoiceFormatDefault.POST, as, { method: 'POST', params: { formatId: f.formatId } }) },
+  { kind: 'invoice formats', name: 'POST /api/invoices with foreign formatId', run: (as, f) => call(invoices.POST, as, { method: 'POST', body: { customerId: must(store.listCustomers(as).items[0]).id, formatId: f.formatId, invoiceDate: '2026-10-07', dueDate: '2026-10-21', taxableMinor: 100 } }) },
   { kind: 'invoices', name: 'GET /api/pending-payments lists', owns: id('invoiceId'), run: (as) => call(pendingPayments.GET, as) },
   { kind: 'invoices', name: 'POST /api/pending-payments/[id]/close', run: (as, f) => call(pendingClose.POST, as, { method: 'POST', body: { note: 'hijack' }, params: { invoiceId: f.invoiceId } }) },
   { kind: 'invoices', name: 'POST /api/pending-payments/[id]/reminders', run: (as, f) => call(pendingReminders.POST, as, { method: 'POST', body: { channel: 'email', note: 'hijack' }, params: { invoiceId: f.invoiceId } }) },
