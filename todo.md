@@ -1,0 +1,12 @@
+# Roadmap run todo (branch roadmap/p0-foundations)
+- [ ] Read poteto-mode Principles (done via skill load)
+- [ ] A. Frame: predicate = every build row has passing spec + matrix cell `built`; checkpoint given, user said go local with subagents
+- [ ] B1. Harness: matrix checker + CI workflow + isolation tests
+- [ ] B2. Split tenant-store.ts, no behavior change
+- [ ] B3a. db (Postgres+migrations) -> auth (demo kept) -> deploy (Hetzner config)
+- [ ] B3b. GST core: seller-gstin, client-gstin, pos, nongst, hsn
+- [ ] B3c. pdf -> designer -> email
+- [ ] B3d. tenancy superadmin fix, native PWA
+- [ ] C. Each unit: hypothesis, smallest change, verify on artifact, close GH issue, log row
+- [ ] D. Decision trail in .audit/billing-roadmap.tsv (show-me-your-work)
+- [ ] E. Verify whole vs predicate; cross-model review; reply
