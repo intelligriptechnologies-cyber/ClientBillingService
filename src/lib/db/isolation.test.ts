@@ -29,6 +29,7 @@ const fixtures: Array<[table: string, build: (tenant: string) => Row]> = [
   ['invoice_formats', (t) => ({ id: `${t}-format`, tenant_id: t, name: `${t} format`, definition: { fixture: true }, is_default: 0, created_at: AT, updated_at: AT })],
   ['delivery_log', (t) => ({ id: `${t}-delivery`, tenant_id: t, invoice_id: `${t}-invoice-001`, channel: 'email', to_address: 'billing@example.test', subject: 'Fixture', status: 'sent', attempted_at: AT, attempted_by: `${t}-admin` })],
   ['bulk_invoice_runs', (t) => ({ id: `${t}-bulk-run`, tenant_id: t, billing_period: '2026-09', generated_count: 0, skipped_count: 0, details: [], created_at: AT })],
+  ['invoice_counters', (t) => ({ tenant_id: t, last_number: 2 })],
 ];
 
 interface CatalogRow { table: string; rls: boolean; force: boolean; has_tenant: boolean; app_privileged: boolean }
@@ -193,7 +194,7 @@ describe.skipIf(!process.env.DATABASE_MIGRATE_URL)(`tenant isolation (${DATABASE
               (SELECT md5(string_agg(tablename || policyname || coalesce(qual, '') || coalesce(with_check, ''), ',' ORDER BY tablename, policyname)) FROM pg_policies WHERE schemaname = 'public') AS policies`,
     )).rows[0];
     const before = await fingerprint();
-    expect(before.history).toEqual(['0001_baseline', '0002_tenant_name_unique_ci']);
+    expect(before.history).toEqual(['0001_baseline', '0002_tenant_name_unique_ci', '0003_invoice_counters']);
     await migrate(database.ownerUrl);
     expect(await fingerprint()).toEqual(before);
   });

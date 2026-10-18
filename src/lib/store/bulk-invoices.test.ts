@@ -55,4 +55,21 @@ describeStore(['settings', 'customers', 'contracts', 'additionalServices', 'invo
     expect((await store.listBulkInvoiceRuns(nexio)).filter((run) => run.billingPeriod === '2026-11')).toHaveLength(1);
     expect((await store.listInvoices(nexio, { month: '2026-11', pageSize: 100 })).items.map((invoice) => invoice.contractId).sort()).toEqual(proposed.map((item) => item.contractId).sort());
   });
+
+  it('bills an additional service at the price it ends with when its price changes during the run', async () => {
+    const store = await storeForTest();
+    const nexio = await memberContext(store, 'nexio-admin');
+    await Promise.all([store.listBulkInvoiceRuns(nexio), store.listBulkInvoiceRuns(nexio)]);
+    const contract = (await store.listContracts(nexio)).items[0];
+
+    // Which request goes first varies from run to run, so five months make a stale price show up in nearly every run.
+    for (const month of ['2026-03', '2026-04', '2026-05', '2026-06', '2026-07']) {
+      const extra = await store.createAdditionalService(nexio, { customerId: contract.customerId, contractId: contract.id, serviceDate: `${month}-10`, description: `Extra ${month}`, priceMinor: 10000 });
+      await Promise.allSettled([store.generateBulkInvoices(nexio, month), store.updateAdditionalService(nexio, extra.id, { priceMinor: 40000 })]);
+      const service = (await store.listAdditionalServices(nexio, { billingPeriod: month })).items.find((item) => item.id === extra.id)!;
+      const invoice = (await store.listInvoices(nexio, { month })).items.find((item) => item.contractId === contract.id)!;
+      expect(service.billedAt).not.toBeNull();
+      expect(invoice.taxableMinor).toBe(contract.valueMinor + service.priceMinor);
+    }
+  });
 });

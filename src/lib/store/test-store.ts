@@ -31,8 +31,8 @@ const pgPorts = {
   deposits: { unit: 'D7', ported: true },
   taskNotes: { unit: 'D7', ported: true },
   additionalServices: { unit: 'D7', ported: true },
-  invoices: { unit: 'D8', ported: false },
-  bulkInvoices: { unit: 'D8', ported: false },
+  invoices: { unit: 'D8', ported: true },
+  bulkInvoices: { unit: 'D8', ported: true },
   payments: { unit: 'D9', ported: false },
   reminders: { unit: 'D9', ported: false },
 } satisfies Record<string, { unit: PortUnit; ported: boolean }>;
