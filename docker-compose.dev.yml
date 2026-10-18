@@ -1,0 +1,24 @@
+# Local Postgres for development (ADR 0001, unit D2). Host port 5433 keeps clear of nexio_stock and cwerp on 5432.
+# Passwords here are dev-only placeholders. Production secrets never appear in the repo.
+# Use `npm run db:up` and `npm run db:down`; set COMPOSE_PROJECT_NAME to run a second copy.
+name: cbs-dev
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    ports:
+      - "127.0.0.1:5433:5432"
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres_dev_only
+      POSTGRES_DB: cbs
+    volumes:
+      - cbs_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d cbs"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+volumes:
+  cbs_pgdata:
