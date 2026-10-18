@@ -81,11 +81,11 @@ const SMTP_SECRET = 'nexio-smtp-secret-9f3a';
 async function seedTenantA(session: AppSession) {
   await store.updateTenantSettings(tenantContextOf(session), { ...settingsInput(await store.getTenantSettings(tenantContextOf(session))), smtpHost: 'smtp.nexio-secret.example', smtpFrom: 'billing@nexio-secret.example', smtpUser: 'nexio-smtp-user', smtpPassword: SMTP_SECRET });
   const customerId = must((await store.listCustomers(tenantContextOf(session))).items[0]).id;
-  const contractId = must((await store.listContracts(session)).items[0]).id;
+  const contractId = must((await store.listContracts(tenantContextOf(session))).items[0]).id;
   const serviceId = must((await store.listServices(tenantContextOf(session))).find((item) => item.status === 'active')).id;
   const pending = must((await store.listPendingPayments(session))[0]);
-  const additionalServiceId = (await store.createAdditionalService(session, { customerId, contractId, serviceDate: '2026-10-05', description: 'Nexio-secret extra work', priceMinor: 5000 })).id;
-  const noteId = (await store.createTaskNote(session, { customerId, date: '2026-10-05', note: 'Nexio-secret note' })).id;
+  const additionalServiceId = (await store.createAdditionalService(tenantContextOf(session), { customerId, contractId, serviceDate: '2026-10-05', description: 'Nexio-secret extra work', priceMinor: 5000 })).id;
+  const noteId = (await store.createTaskNote(tenantContextOf(session), { customerId, date: '2026-10-05', note: 'Nexio-secret note' })).id;
   const quotationId = (await store.createQuotation(tenantContextOf(session), { customerName: 'Nexio-secret prospect', lines: [{ serviceId, frequency: 'monthly', quantity: 1 }] })).id;
   const userId = (await store.createTenantUser(tenantContextOf(session), { name: 'Nexio-secret colleague', email: 'secret@nexio.example', role: 'user' })).id;
   const formatId = (await store.createInvoiceFormat(session, { name: 'Nexio-secret format', definition: formatDefinition })).id;
@@ -96,20 +96,20 @@ async function seedTenantA(session: AppSession) {
     invoiceId: pending.id,
     invoiceNumber: pending.invoiceNumber,
     paymentId: must((await store.listPayments(session)).items[0]).id,
-    depositId: must((await store.listSecurityDeposits(session))[0]).id,
+    depositId: must((await store.listSecurityDeposits(tenantContextOf(session)))[0]).id,
   };
 }
 
 async function snapshot(session: AppSession) {
   const query = { pageSize: 1000 };
-  const contractItems = (await store.listContracts(session, query)).items;
+  const contractItems = (await store.listContracts(tenantContextOf(session), query)).items;
   return {
     customers: await store.listCustomers(tenantContextOf(session), query), contracts: contractItems, invoices: await store.listInvoices(session, query),
-    payments: await store.listPayments(session, query), pending: await store.listPendingPayments(session), deposits: await store.listSecurityDeposits(session),
-    renewals: await store.listRenewals(session, query), services: await store.listServices(tenantContextOf(session)), additional: await store.listAdditionalServices(session, query),
-    quotations: await store.listQuotations(tenantContextOf(session)), notes: await store.listTaskNotes(session), users: await store.listTenantUsers(tenantContextOf(session)),
+    payments: await store.listPayments(session, query), pending: await store.listPendingPayments(session), deposits: await store.listSecurityDeposits(tenantContextOf(session)),
+    renewals: await store.listRenewals(tenantContextOf(session), query), services: await store.listServices(tenantContextOf(session)), additional: await store.listAdditionalServices(tenantContextOf(session), query),
+    quotations: await store.listQuotations(tenantContextOf(session)), notes: await store.listTaskNotes(tenantContextOf(session)), users: await store.listTenantUsers(tenantContextOf(session)),
     logs: await store.listOperationalLogs(tenantContextOf(session)), settings: await store.getTenantSettings(tenantContextOf(session)), bulkRuns: await store.listBulkInvoiceRuns(session), formats: await store.listInvoiceFormats(session),
-    audit: await Promise.all(contractItems.map(async (item) => store.listContractAudit(session, item.id))),
+    audit: await Promise.all(contractItems.map(async (item) => store.listContractAudit(tenantContextOf(session), item.id))),
     deliveries: await Promise.all((await store.listInvoices(session, query)).items.map(async (item) => store.listDeliveries(session, item.id))),
     smtp: await store.getSmtpSettings(tenantContextOf(session)),
   };

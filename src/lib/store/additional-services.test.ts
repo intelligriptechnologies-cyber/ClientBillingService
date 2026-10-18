@@ -11,17 +11,17 @@ describeStore(['customers', 'services', 'contracts', 'additionalServices'], 'add
     const customer = (await store.listCustomers(tenantContextOf(nexio), {})).items[0];
     const service = (await store.listServices(tenantContextOf(nexio)))[0];
     if (!customer || !service) throw new Error('Expected seeded billing data');
-    const contract = await store.createContract(nexio, {
+    const contract = await store.createContract(tenantContextOf(nexio), {
       customerId: customer.id, serviceIds: [service.id], name: 'Managed reporting', startDate: '2026-01-01', endDate: '2026-12-31',
       valueMinor: 120000, paymentTermsDays: 14, billingFrequency: 'monthly', invoiceMonths: [], cycleDay: 1,
       escalationPercent: 0, escalationReviewDate: '', renewalNoticeDays: 30, securityDepositMinor: 0,
     });
 
-    const additional = await store.createAdditionalService(nexio, { customerId: customer.id, contractId: contract.id, serviceDate: '2026-10-15', description: 'On-site reporting workshop', priceMinor: 250000, notes: 'Approved by finance.' });
+    const additional = await store.createAdditionalService(tenantContextOf(nexio), { customerId: customer.id, contractId: contract.id, serviceDate: '2026-10-15', description: 'On-site reporting workshop', priceMinor: 250000, notes: 'Approved by finance.' });
 
-    expect((await store.listAdditionalServices(nexio, { billingPeriod: '2026-10' })).items).toEqual(expect.arrayContaining([expect.objectContaining({ id: additional.id, contractId: contract.id, priceMinor: 250000 })]));
-    expect((await store.listAdditionalServices(nexio, { billingPeriod: '2026-11' })).items).not.toEqual(expect.arrayContaining([expect.objectContaining({ id: additional.id })]));
-    expect((await store.listAdditionalServices(evo, {})).items).toEqual([]);
-    await expect(store.createAdditionalService(evo, { customerId: customer.id, contractId: contract.id, serviceDate: '2026-10-15', description: 'Cross tenant', priceMinor: 100, notes: '' })).rejects.toThrow('tenant');
+    expect((await store.listAdditionalServices(tenantContextOf(nexio), { billingPeriod: '2026-10' })).items).toEqual(expect.arrayContaining([expect.objectContaining({ id: additional.id, contractId: contract.id, priceMinor: 250000 })]));
+    expect((await store.listAdditionalServices(tenantContextOf(nexio), { billingPeriod: '2026-11' })).items).not.toEqual(expect.arrayContaining([expect.objectContaining({ id: additional.id })]));
+    expect((await store.listAdditionalServices(tenantContextOf(evo), {})).items).toEqual([]);
+    await expect(store.createAdditionalService(tenantContextOf(evo), { customerId: customer.id, contractId: contract.id, serviceDate: '2026-10-15', description: 'Cross tenant', priceMinor: 100, notes: '' })).rejects.toThrow('tenant');
   });
 });

@@ -63,7 +63,7 @@ describeStore(['settings', 'customers', 'services', 'contracts', 'invoices'], 'i
     if (!nexio || !evo) throw new Error('Expected seeded sessions');
     await registerSeller(store, nexio);
     const customer = (await store.listCustomers(tenantContextOf(nexio), {})).items[0];
-    const contract = await store.createContract(nexio, {
+    const contract = await store.createContract(tenantContextOf(nexio), {
       customerId: customer.id, serviceIds: [(await store.listServices(tenantContextOf(nexio)))[0].id], name: 'Snapshot contract', startDate: '2026-01-01', endDate: '2026-12-31',
       valueMinor: 250000, paymentTermsDays: 14, billingFrequency: 'monthly', invoiceMonths: [], cycleDay: 1,
       escalationPercent: 0, escalationReviewDate: '', renewalNoticeDays: 30, securityDepositMinor: 0,

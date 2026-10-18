@@ -1,5 +1,8 @@
 import { parseBillingState, parseGstin, parseHsnSac } from '../invoice-gst';
-import type { BillingFrequency, CustomerInput, QuotationInput, QuotationLine, ServiceInput, ServiceUpdate, TenantService, TenantSettingsInput, TenantUser, TenantUserInput, TenantUserUpdate } from './types';
+import type {
+  AdditionalService, AdditionalServiceInput, AdditionalServiceUpdate, BillingFrequency, Contract, ContractInput, ContractUpdate, CustomerInput, DepositSettlementInput, QuotationInput, QuotationLine,
+  RenewalList, RenewalQuery, RenewalRecord, RenewalStatus, SecurityDeposit, ServiceInput, ServiceUpdate, TaskNoteInput, TenantService, TenantSettingsInput, TenantUser, TenantUserInput, TenantUserUpdate,
+} from './types';
 
 // Input rules for the ported store areas. Both drivers apply them before any SQL runs.
 
@@ -145,4 +148,135 @@ export function quoteNumber(tenantId: string, sequence: number) {
 
 export function quotationTotal(lines: readonly QuotationLine[]) {
   return lines.reduce((total, line) => total + line.lineTotalMinor, 0);
+}
+
+/** A real `YYYY-MM-DD` day. Postgres refuses 2026-02-31 in a date column; SQLite would store it. */
+export function isCalendarDate(value: unknown): value is string {
+  if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  const date = new Date(`${value}T00:00:00Z`);
+  return !Number.isNaN(date.getTime()) && date.toISOString().slice(0, 10) === value;
+}
+
+/** The half-open range of days in a `YYYY-MM` month, for date columns, or null when the text is not one. */
+export function monthDays(month: string) {
+  const range = monthRange(month);
+  return range && { start: range.start.slice(0, 10), end: range.end.slice(0, 10) };
+}
+
+const isInt4 = (value: number, min: number) => Number.isInteger(value) && value >= min && value <= INT4_MAX;
+const requiredInvoiceMonths: Record<BillingFrequency, number> = { monthly: 0, quarterly: 3, halfYearly: 2, annual: 1 };
+export const CONTRACT_CUSTOMER_MESSAGE = 'The selected customer must belong to your tenant and be active.';
+export const CONTRACT_SERVICE_MESSAGE = 'Each contract service must belong to your tenant and be active.';
+export const FOREIGN_CONTRACT_MESSAGE = 'This contract does not belong to your tenant.';
+
+/**
+ * The columns a contract save writes. escalation_percent is numeric(6,3), so a rate needs at most three decimals
+ * and must stay under 1000; otherwise Postgres would round or refuse what SQLite keeps exactly.
+ */
+export function contractFields(input: ContractInput) {
+  if (!input.name.trim()) throw new Error('Contract name is required.');
+  if (!input.customerId) throw new Error('Choose a customer.');
+  if (!input.serviceIds.length) throw new Error('Choose at least one service.');
+  if (!isCalendarDate(input.startDate) || !isCalendarDate(input.endDate) || input.endDate < input.startDate) throw new Error('Enter a valid contract date range.');
+  if (!Number.isSafeInteger(input.valueMinor) || input.valueMinor < 0 || !Number.isSafeInteger(input.securityDepositMinor) || input.securityDepositMinor < 0) throw new Error('Contract value and security deposit must be non-negative.');
+  const escalation = input.escalationPercent;
+  if (!isInt4(input.paymentTermsDays, 0) || !Number.isInteger(input.cycleDay) || input.cycleDay < 1 || input.cycleDay > 31 || !isInt4(input.renewalNoticeDays, 0)
+    || !Number.isFinite(escalation) || escalation < 0 || escalation >= 1000 || Math.round(escalation * 1000) / 1000 !== escalation) throw new Error('Enter valid billing, escalation, and renewal terms.');
+  if (input.escalationReviewDate && !isCalendarDate(input.escalationReviewDate)) throw new Error('Enter a valid escalation review date.');
+  const months = [...new Set(input.invoiceMonths)].sort((a, b) => a - b);
+  const required = requiredInvoiceMonths[input.billingFrequency];
+  if (months.length !== required || months.some((month) => !Number.isInteger(month) || month < 1 || month > 12)) throw new Error(`${input.billingFrequency === 'halfYearly' ? 'Half-yearly' : input.billingFrequency[0].toUpperCase() + input.billingFrequency.slice(1)} contracts require ${required} invoice months.`);
+  return {
+    customerId: input.customerId, serviceIds: [...new Set(input.serviceIds)], name: input.name.trim(), startDate: input.startDate, endDate: input.endDate, valueMinor: input.valueMinor,
+    paymentTermsDays: input.paymentTermsDays, billingFrequency: input.billingFrequency, invoiceMonths: months, cycleDay: input.cycleDay, escalationPercent: escalation,
+    escalationReviewDate: input.escalationReviewDate || null, renewalNoticeDays: input.renewalNoticeDays, securityDepositMinor: input.securityDepositMinor,
+  };
+}
+
+/** The contract after `update`; what the update leaves out keeps its current value. */
+export function updatedContract(current: Contract, update: ContractUpdate) {
+  const fields = contractFields({
+    customerId: update.customerId ?? current.customerId, serviceIds: update.serviceIds ?? current.serviceIds, name: update.name ?? current.name, startDate: update.startDate ?? current.startDate,
+    endDate: update.endDate ?? current.endDate, valueMinor: update.valueMinor ?? current.valueMinor, paymentTermsDays: update.paymentTermsDays ?? current.paymentTermsDays,
+    billingFrequency: update.billingFrequency ?? current.billingFrequency, invoiceMonths: update.invoiceMonths ?? current.invoiceMonths, cycleDay: update.cycleDay ?? current.cycleDay,
+    escalationPercent: update.escalationPercent ?? current.escalationPercent, escalationReviewDate: update.escalationReviewDate ?? (current.escalationReviewDate ?? ''),
+    renewalNoticeDays: update.renewalNoticeDays ?? current.renewalNoticeDays, securityDepositMinor: update.securityDepositMinor ?? current.securityDepositMinor,
+  });
+  const status = update.status ?? current.status;
+  if (status !== 'active' && status !== 'inactive') throw new Error('Invalid contract status.');
+  return { ...fields, status };
+}
+
+/** The renewal's end date and audit note. It must move the end date later than `currentEndDate`. */
+export function renewal(currentEndDate: string, input: { endDate: string; note: string }) {
+  if (!isCalendarDate(input.endDate) || input.endDate <= currentEndDate) throw new Error('The renewed end date must be later than the current end date.');
+  return { endDate: input.endDate, note: input.note.trim() || 'Renewal recorded.' };
+}
+
+export function renewalRecord(contract: Contract, date = new Date()): RenewalRecord {
+  return { contractId: contract.id, contractName: contract.name, customerName: contract.customerName, endDate: contract.endDate, valueMinor: contract.valueMinor, renewalNoticeDays: contract.renewalNoticeDays, renewalStatus: renewalStatusFor(contract, date), dueTiming: renewalDueTiming(contract.endDate, date), status: contract.status };
+}
+
+function renewalStatusFor(contract: Contract, date: Date): RenewalStatus {
+  const today = date.toISOString().slice(0, 10);
+  if (contract.endDate < today) return 'expired';
+  const noticeDate = new Date(`${contract.endDate}T00:00:00Z`);
+  noticeDate.setUTCDate(noticeDate.getUTCDate() - contract.renewalNoticeDays);
+  return noticeDate.toISOString().slice(0, 10) <= today ? 'upcoming' : 'current';
+}
+
+function renewalDueTiming(endDate: string, date: Date) {
+  const today = Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate());
+  const days = Math.round((Date.parse(`${endDate}T00:00:00Z`) - today) / 86400000);
+  if (days < 0) return `${Math.abs(days)} days overdue`;
+  if (days === 0) return 'Due today';
+  return `Due in ${days} days`;
+}
+
+/** Renewals are worked out in code from every contract, then filtered and paged. */
+export function renewalPage(contracts: Contract[], query: RenewalQuery): RenewalList {
+  const filtered = contracts.map((contract) => renewalRecord(contract)).filter((record) => (!query.status || record.renewalStatus === query.status) && (!query.month || record.endDate.startsWith(query.month)));
+  const pageSize = Math.min(Math.max(query.pageSize ?? 10, 1), 100); const page = Math.max(query.page ?? 1, 1);
+  return { items: filtered.slice((page - 1) * pageSize, page * pageSize), total: filtered.length };
+}
+
+export const FOREIGN_DEPOSIT_MESSAGE = 'This security deposit does not belong to your tenant.';
+
+/** The deposit after settling `input` against what is already settled, or the reason it cannot be. */
+export function settlement(deposit: { amountMinor: number; settledMinor: number; status: SecurityDeposit['status'] }, input: DepositSettlementInput) {
+  if (!Number.isSafeInteger(input.amountMinor) || input.amountMinor <= 0) throw new Error('Settlement amount must be a positive whole minor-unit value.');
+  if (deposit.settledMinor >= deposit.amountMinor || deposit.status === 'settled') throw new Error('This security deposit has already been settled.');
+  if (input.amountMinor > deposit.amountMinor - deposit.settledMinor) throw new Error('Settlement cannot exceed the held deposit balance.');
+  const settledMinor = deposit.settledMinor + input.amountMinor;
+  return { settledMinor, status: settledMinor === deposit.amountMinor ? 'settled' as const : 'held' as const, note: input.note.trim() || 'Customer closeout settlement.' };
+}
+
+export function checkTaskNote(input: TaskNoteInput): void {
+  if (!input || typeof input.customerId !== 'string' || !input.customerId) throw new Error('Choose a customer.');
+  if (!isCalendarDate(input.date)) throw new Error('Choose a valid date.');
+  if (typeof input.note !== 'string' || !input.note.trim()) throw new Error('Note is required.');
+}
+
+export const TASK_NOTE_NOT_FOUND = 'Task note not found.';
+export const TASK_NOTE_CUSTOMER_MESSAGE = 'The selected customer does not belong to your tenant.';
+
+export function additionalServiceFields(input: AdditionalServiceInput) {
+  if (!input.customerId || !input.contractId) throw new Error('Choose a customer and contract.');
+  if (!isCalendarDate(input.serviceDate)) throw new Error('Enter a valid service date.');
+  if (!input.description.trim()) throw new Error('A service description is required.');
+  if (!Number.isSafeInteger(input.priceMinor) || input.priceMinor < 0) throw new Error('The customized price must be a non-negative whole minor unit.');
+  return { customerId: input.customerId, contractId: input.contractId, serviceDate: input.serviceDate, description: input.description.trim(), priceMinor: input.priceMinor, notes: input.notes?.trim() ?? '' };
+}
+
+/** The additional service after `update`. A billed one is part of an invoice and cannot change. */
+export function updatedAdditionalService(current: AdditionalService, update: AdditionalServiceUpdate) {
+  if (current.billedAt) throw new Error('A billed additional service cannot be changed.');
+  const fields = additionalServiceFields({ customerId: update.customerId ?? current.customerId, contractId: update.contractId ?? current.contractId, serviceDate: update.serviceDate ?? current.serviceDate, description: update.description ?? current.description, priceMinor: update.priceMinor ?? current.priceMinor, notes: update.notes ?? current.notes });
+  const status = update.status ?? current.status;
+  if (status !== 'active' && status !== 'archived') throw new Error('Additional service status is invalid.');
+  return { ...fields, status };
+}
+
+export function checkBillingPeriod(period: string) {
+  if (!/^\d{4}-\d{2}$/.test(period)) throw new Error('Billing period must use YYYY-MM.');
 }

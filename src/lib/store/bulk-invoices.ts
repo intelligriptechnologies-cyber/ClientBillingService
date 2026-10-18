@@ -1,7 +1,7 @@
 import type { DatabaseSync } from 'node:sqlite';
 import { now, requireTenantMember } from './shared';
 import { amountOnlyLine, gstSnapshotFields, resolveSupply, sellerRegisteredIn } from '../invoice-gst';
-import { contractFromRow } from './contracts';
+import { contractWithServices } from './contracts';
 import { parseSettingsRow } from './rows';
 import { resolveFormatForInvoice } from './invoice-formats';
 import type { AppSession, Contract, InvoiceSnapshot, BulkInvoiceAdditionalLine, BulkInvoiceProposal, BulkInvoiceSkip, BulkInvoicePreview, BulkInvoiceRun, BulkInvoiceGeneration } from './types';
@@ -27,7 +27,7 @@ export function createBulkInvoiceMethods(database: DatabaseSync) {
     const seller = parseSettingsRow(database.prepare('SELECT * FROM tenant_settings WHERE tenant_id = ?').get(session.tenantId) as Record<string, unknown>);
     const gstRate = sellerRegisteredIn(seller.stateCode) ? 18 : 0;
     for (const row of rows) {
-      const contract = contractFromRow(database, row);
+      const contract = contractWithServices(database, row);
       const common = { contractId: contract.id, contractName: contract.name, customerName: contract.customerName };
       if (contract.status !== 'active') { skipped.push({ ...common, reason: 'Contract is inactive.' }); continue; }
       if (contract.startDate > periodEnd || contract.endDate < periodStart) { skipped.push({ ...common, reason: 'Contract is outside this billing period.' }); continue; }
