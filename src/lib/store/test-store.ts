@@ -33,8 +33,8 @@ const pgPorts = {
   additionalServices: { unit: 'D7', ported: true },
   invoices: { unit: 'D8', ported: true },
   bulkInvoices: { unit: 'D8', ported: true },
-  payments: { unit: 'D9', ported: false },
-  reminders: { unit: 'D9', ported: false },
+  payments: { unit: 'D9', ported: true },
+  reminders: { unit: 'D9', ported: true },
 } satisfies Record<string, { unit: PortUnit; ported: boolean }>;
 
 export type StoreArea = keyof typeof pgPorts;
@@ -52,16 +52,6 @@ afterEach(async () => {
   for (const cleanup of cleanups.splice(0)) await cleanup();
 });
 
-/** A store that answers every method it has, and rejects the rest by name instead of returning undefined. */
-function withoutPort(ported: object): TenantStore {
-  return new Proxy(ported, {
-    get(target, name, receiver) {
-      if (typeof name !== 'string' || name === 'then' || name in target) return Reflect.get(target, name, receiver);
-      return () => Promise.reject(new Error(`${name} has no Postgres port yet.`));
-    },
-  }) as TenantStore;
-}
-
 /** A seeded store for one test, closed after it. */
 export async function storeForTest(): Promise<TenantStore> {
   if (testDriver === 'sqlite') {
@@ -73,7 +63,7 @@ export async function storeForTest(): Promise<TenantStore> {
   let dropped: Promise<void> | undefined;
   const close = () => (dropped ??= database.drop());
   cleanups.push(close);
-  return withoutPort({ ...createPgStore(database.db), close });
+  return { ...createPgStore(database.db), close };
 }
 
 /** The superadmin, built directly: under Postgres it is an Authelia group with no users row (ADR 0002, decision 3). */
