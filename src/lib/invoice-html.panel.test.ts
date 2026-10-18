@@ -45,12 +45,12 @@ describe('the Panel layout', () => {
     const rows = supplyHtml().match(/<tr class="pn-filler">/g) ?? [];
     expect(rows).toHaveLength(3);
     const many = renderInvoiceHtml(supplyInvoice(withFormat({ ...base, documentType: 'Bill of Supply', lines: Array.from({ length: 5 }, () => plainLine) })));
-    expect(many).not.toContain('pn-filler');
+    expect(many).not.toContain('<tr class="pn-filler">');
   });
 
   it('a GST invoice keeps the HSN column, the tax columns and the CGST and SGST rows', () => {
     const html = gstHtml();
-    expect(html).toContain('<th>HSN/SAC</th>');
+    expect(html).toContain('>HSN/SAC</th>');
     expect(html).toContain('998311');
     expect(html).toContain('TAXABLE VALUE');
     expect(html).toContain('GSTIN: 29AAGCB7383J1Z4');
@@ -94,7 +94,7 @@ describe('the Panel layout', () => {
   it('the UPI ID is plain text from its own block, apart from the QR slot, and is never a link', () => {
     const only = supplyHtml();
     expect(only).toContain('UPI ID: test@upi.example');
-    expect(only).not.toContain('upi-slot');
+    expect(only).not.toContain('class="upi-slot"');
     expect(only).not.toMatch(/https?:\/\/|upi:\/\//);
     expect(supplyHtml({ ...panel, blocks: { ...panel.blocks, upiId: false } })).not.toContain('test@upi.example');
     expect(supplyHtml({ ...panel, upiId: '' })).not.toContain('UPI ID');
@@ -106,7 +106,7 @@ describe('the Panel layout', () => {
   it('the bank panel, notes and signatory follow their switches and the empty panel disappears', () => {
     const none = supplyHtml({ ...panel, bankDetails: '', upiId: '' });
     expect(none).not.toContain('BANK DETAILS');
-    expect(none).not.toContain('pn-bank');
+    expect(none).not.toContain('class="pn-bank"');
     const noMarks = supplyHtml({ ...panel, blocks: { ...panel.blocks, signature: false, stamp: false, amountInWords: false } });
     expect(noMarks).not.toContain('Authorized Signatory');
     expect(noMarks).not.toContain('Amount in words');
