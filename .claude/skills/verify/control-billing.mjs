@@ -645,7 +645,7 @@ async function doApi(name, state, flags, method, path, bodyText, evidence) {
   const identity = flags.anonymous ? '(anonymous)' : identityFrom(flags, state);
   const session = flags.anonymous ? null : await sessionFor(name, state, identity);
   if (!path.startsWith('/')) throw new CliError(`api path must start with "/", got "${path}".`, 'Example: api GET /api/customers');
-  const headers = session ? { cookie: `${SESSION_COOKIE}=${session.cookie.value}` } : {};
+  const headers = { origin: state.url, ...(session ? { cookie: `${SESSION_COOKIE}=${session.cookie.value}` } : {}) };
   let payload;
   if (bodyText !== undefined) {
     try { JSON.parse(bodyText); } catch { throw new CliError('The body is not valid JSON.', `Pass one JSON argument, quoted for your shell, or use --body-file <file>. Received: ${bodyText.slice(0, 80)}. PowerShell strips inner double quotes from native arguments.`); }
