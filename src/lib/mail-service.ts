@@ -28,7 +28,7 @@ async function loadInvoice(store: Store, session: AppSession, invoiceId: string)
 }
 
 async function billingEmail(store: Store, session: AppSession, invoice: TenantInvoice): Promise<string> {
-  return (await store.getCustomer(session, invoice.customerId))?.email.trim() || invoice.snapshot.customerEmail.trim();
+  return (await store.getCustomer(tenantContextOf(session), invoice.customerId))?.email.trim() || invoice.snapshot.customerEmail.trim();
 }
 
 function invoiceSubject(invoice: TenantInvoice) { return `Invoice ${invoice.invoiceNumber} from ${invoice.snapshot.companyName} (${money(invoice.totalMinor)})`; }

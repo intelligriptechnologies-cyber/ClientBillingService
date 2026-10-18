@@ -1,5 +1,6 @@
 import { expect, it } from 'vitest';
 import { describeStore, storeForTest } from './test-store';
+import { tenantContextOf } from '../auth/session-context';
 
 describeStore(['customers', 'contracts', 'deposits', 'invoices', 'payments'], 'demo seed', () => {
   it('seeds a complete billing scenario for every tenant', async () => {
@@ -9,11 +10,11 @@ describeStore(['customers', 'contracts', 'deposits', 'invoices', 'payments'], 'd
       const session = await store.authenticate(`${tenantId}-admin`);
       if (!session) throw new Error(`Expected ${tenantId} admin session`);
 
-      const customer = (await store.listCustomers(session, {})).items[0];
-      const contract = (await store.listContracts(session, {})).items[0];
+      const customer = (await store.listCustomers(tenantContextOf(session), {})).items[0];
+      const contract = (await store.listContracts(tenantContextOf(session), {})).items[0];
       const invoices = (await store.listInvoices(session, {})).items;
       const payments = (await store.listPayments(session, {})).items;
-      const deposits = await store.listSecurityDeposits(session);
+      const deposits = await store.listSecurityDeposits(tenantContextOf(session));
 
       expect(customer).toBeDefined();
       expect(contract).toMatchObject({ customerId: customer?.id, status: 'active' });

@@ -7,7 +7,7 @@ describeStore(['settings', 'customers', 'services', 'contracts', 'invoices'], 'i
     const store = await storeForTest(); const session = await store.authenticate('nexio-admin');
     if (!session) throw new Error('Expected tenant session');
     await registerSeller(store, session);
-    const customer = (await store.listCustomers(session)).items[0];
+    const customer = (await store.listCustomers(tenantContextOf(session))).items[0];
     const details = { customerId: customer.id, invoiceDate: '2026-10-07', dueDate: '2026-10-21', venue: 'Bengaluru', billingAddress: 'New billing address', customerPan: 'ABCDE1234F', customerGstin: '29AAGCB7383J1Z4', gstApplicable: true, notes: 'Monthly booking' };
     const first = await store.createIssuedInvoice(session, { ...details, taxSplitOverrideReason: 'Supply to an SEZ unit', lines: [
       { description: 'Venue booking', quantity: 2, rateMinor: 12500, taxType: 'igst', gstRate: 18, hsnSac: '998311' },
@@ -25,7 +25,7 @@ describeStore(['settings', 'customers', 'services', 'contracts', 'invoices'], 'i
   it('voids an unpaid invoice with a reason and records operation errors for tenant admins', async () => {
     const store = await storeForTest(); const nexio = await store.authenticate('nexio-admin');
     if (!nexio) throw new Error('Expected tenant session');
-    const customer = (await store.listCustomers(nexio)).items[0];
+    const customer = (await store.listCustomers(tenantContextOf(nexio))).items[0];
     const invoice = await store.createIssuedInvoice(nexio, { customerId: customer.id, invoiceDate: '2026-10-07', dueDate: '2026-10-21', taxableMinor: 10000 });
     await expect(store.voidInvoice(nexio, invoice.id, '')).rejects.toThrow('reason');
     expect((await store.voidInvoice(nexio, invoice.id, 'Issued in error')).status).toBe('void');
@@ -41,8 +41,8 @@ describeStore(['settings', 'customers', 'services', 'contracts', 'invoices'], 'i
     if (!nexio || !evo) throw new Error('Expected seeded sessions');
 
     await store.updateTenantSettings(tenantContextOf(nexio), { ...await store.getTenantSettings(tenantContextOf(nexio)), gstin: '29AAGCB7383J1Z4' });
-    const customer = (await store.listCustomers(nexio, {})).items[0];
-    const interstate = await store.createCustomer(nexio, { companyName: 'Interstate Buyer', contactName: 'Ravi', email: 'ravi@example.com', phone: '9000000000', gstin: '27AAPFU0939F1ZV', billingAddress: 'Mumbai', invoiceDelivery: 'email' });
+    const customer = (await store.listCustomers(tenantContextOf(nexio), {})).items[0];
+    const interstate = await store.createCustomer(tenantContextOf(nexio), { companyName: 'Interstate Buyer', contactName: 'Ravi', email: 'ravi@example.com', phone: '9000000000', gstin: '27AAPFU0939F1ZV', billingAddress: 'Mumbai', invoiceDelivery: 'email' });
     await store.createIssuedInvoice(nexio, { customerId: customer.id, invoiceDate: '2026-11-02', dueDate: '2026-11-16', taxableMinor: 10_000, gstRate: 18 });
     await store.createIssuedInvoice(nexio, { customerId: interstate.id, invoiceDate: '2026-11-03', dueDate: '2026-11-17', taxableMinor: 20_000, gstRate: 18 });
 
@@ -62,9 +62,9 @@ describeStore(['settings', 'customers', 'services', 'contracts', 'invoices'], 'i
     const evo = await store.authenticate('evo-admin');
     if (!nexio || !evo) throw new Error('Expected seeded sessions');
     await registerSeller(store, nexio);
-    const customer = (await store.listCustomers(nexio, {})).items[0];
-    const contract = await store.createContract(nexio, {
-      customerId: customer.id, serviceIds: [(await store.listServices(nexio))[0].id], name: 'Snapshot contract', startDate: '2026-01-01', endDate: '2026-12-31',
+    const customer = (await store.listCustomers(tenantContextOf(nexio), {})).items[0];
+    const contract = await store.createContract(tenantContextOf(nexio), {
+      customerId: customer.id, serviceIds: [(await store.listServices(tenantContextOf(nexio)))[0].id], name: 'Snapshot contract', startDate: '2026-01-01', endDate: '2026-12-31',
       valueMinor: 250000, paymentTermsDays: 14, billingFrequency: 'monthly', invoiceMonths: [], cycleDay: 1,
       escalationPercent: 0, escalationReviewDate: '', renewalNoticeDays: 30, securityDepositMinor: 0,
     });

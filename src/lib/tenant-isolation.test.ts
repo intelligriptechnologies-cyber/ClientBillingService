@@ -80,13 +80,13 @@ const SMTP_SECRET = 'nexio-smtp-secret-9f3a';
 
 async function seedTenantA(session: AppSession) {
   await store.updateTenantSettings(tenantContextOf(session), { ...settingsInput(await store.getTenantSettings(tenantContextOf(session))), smtpHost: 'smtp.nexio-secret.example', smtpFrom: 'billing@nexio-secret.example', smtpUser: 'nexio-smtp-user', smtpPassword: SMTP_SECRET });
-  const customerId = must((await store.listCustomers(session)).items[0]).id;
-  const contractId = must((await store.listContracts(session)).items[0]).id;
-  const serviceId = must((await store.listServices(session)).find((item) => item.status === 'active')).id;
+  const customerId = must((await store.listCustomers(tenantContextOf(session))).items[0]).id;
+  const contractId = must((await store.listContracts(tenantContextOf(session))).items[0]).id;
+  const serviceId = must((await store.listServices(tenantContextOf(session))).find((item) => item.status === 'active')).id;
   const pending = must((await store.listPendingPayments(session))[0]);
-  const additionalServiceId = (await store.createAdditionalService(session, { customerId, contractId, serviceDate: '2026-10-05', description: 'Nexio-secret extra work', priceMinor: 5000 })).id;
-  const noteId = (await store.createTaskNote(session, { customerId, date: '2026-10-05', note: 'Nexio-secret note' })).id;
-  const quotationId = (await store.createQuotation(session, { customerName: 'Nexio-secret prospect', lines: [{ serviceId, frequency: 'monthly', quantity: 1 }] })).id;
+  const additionalServiceId = (await store.createAdditionalService(tenantContextOf(session), { customerId, contractId, serviceDate: '2026-10-05', description: 'Nexio-secret extra work', priceMinor: 5000 })).id;
+  const noteId = (await store.createTaskNote(tenantContextOf(session), { customerId, date: '2026-10-05', note: 'Nexio-secret note' })).id;
+  const quotationId = (await store.createQuotation(tenantContextOf(session), { customerName: 'Nexio-secret prospect', lines: [{ serviceId, frequency: 'monthly', quantity: 1 }] })).id;
   const userId = (await store.createTenantUser(tenantContextOf(session), { name: 'Nexio-secret colleague', email: 'secret@nexio.example', role: 'user' })).id;
   const formatId = (await store.createInvoiceFormat(session, { name: 'Nexio-secret format', definition: formatDefinition })).id;
   await store.recordOperationalError(tenantContextOf(session), 'nexio-secret-operation', new Error('Nexio-secret failure'));
@@ -96,20 +96,20 @@ async function seedTenantA(session: AppSession) {
     invoiceId: pending.id,
     invoiceNumber: pending.invoiceNumber,
     paymentId: must((await store.listPayments(session)).items[0]).id,
-    depositId: must((await store.listSecurityDeposits(session))[0]).id,
+    depositId: must((await store.listSecurityDeposits(tenantContextOf(session)))[0]).id,
   };
 }
 
 async function snapshot(session: AppSession) {
   const query = { pageSize: 1000 };
-  const contractItems = (await store.listContracts(session, query)).items;
+  const contractItems = (await store.listContracts(tenantContextOf(session), query)).items;
   return {
-    customers: await store.listCustomers(session, query), contracts: contractItems, invoices: await store.listInvoices(session, query),
-    payments: await store.listPayments(session, query), pending: await store.listPendingPayments(session), deposits: await store.listSecurityDeposits(session),
-    renewals: await store.listRenewals(session, query), services: await store.listServices(session), additional: await store.listAdditionalServices(session, query),
-    quotations: await store.listQuotations(session), notes: await store.listTaskNotes(session), users: await store.listTenantUsers(tenantContextOf(session)),
+    customers: await store.listCustomers(tenantContextOf(session), query), contracts: contractItems, invoices: await store.listInvoices(session, query),
+    payments: await store.listPayments(session, query), pending: await store.listPendingPayments(session), deposits: await store.listSecurityDeposits(tenantContextOf(session)),
+    renewals: await store.listRenewals(tenantContextOf(session), query), services: await store.listServices(tenantContextOf(session)), additional: await store.listAdditionalServices(tenantContextOf(session), query),
+    quotations: await store.listQuotations(tenantContextOf(session)), notes: await store.listTaskNotes(tenantContextOf(session)), users: await store.listTenantUsers(tenantContextOf(session)),
     logs: await store.listOperationalLogs(tenantContextOf(session)), settings: await store.getTenantSettings(tenantContextOf(session)), bulkRuns: await store.listBulkInvoiceRuns(session), formats: await store.listInvoiceFormats(session),
-    audit: await Promise.all(contractItems.map(async (item) => store.listContractAudit(session, item.id))),
+    audit: await Promise.all(contractItems.map(async (item) => store.listContractAudit(tenantContextOf(session), item.id))),
     deliveries: await Promise.all((await store.listInvoices(session, query)).items.map(async (item) => store.listDeliveries(session, item.id))),
     smtp: await store.getSmtpSettings(tenantContextOf(session)),
   };
@@ -177,8 +177,8 @@ const cases: Case[] = [
   { kind: 'invoice formats', name: 'PUT /api/invoice-formats/[id] updates', run: (as, f) => call(invoiceFormat.PUT, as, { method: 'PUT', body: { name: 'Hijacked', definition: formatDefinition }, params: { formatId: f.formatId } }) },
   { kind: 'invoice formats', name: 'DELETE /api/invoice-formats/[id] deletes', run: (as, f) => call(invoiceFormat.DELETE, as, { method: 'DELETE', params: { formatId: f.formatId } }) },
   { kind: 'invoice formats', name: 'POST /api/invoice-formats/[id]/default makes default', run: (as, f) => call(invoiceFormatDefault.POST, as, { method: 'POST', params: { formatId: f.formatId } }) },
-  { kind: 'invoice formats', name: 'PATCH /api/customers/[id] with foreign formatId', run: async (as, f) => call(customer.PATCH, as, { method: 'PATCH', body: { ...customerBody, invoiceFormatId: f.formatId }, params: { customerId: must((await store.listCustomers(as)).items[0]).id } }) },
-  { kind: 'invoice formats', name: 'POST /api/invoices with foreign formatId', run: async (as, f) => call(invoices.POST, as, { method: 'POST', body: { customerId: must((await store.listCustomers(as)).items[0]).id, formatId: f.formatId, invoiceDate: '2026-10-07', dueDate: '2026-10-21', taxableMinor: 100 } }) },
+  { kind: 'invoice formats', name: 'PATCH /api/customers/[id] with foreign formatId', run: async (as, f) => call(customer.PATCH, as, { method: 'PATCH', body: { ...customerBody, invoiceFormatId: f.formatId }, params: { customerId: must((await store.listCustomers(tenantContextOf(as))).items[0]).id } }) },
+  { kind: 'invoice formats', name: 'POST /api/invoices with foreign formatId', run: async (as, f) => call(invoices.POST, as, { method: 'POST', body: { customerId: must((await store.listCustomers(tenantContextOf(as))).items[0]).id, formatId: f.formatId, invoiceDate: '2026-10-07', dueDate: '2026-10-21', taxableMinor: 100 } }) },
   { kind: 'invoices', name: 'GET /api/pending-payments lists', owns: id('invoiceId'), run: (as) => call(pendingPayments.GET, as) },
   { kind: 'invoices', name: 'POST /api/pending-payments/[id]/close', run: (as, f) => call(pendingClose.POST, as, { method: 'POST', body: { note: 'hijack' }, params: { invoiceId: f.invoiceId } }) },
   { kind: 'invoices', name: 'POST /api/pending-payments/[id]/reminders', run: (as, f) => call(pendingReminders.POST, as, { method: 'POST', body: { channel: 'email', note: 'hijack' }, params: { invoiceId: f.invoiceId } }) },
@@ -265,13 +265,13 @@ describe('store functions reached by id without a route', () => {
     const f = await seedTenantA(tenantA);
     const before = await snapshot(tenantA);
     const attempts: Array<[string, () => Promise<unknown>]> = [
-      ['getService', async () => await store.getService(tenantB, f.serviceId)],
-      ['getQuotation', async () => await store.getQuotation(tenantB, f.quotationId)],
+      ['getService', async () => await store.getService(tenantContextOf(tenantB), f.serviceId)],
+      ['getQuotation', async () => await store.getQuotation(tenantContextOf(tenantB), f.quotationId)],
       ['getInvoice', async () => await store.getInvoice(tenantB, f.invoiceId)],
       ['getPayment', async () => await store.getPayment(tenantB, f.paymentId)],
       ['listDeliveries', async () => await store.listDeliveries(tenantB, f.invoiceId)],
       ['recordDelivery', async () => await store.recordDelivery(tenantB, { invoiceId: f.invoiceId, to: ['x@y.example'], cc: [], subject: 'planted', status: 'sent', error: '' })],
-      ['getCustomer', async () => await store.getCustomer(tenantB, f.customerId)],
+      ['getCustomer', async () => await store.getCustomer(tenantContextOf(tenantB), f.customerId)],
     ];
     for (const [name, run] of attempts) {
       let outcome: unknown;

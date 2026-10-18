@@ -2,6 +2,7 @@ import { recordOperationException } from '@/lib/operational-error';
 import { NextResponse } from 'next/server';
 import { getCurrentSession } from '@/lib/session';
 import { getTenantStore, type CustomerInput, type CustomerQuery } from '@/lib/tenant-store';
+import { tenantContextOf } from '@/lib/auth/session-context';
 
 function unauthorized() { return NextResponse.json({ message: 'A tenant session is required.' }, { status: 401 }); }
 
@@ -19,13 +20,13 @@ export async function GET(request: Request) {
     invoiceDelivery: invoiceDelivery && ['monthly', 'quarterly', 'email', 'manual'].includes(invoiceDelivery) ? invoiceDelivery as Exclude<CustomerQuery['invoiceDelivery'], undefined> : undefined,
     page: Number(params.get('page') ?? 1), pageSize: Number(params.get('pageSize') ?? 10),
   };
-  return NextResponse.json(await getTenantStore().listCustomers(session, query));
+  return NextResponse.json(await getTenantStore().listCustomers(tenantContextOf(session), query));
   } catch (error) { await recordOperationException(session, '/api/customers', error); return NextResponse.json({ message: error instanceof Error ? error.message : 'Unable to load customers.' }, { status: 400 }); }
 }
 
 export async function POST(request: Request) {
   const session = await getCurrentSession();
   if (!session?.tenantId) return unauthorized();
-  try { return NextResponse.json(await getTenantStore().createCustomer(session, await request.json() as CustomerInput), { status: 201 }); }
+  try { return NextResponse.json(await getTenantStore().createCustomer(tenantContextOf(session), await request.json() as CustomerInput), { status: 201 }); }
   catch (error) { await recordOperationException(session, '/api/customers', error); return NextResponse.json({ message: error instanceof Error ? error.message : 'Unable to create customer.' }, { status: 400 }); }
 }
