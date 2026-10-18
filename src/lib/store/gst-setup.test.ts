@@ -8,6 +8,7 @@ import { UNREGISTERED_SELLER_TAX_MESSAGE } from '../invoice-gst';
 import { renderInvoiceHtml } from '../invoice-html';
 import type { InvoiceLineInput } from '../invoice-lines';
 import { createTenantStore } from '../tenant-store';
+import { tenantContextOf } from '../auth/session-context';
 
 const KARNATAKA = '29AAGCB7383J1Z4';
 const MAHARASHTRA = '27AAPFU0939F1ZV';
@@ -24,7 +25,7 @@ async function setup() {
   const store = storeForTest();
   const session = await store.authenticate('nexio-admin');
   if (!session) throw new Error('Expected seeded session');
-  const register = async (gstin = KARNATAKA) => store.updateTenantSettings(session, { ...await store.getTenantSettings(session), gstin, legalName: 'Nexio Hyper Private Limited' });
+  const register = async (gstin = KARNATAKA) => store.updateTenantSettings(tenantContextOf(session), { ...await store.getTenantSettings(tenantContextOf(session)), gstin, legalName: 'Nexio Hyper Private Limited' });
   const customer = (fields: { gstin?: string; stateCode?: string; name?: string } = {}) => store.createCustomer(session, { companyName: fields.name ?? `Buyer ${crypto.randomUUID()}`, contactName: 'Buyer', email: 'buyer@example.com', phone: '9000000000', gstin: fields.gstin ?? '', stateCode: fields.stateCode, billingAddress: 'Somewhere', invoiceDelivery: 'manual' });
   const line = (fields: Partial<InvoiceLineInput> = {}): InvoiceLineInput => ({ description: 'Consulting', quantity: 1, rateMinor: 100_000, taxType: 'cgst_sgst', gstRate: 18, hsnSac: '998311', ...fields });
   const invoice = (customerId: string, lines: InvoiceLineInput[], extra: { taxSplitOverrideReason?: string; invoiceDate?: string } = {}) => store.createIssuedInvoice(session, { customerId, invoiceDate: extra.invoiceDate ?? '2026-11-02', dueDate: '2026-11-30', gstApplicable: true, lines, taxSplitOverrideReason: extra.taxSplitOverrideReason });
@@ -34,10 +35,10 @@ async function setup() {
 describe('seller GST setup', () => {
   it('rejects an invalid GSTIN with a message that names the problem', async () => {
     const { store, session } = await setup();
-    const settings = await store.getTenantSettings(session);
-    await expect(store.updateTenantSettings(session, { ...settings, gstin: '29AAGCB7383J1Z5' })).rejects.toThrow(/check digit/);
-    await expect(store.updateTenantSettings(session, { ...settings, gstin: '29ABC' })).rejects.toThrow(/15 characters/);
-    expect((await store.getTenantSettings(session)).gstin).toBe('');
+    const settings = await store.getTenantSettings(tenantContextOf(session));
+    await expect(store.updateTenantSettings(tenantContextOf(session), { ...settings, gstin: '29AAGCB7383J1Z5' })).rejects.toThrow(/check digit/);
+    await expect(store.updateTenantSettings(tenantContextOf(session), { ...settings, gstin: '29ABC' })).rejects.toThrow(/15 characters/);
+    expect((await store.getTenantSettings(tenantContextOf(session))).gstin).toBe('');
   });
 
   it('stores a valid GSTIN in capitals with the legal name and the state taken from its first two digits', async () => {
@@ -49,16 +50,16 @@ describe('seller GST setup', () => {
   it('treats a blank GSTIN as unregistered and clears the state', async () => {
     const { store, session, register } = await setup();
     await register();
-    const saved = await store.updateTenantSettings(session, { ...await store.getTenantSettings(session), gstin: '  ' });
+    const saved = await store.updateTenantSettings(tenantContextOf(session), { ...await store.getTenantSettings(tenantContextOf(session)), gstin: '  ' });
     expect(saved).toMatchObject({ gstin: '', stateCode: '' });
   });
 
   it('keeps the stored legal name when an update does not send one', async () => {
     const { store, session, register } = await setup();
     await register();
-    const { legalName, ...rest } = await store.getTenantSettings(session);
+    const { legalName, ...rest } = await store.getTenantSettings(tenantContextOf(session));
     expect(legalName).toBe('Nexio Hyper Private Limited');
-    expect((await store.updateTenantSettings(session, { ...rest, footer: 'Updated footer' })).legalName).toBe('Nexio Hyper Private Limited');
+    expect((await store.updateTenantSettings(tenantContextOf(session), { ...rest, footer: 'Updated footer' })).legalName).toBe('Nexio Hyper Private Limited');
   });
 });
 
@@ -337,7 +338,9 @@ describe('additive migration', () => {
       legacy.exec("CREATE TABLE customers (id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL, company_name TEXT NOT NULL, contact_name TEXT NOT NULL, email TEXT NOT NULL, phone TEXT NOT NULL, gstin TEXT NOT NULL, billing_address TEXT NOT NULL, invoice_delivery TEXT NOT NULL, status TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL)");
       legacy.exec("CREATE TABLE tenant_settings (tenant_id TEXT PRIMARY KEY, company_name TEXT NOT NULL, gstin TEXT NOT NULL DEFAULT '', address TEXT NOT NULL DEFAULT '', invoice_prefix TEXT NOT NULL, payment_terms_days INTEGER NOT NULL, footer TEXT NOT NULL DEFAULT '', invoice_template TEXT NOT NULL, email_subject TEXT NOT NULL, email_body TEXT NOT NULL, smtp_host TEXT NOT NULL DEFAULT '', smtp_port INTEGER NOT NULL DEFAULT 587, smtp_from TEXT NOT NULL DEFAULT '', log_retention_days INTEGER NOT NULL DEFAULT 30, logo_data_url TEXT NOT NULL DEFAULT '', stamp_data_url TEXT NOT NULL DEFAULT '', signature_data_url TEXT NOT NULL DEFAULT '', updated_at TEXT NOT NULL)");
       legacy.exec("CREATE TABLE services (id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL, name TEXT NOT NULL, description TEXT NOT NULL DEFAULT '', status TEXT NOT NULL, monthly_minor INTEGER NOT NULL, quarterly_minor INTEGER NOT NULL, half_yearly_minor INTEGER NOT NULL, annual_minor INTEGER NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, UNIQUE(tenant_id, name))");
+      legacy.exec("CREATE TABLE users (id TEXT PRIMARY KEY, tenant_id TEXT, name TEXT NOT NULL, email TEXT NOT NULL UNIQUE, role TEXT NOT NULL, password TEXT NOT NULL, status TEXT NOT NULL)");
       legacy.exec("INSERT INTO tenants (id, name, status) VALUES ('legacy', 'Legacy Co', 'active')");
+      legacy.exec("INSERT INTO users (id, tenant_id, name, email, role, password, status) VALUES ('legacy-admin', 'legacy', 'A', 'a@example.com', 'admin', 'admin123', 'active')");
       const insertCustomer = legacy.prepare("INSERT INTO customers VALUES (?, 'legacy', ?, 'C', 'c@example.com', '1', ?, 'Addr', 'manual', 'active', 't', 't')");
       insertCustomer.run('c-valid', 'Valid', MAHARASHTRA); insertCustomer.run('c-junk', 'Junk', 'NA'); insertCustomer.run('c-blank', 'Blank', '');
       legacy.exec(`INSERT INTO tenant_settings (tenant_id, company_name, gstin, invoice_prefix, payment_terms_days, invoice_template, email_subject, email_body, updated_at) VALUES ('legacy', 'Legacy Co', '${KARNATAKA}', 'LEG', 14, 't', 's', 'b', 't')`);
@@ -349,7 +352,7 @@ describe('additive migration', () => {
         const session = { id: 'legacy-admin', name: 'A', email: 'a@example.com', role: 'admin' as const, tenantId: 'legacy', tenantName: 'Legacy Co' };
         const customers = (await store.listCustomers(session, {})).items;
         expect(customers.map((item) => [item.id, item.gstin, item.stateCode]).sort()).toEqual([['c-blank', '', ''], ['c-junk', 'NA', ''], ['c-valid', MAHARASHTRA, '27']]);
-        expect(await store.getTenantSettings(session)).toMatchObject({ gstin: KARNATAKA, stateCode: '29', legalName: '' });
+        expect(await store.getTenantSettings(tenantContextOf(session))).toMatchObject({ gstin: KARNATAKA, stateCode: '29', legalName: '' });
         expect(await store.listServices(session)).toEqual([expect.objectContaining({ id: 'svc', hsnSac: '' })]);
         await store.close();
       }

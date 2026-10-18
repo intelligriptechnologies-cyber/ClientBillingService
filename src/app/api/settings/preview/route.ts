@@ -2,10 +2,11 @@ import { recordOperationException } from '@/lib/operational-error';
 import { NextResponse } from 'next/server';
 import { getCurrentSession } from '@/lib/session';
 import { getTenantStore } from '@/lib/tenant-store';
+import { tenantContextOf } from '@/lib/auth/session-context';
 
 export async function POST() {
   const session = await getCurrentSession();
   if (!session) return NextResponse.json({ message: 'Sign in to preview templates.' }, { status: 401 });
-  try { return NextResponse.json({ preview: await getTenantStore().previewTenantTemplate(session) }); }
+  try { return NextResponse.json({ preview: await getTenantStore().previewTenantTemplate(tenantContextOf(session)) }); }
   catch (error) { await recordOperationException(session, '/api/settings/preview', error); return NextResponse.json({ message: error instanceof Error ? error.message : 'Unable to preview template.' }, { status: 403 }); }
 }

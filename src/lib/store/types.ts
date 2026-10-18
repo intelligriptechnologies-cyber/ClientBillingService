@@ -3,6 +3,7 @@ import type { Gstr1Section } from '../gst';
 import type { GstSnapshotFields, SupplyContext } from '../invoice-gst';
 import type { SnapshotFormat, InvoiceFormat } from '../invoice-format';
 import type { SmtpSettings } from '../mailer';
+import type { TenantContext, PlatformActor } from '../auth/principal';
 
 export type AppRole = 'superadmin' | 'admin' | 'user';
 export type DemoIdentity = { id: string; name: string; email: string; role: AppRole; tenantId: string | null; tenantName: string | null };
@@ -88,15 +89,15 @@ export type GstSalesReport = { month: string; companyName: string; gstin: string
 export interface TenantStore {
   listIdentities(): Promise<DemoIdentity[]>;
   authenticate(userId: string): Promise<AppSession | null>;
-  listTenantRecords(session: AppSession): Promise<TenantRecord[]>;
-  createTenantRecord(session: AppSession, tenantId: string, label: string): Promise<TenantRecord>;
-  listTenants(session: AppSession, filters: TenantFilters): Promise<TenantList>;
-  createTenant(session: AppSession, input: TenantInput): Promise<Tenant>;
-  updateTenant(session: AppSession, tenantId: string, input: TenantUpdate): Promise<Tenant>;
-  listTenantHistory(session: AppSession, tenantId: string): Promise<TenantHistoryEvent[]>;
-  listTenantUsers(session: AppSession): Promise<TenantUser[]>;
-  createTenantUser(session: AppSession, input: TenantUserInput): Promise<TenantUser>;
-  updateTenantUser(session: AppSession, userId: string, update: TenantUserUpdate): Promise<TenantUser>;
+  listTenantRecords(context: TenantContext): Promise<TenantRecord[]>;
+  createTenantRecord(context: TenantContext, tenantId: string, label: string): Promise<TenantRecord>;
+  listTenants(platform: PlatformActor, filters: TenantFilters): Promise<TenantList>;
+  createTenant(platform: PlatformActor, input: TenantInput): Promise<Tenant>;
+  updateTenant(platform: PlatformActor, tenantId: string, input: TenantUpdate): Promise<Tenant>;
+  listTenantHistory(platform: PlatformActor, tenantId: string): Promise<TenantHistoryEvent[]>;
+  listTenantUsers(context: TenantContext): Promise<TenantUser[]>;
+  createTenantUser(context: TenantContext, input: TenantUserInput): Promise<TenantUser>;
+  updateTenantUser(context: TenantContext, userId: string, update: TenantUserUpdate): Promise<TenantUser>;
   listServices(session: AppSession, query?: string): Promise<TenantService[]>;
   getService(session: AppSession, serviceId: string): Promise<TenantService | null>;
   createService(session: AppSession, input: ServiceInput): Promise<TenantService>;
@@ -142,14 +143,14 @@ export interface TenantStore {
   closeInvoice(session: AppSession, invoiceId: string, note?: string): Promise<TenantPayment>;
   listPendingPayments(session: AppSession): Promise<PendingPayment[]>;
   recordPaymentReminder(session: AppSession, invoiceId: string, input: { channel: PaymentReminder['channel']; note?: string }): Promise<PaymentReminder>;
-  getTenantSettings(session: AppSession): Promise<TenantSettings>;
-  updateTenantSettings(session: AppSession, input: TenantSettingsInput): Promise<TenantSettings>;
-  previewTenantTemplate(session: AppSession): Promise<string>;
+  getTenantSettings(context: TenantContext): Promise<TenantSettings>;
+  updateTenantSettings(context: TenantContext, input: TenantSettingsInput): Promise<TenantSettings>;
+  previewTenantTemplate(context: TenantContext): Promise<string>;
   /** The only reader of the SMTP password. It serves the mailer inside the server and no route may return it. */
-  getSmtpSettings(session: AppSession): Promise<SmtpSettings>;
-  logFeatureFlow(session: AppSession, message: string): Promise<void>;
-  recordOperationalError(session: AppSession, operation: string, cause: unknown): Promise<void>;
-  listOperationalLogs(session: AppSession): Promise<OperationalLog[]>;
+  getSmtpSettings(context: TenantContext): Promise<SmtpSettings>;
+  logFeatureFlow(context: TenantContext, message: string): Promise<void>;
+  recordOperationalError(context: TenantContext, operation: string, cause: unknown): Promise<void>;
+  listOperationalLogs(context: TenantContext): Promise<OperationalLog[]>;
   recordDelivery(session: AppSession, input: DeliveryInput): Promise<DeliveryRecord>;
   listDeliveries(session: AppSession, invoiceId: string): Promise<DeliveryRecord[]>;
   listInvoiceFormats(session: AppSession): Promise<InvoiceFormat[]>;

@@ -48,6 +48,7 @@ import * as tenant from '../app/api/tenants/[tenantId]/route';
 import * as tenantHistory from '../app/api/tenants/[tenantId]/history/route';
 import * as users from '../app/api/users/route';
 import * as user from '../app/api/users/[userId]/route';
+import { tenantContextOf } from './auth/session-context';
 
 type Store = ReturnType<typeof createTenantStore>;
 
@@ -78,7 +79,7 @@ function must<T>(value: T | null | undefined): T {
 const SMTP_SECRET = 'nexio-smtp-secret-9f3a';
 
 async function seedTenantA(session: AppSession) {
-  await store.updateTenantSettings(session, { ...settingsInput(await store.getTenantSettings(session)), smtpHost: 'smtp.nexio-secret.example', smtpFrom: 'billing@nexio-secret.example', smtpUser: 'nexio-smtp-user', smtpPassword: SMTP_SECRET });
+  await store.updateTenantSettings(tenantContextOf(session), { ...settingsInput(await store.getTenantSettings(tenantContextOf(session))), smtpHost: 'smtp.nexio-secret.example', smtpFrom: 'billing@nexio-secret.example', smtpUser: 'nexio-smtp-user', smtpPassword: SMTP_SECRET });
   const customerId = must((await store.listCustomers(session)).items[0]).id;
   const contractId = must((await store.listContracts(session)).items[0]).id;
   const serviceId = must((await store.listServices(session)).find((item) => item.status === 'active')).id;
@@ -86,9 +87,9 @@ async function seedTenantA(session: AppSession) {
   const additionalServiceId = (await store.createAdditionalService(session, { customerId, contractId, serviceDate: '2026-10-05', description: 'Nexio-secret extra work', priceMinor: 5000 })).id;
   const noteId = (await store.createTaskNote(session, { customerId, date: '2026-10-05', note: 'Nexio-secret note' })).id;
   const quotationId = (await store.createQuotation(session, { customerName: 'Nexio-secret prospect', lines: [{ serviceId, frequency: 'monthly', quantity: 1 }] })).id;
-  const userId = (await store.createTenantUser(session, { name: 'Nexio-secret colleague', email: 'secret@nexio.example', role: 'user' })).id;
+  const userId = (await store.createTenantUser(tenantContextOf(session), { name: 'Nexio-secret colleague', email: 'secret@nexio.example', role: 'user' })).id;
   const formatId = (await store.createInvoiceFormat(session, { name: 'Nexio-secret format', definition: formatDefinition })).id;
-  await store.recordOperationalError(session, 'nexio-secret-operation', new Error('Nexio-secret failure'));
+  await store.recordOperationalError(tenantContextOf(session), 'nexio-secret-operation', new Error('Nexio-secret failure'));
   const deliveryId = (await store.recordDelivery(session, { invoiceId: pending.id, to: ['secret-recipient@nexio-secret.example'], cc: [], subject: 'Nexio-secret subject', status: 'sent', error: '' })).id;
   return {
     customerId, contractId, serviceId, additionalServiceId, noteId, quotationId, userId, formatId, deliveryId,
@@ -106,11 +107,11 @@ async function snapshot(session: AppSession) {
     customers: await store.listCustomers(session, query), contracts: contractItems, invoices: await store.listInvoices(session, query),
     payments: await store.listPayments(session, query), pending: await store.listPendingPayments(session), deposits: await store.listSecurityDeposits(session),
     renewals: await store.listRenewals(session, query), services: await store.listServices(session), additional: await store.listAdditionalServices(session, query),
-    quotations: await store.listQuotations(session), notes: await store.listTaskNotes(session), users: await store.listTenantUsers(session),
-    logs: await store.listOperationalLogs(session), settings: await store.getTenantSettings(session), bulkRuns: await store.listBulkInvoiceRuns(session), formats: await store.listInvoiceFormats(session),
+    quotations: await store.listQuotations(session), notes: await store.listTaskNotes(session), users: await store.listTenantUsers(tenantContextOf(session)),
+    logs: await store.listOperationalLogs(tenantContextOf(session)), settings: await store.getTenantSettings(tenantContextOf(session)), bulkRuns: await store.listBulkInvoiceRuns(session), formats: await store.listInvoiceFormats(session),
     audit: await Promise.all(contractItems.map(async (item) => store.listContractAudit(session, item.id))),
     deliveries: await Promise.all((await store.listInvoices(session, query)).items.map(async (item) => store.listDeliveries(session, item.id))),
-    smtp: await store.getSmtpSettings(session),
+    smtp: await store.getSmtpSettings(tenantContextOf(session)),
   };
 }
 
@@ -324,7 +325,7 @@ describe('the delivery log and mail settings', () => {
 
   it('never returns the SMTP password from the settings or SMTP test routes, to its owner or anyone else', async () => {
     await seedTenantA(tenantA);
-    const input = settingsInput(await store.getTenantSettings(tenantA));
+    const input = settingsInput(await store.getTenantSettings(tenantContextOf(tenantA)));
     const replies = [
       await call(settings.GET, tenantA), await call(settings.PUT, tenantA, { method: 'PUT', body: { ...input, companyName: 'Nexio Renamed' } }),
       await call(settings.PUT, tenantA, { method: 'PUT', body: { ...input, smtpPassword: SMTP_SECRET } }), await call(smtpTest.POST, tenantA, { method: 'POST' }),
@@ -332,37 +333,37 @@ describe('the delivery log and mail settings', () => {
     ];
     for (const reply of replies) expect(reply.text).not.toContain(SMTP_SECRET);
     expect(JSON.parse(replies[0].text).settings).toMatchObject({ smtpUser: 'nexio-smtp-user', smtpPasswordSet: true });
-    expect((await store.getSmtpSettings(tenantA)).password).toBe(SMTP_SECRET);
-    expect((await store.getSmtpSettings(tenantB)).password).toBe('');
+    expect((await store.getSmtpSettings(tenantContextOf(tenantA))).password).toBe(SMTP_SECRET);
+    expect((await store.getSmtpSettings(tenantContextOf(tenantB))).password).toBe('');
   });
 
   it('refuses a tenant user who tries to change SMTP settings', async () => {
     await seedTenantA(tenantA);
     const user = must(await store.authenticate('nexio-user'));
-    const input = settingsInput(await store.getTenantSettings(tenantA));
+    const input = settingsInput(await store.getTenantSettings(tenantContextOf(tenantA)));
     expect((await call(settings.PUT, user, { method: 'PUT', body: { ...input, smtpPassword: 'planted' } })).status).toBeGreaterThanOrEqual(400);
-    expect((await store.getSmtpSettings(tenantA)).password).toBe(SMTP_SECRET);
+    expect((await store.getSmtpSettings(tenantContextOf(tenantA))).password).toBe(SMTP_SECRET);
   });
 });
 
 describe('global uniqueness constraints do not disclose another tenant', () => {
   it.fails('LEAK users.email is globally UNIQUE: POST /api/users with another tenant email is refused, revealing it exists (tenant-store.ts:96,388)', async () => {
     const f = await seedTenantA(tenantA);
-    const taken = must((await store.listTenantUsers(tenantA)).find((item) => item.id === f.userId)).email;
+    const taken = must((await store.listTenantUsers(tenantContextOf(tenantA))).find((item) => item.id === f.userId)).email;
     const reply = await call(users.POST, tenantB, { method: 'POST', body: { name: 'Same person, other tenant', email: taken, role: 'user' } });
     expect(reply.status).toBe(201);
   });
 
   it.fails('LEAK users.email is globally UNIQUE: PATCH /api/users/[id] to another tenant email is refused, revealing it exists (tenant-store.ts:96,406)', async () => {
     const f = await seedTenantA(tenantA);
-    const taken = must((await store.listTenantUsers(tenantA)).find((item) => item.id === f.userId)).email;
-    const own = must((await store.listTenantUsers(tenantB)).find((item) => item.role === 'user'));
+    const taken = must((await store.listTenantUsers(tenantContextOf(tenantA))).find((item) => item.id === f.userId)).email;
+    const own = must((await store.listTenantUsers(tenantContextOf(tenantB))).find((item) => item.role === 'user'));
     const reply = await call(user.PATCH, tenantB, { method: 'PATCH', body: { email: taken }, params: { userId: own.id } });
     expect(reply.status).toBe(200);
   });
 
   it('PATCH /api/users/[id] to an unused email works (control)', async () => {
-    const own = must((await store.listTenantUsers(tenantB)).find((item) => item.role === 'user'));
+    const own = must((await store.listTenantUsers(tenantContextOf(tenantB))).find((item) => item.role === 'user'));
     expect((await call(user.PATCH, tenantB, { method: 'PATCH', body: { email: 'fresh@evo.example' }, params: { userId: own.id } })).status).toBe(200);
   });
 });

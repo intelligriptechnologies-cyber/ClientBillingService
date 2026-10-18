@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createTenantStore, type AppSession } from '@/lib/tenant-store';
+import { tenantContextOf } from '../auth/session-context';
 
 const INVOICE = 'nexio-invoice-001';
 let store: ReturnType<typeof createTenantStore>; let admin: AppSession; let user: AppSession; let evo: AppSession; let superadmin: AppSession;
@@ -53,7 +54,7 @@ describe('additive migration', () => {
     const upgraded = createTenantStore(file);
     try {
       const session = must(await upgraded.authenticate('nexio-admin'));
-      expect(await upgraded.getTenantSettings(session)).toMatchObject({ smtpHost: 'smtp.old.example', smtpFrom: 'old@nexio.example', smtpUser: '', smtpPasswordSet: false });
+      expect(await upgraded.getTenantSettings(tenantContextOf(session))).toMatchObject({ smtpHost: 'smtp.old.example', smtpFrom: 'old@nexio.example', smtpUser: '', smtpPasswordSet: false });
       expect((await upgraded.recordDelivery(session, attempt())).status).toBe('sent');
     } finally { await upgraded.close(); }
   });

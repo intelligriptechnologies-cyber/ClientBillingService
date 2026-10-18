@@ -2,6 +2,7 @@ import { recordOperationException } from '@/lib/operational-error';
 import { NextResponse } from 'next/server';
 import { getCurrentSession } from '@/lib/session';
 import { getTenantStore, type TenantStatus } from '@/lib/tenant-store';
+import { platformActorOf } from '@/lib/auth/session-context';
 
 export async function PATCH(request: Request, context: { params: Promise<{ tenantId: string }> }) {
   const session = await getCurrentSession();
@@ -9,7 +10,7 @@ export async function PATCH(request: Request, context: { params: Promise<{ tenan
   try {
     const { tenantId } = await context.params;
     const body = await request.json() as { name?: string; status?: TenantStatus };
-    return NextResponse.json({ tenant: await getTenantStore().updateTenant(session, tenantId, body) });
+    return NextResponse.json({ tenant: await getTenantStore().updateTenant(platformActorOf(session), tenantId, body) });
   } catch (error) { await recordOperationException(session, '/api/tenants/[tenantId]', error);
     const message = error instanceof Error ? error.message : 'Unable to update tenant.';
     return NextResponse.json({ message }, { status: message.includes('superadmin') ? 403 : 400 });

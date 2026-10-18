@@ -2,6 +2,7 @@ import { recordOperationException } from '@/lib/operational-error';
 import { NextResponse } from 'next/server';
 import { getCurrentSession } from '@/lib/session';
 import { getTenantStore } from '@/lib/tenant-store';
+import { platformActorOf } from '@/lib/auth/session-context';
 
 function failure(error: unknown) {
   const message = error instanceof Error ? error.message : 'Unable to manage tenants.';
@@ -14,7 +15,7 @@ export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   try {
     const requestedStatus = searchParams.get('status');
-    return NextResponse.json(await getTenantStore().listTenants(session, {
+    return NextResponse.json(await getTenantStore().listTenants(platformActorOf(session), {
       query: searchParams.get('query') ?? undefined,
       month: searchParams.get('month') ?? undefined,
       status: requestedStatus === 'active' || requestedStatus === 'disabled' ? requestedStatus : 'all',
@@ -29,6 +30,6 @@ export async function POST(request: Request) {
   if (!session) return NextResponse.json({ message: 'Sign in is required.' }, { status: 401 });
   try {
     const body = await request.json() as { name?: string };
-    return NextResponse.json({ tenant: await getTenantStore().createTenant(session, { name: body.name ?? '' }) }, { status: 201 });
+    return NextResponse.json({ tenant: await getTenantStore().createTenant(platformActorOf(session), { name: body.name ?? '' }) }, { status: 201 });
   } catch (error) { await recordOperationException(session, '/api/tenants', error); return failure(error); }
 }

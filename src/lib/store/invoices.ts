@@ -3,7 +3,7 @@ import { gstr1Section, validateGstin } from '../gst';
 import { amountOnlyLine, gstSnapshotFields, parseBillingState, parseGstin, resolveSupply } from '../invoice-gst';
 import { calculateInvoiceLines } from '../invoice-lines';
 import { now, requireTenantMember } from './shared';
-import { settingsFromRow } from './settings';
+import { parseSettingsRow } from './rows';
 import { existingFormatId, resolveFormatForInvoice } from './invoice-formats';
 import type { AppSession, InvoiceStatus, InvoiceSnapshot, TenantInvoice, InvoiceInput, InvoiceQuery, InvoiceList, GstSalesRow, GstSalesReport, HsnSummaryRow } from './types';
 
@@ -62,7 +62,7 @@ export function createInvoiceMethods(database: DatabaseSync) {
     getGstSalesReport(session: AppSession, month: string): GstSalesReport {
       requireTenantMember(session);
       if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(month)) throw new Error('Choose a valid report month.');
-      const settings = settingsFromRow(database.prepare('SELECT * FROM tenant_settings WHERE tenant_id = ?').get(session.tenantId) as Record<string, unknown>);
+      const settings = parseSettingsRow(database.prepare('SELECT * FROM tenant_settings WHERE tenant_id = ?').get(session.tenantId) as Record<string, unknown>);
       const rows = database.prepare(`SELECT invoices.*, customers.company_name AS customer_name, customers.gstin AS customer_gstin
         FROM invoices JOIN customers ON customers.id = invoices.customer_id
         WHERE invoices.tenant_id = ? AND substr(invoices.invoice_date, 1, 7) = ? AND invoices.status != 'void'
@@ -73,7 +73,7 @@ export function createInvoiceMethods(database: DatabaseSync) {
     },
     getSupplyContext(session: AppSession, query: { customerId?: string; customerGstin?: string; billingStateCode?: string }) {
       requireTenantMember(session);
-      const settings = settingsFromRow(database.prepare('SELECT * FROM tenant_settings WHERE tenant_id = ?').get(session.tenantId) as Record<string, unknown>);
+      const settings = parseSettingsRow(database.prepare('SELECT * FROM tenant_settings WHERE tenant_id = ?').get(session.tenantId) as Record<string, unknown>);
       const customer = query.customerId ? database.prepare('SELECT * FROM customers WHERE id = ? AND tenant_id = ?').get(query.customerId, session.tenantId) as Record<string, unknown> | undefined : undefined;
       if (query.customerId && !customer) throw new Error('The selected customer must belong to your tenant.');
       return resolveSupply(settings.stateCode, clientForSupply(customer, query.customerGstin, query.billingStateCode));
@@ -130,7 +130,7 @@ export function createInvoiceMethods(database: DatabaseSync) {
       if (!customerId) throw new Error('Choose a customer or contract.');
       const customer = database.prepare('SELECT * FROM customers WHERE id = ? AND tenant_id = ?').get(customerId, session.tenantId) as Record<string, unknown> | undefined;
       if (!customer) throw new Error('The selected customer must belong to your tenant.');
-      const settings = settingsFromRow(database.prepare('SELECT * FROM tenant_settings WHERE tenant_id = ?').get(session.tenantId) as Record<string, unknown>);
+      const settings = parseSettingsRow(database.prepare('SELECT * FROM tenant_settings WHERE tenant_id = ?').get(session.tenantId) as Record<string, unknown>);
       const supply = resolveSupply(settings.stateCode, clientForSupply(customer, input.customerGstin));
       const gstFields = gstSnapshotFields({ seller: settings, supply, lines: totals ? totals.lines : [amountOnlyLine(supply, gstRate)], requireHsn: Boolean(totals), overrideReason: input.taxSplitOverrideReason });
       const sequence = Number((database.prepare('SELECT COUNT(*) AS count FROM invoices WHERE tenant_id = ?').get(session.tenantId) as { count: number }).count) + 1;
