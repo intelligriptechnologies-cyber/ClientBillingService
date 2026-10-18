@@ -30,7 +30,8 @@ export default defineConfig({
         ...process.env,
         CLIENT_BILLING_DATABASE: ':memory:',
         CLIENT_BILLING_SEED_MODE: 'demo',
-        CLIENT_BILLING_DIST_DIR: '.next-authelia',
+        // `next start` takes no lock and reads the one production build, so only dev needs a second dist dir.
+        ...(process.env.CLIENT_BILLING_TEST_USE_START ? {} : { CLIENT_BILLING_DIST_DIR: '.next-authelia' }),
         CLIENT_BILLING_ENV: 'test',
         CLIENT_BILLING_AUTH_MODE: 'authelia',
         CBS_PROXY_SECRET: proxySecret,
