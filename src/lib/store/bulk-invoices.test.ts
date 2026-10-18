@@ -1,5 +1,6 @@
 import { expect, it } from 'vitest';
 import { describeStore, storeForTest, registerSeller } from './test-store';
+import { tenantContextOf } from '../auth/session-context';
 
 describeStore(['settings', 'customers', 'services', 'contracts', 'additionalServices', 'invoices', 'bulkInvoices'], 'bulk invoice runs', () => {
   it('previews a period billing run with additional services, explains skips, and issues it only once', async () => {
@@ -7,8 +8,8 @@ describeStore(['settings', 'customers', 'services', 'contracts', 'additionalServ
     const nexio = await store.authenticate('nexio-admin');
     if (!nexio) throw new Error('Expected seeded session');
     await registerSeller(store, nexio);
-    const customer = (await store.listCustomers(nexio, {})).items[0];
-    const service = (await store.listServices(nexio))[0];
+    const customer = (await store.listCustomers(tenantContextOf(nexio), {})).items[0];
+    const service = (await store.listServices(tenantContextOf(nexio)))[0];
     if (!customer || !service) throw new Error('Expected seeded customer and service');
 
     const eligible = await store.createContract(nexio, {

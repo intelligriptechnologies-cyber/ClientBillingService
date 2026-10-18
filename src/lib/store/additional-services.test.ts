@@ -1,5 +1,6 @@
 import { expect, it } from 'vitest';
 import { describeStore, storeForTest } from './test-store';
+import { tenantContextOf } from '../auth/session-context';
 
 describeStore(['customers', 'services', 'contracts', 'additionalServices'], 'additional services', () => {
   it('records a dated additional service only against its customer contract and exposes it for that billing period', async () => {
@@ -7,8 +8,8 @@ describeStore(['customers', 'services', 'contracts', 'additionalServices'], 'add
     const nexio = await store.authenticate('nexio-admin');
     const evo = await store.authenticate('evo-admin');
     if (!nexio || !evo) throw new Error('Expected seeded sessions');
-    const customer = (await store.listCustomers(nexio, {})).items[0];
-    const service = (await store.listServices(nexio))[0];
+    const customer = (await store.listCustomers(tenantContextOf(nexio), {})).items[0];
+    const service = (await store.listServices(tenantContextOf(nexio)))[0];
     if (!customer || !service) throw new Error('Expected seeded billing data');
     const contract = await store.createContract(nexio, {
       customerId: customer.id, serviceIds: [service.id], name: 'Managed reporting', startDate: '2026-01-01', endDate: '2026-12-31',

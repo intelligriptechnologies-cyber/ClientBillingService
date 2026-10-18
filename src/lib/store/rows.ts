@@ -1,5 +1,5 @@
 import type { SmtpSettings } from '../mailer';
-import type { DemoIdentity, OperationalLog, Tenant, TenantHistoryEvent, TenantRecord, TenantSettings, TenantUser } from './types';
+import type { CustomerRecord, DemoIdentity, OperationalLog, Quotation, QuotationLine, Tenant, TenantHistoryEvent, TenantRecord, TenantService, TenantSettings, TenantUser } from './types';
 
 // One parser per table, at the store boundary (ADR 0001, the graft from candidate C). SQLite and Postgres rows
 // with the same columns parse the same way. A column with the wrong type throws here instead of leaking a bad value.
@@ -69,4 +69,37 @@ export function parseSmtpRow(row: Row): SmtpSettings {
 
 export function parseOperationalLogRow(row: Row): OperationalLog {
   return { id: text(row, 'id'), kind: oneOf(row, 'kind', ['feature-flow', 'error']), message: text(row, 'message'), createdAt: text(row, 'created_at') };
+}
+
+const billingFrequencies = ['monthly', 'quarterly', 'halfYearly', 'annual'] as const;
+
+export function parseServiceRow(row: Row): TenantService {
+  return {
+    id: text(row, 'id'), name: text(row, 'name'), description: text(row, 'description'), hsnSac: text(row, 'hsn_sac'), status: oneOf(row, 'status', ['active', 'inactive']),
+    prices: { monthly: integer(row, 'monthly_minor'), quarterly: integer(row, 'quarterly_minor'), halfYearly: integer(row, 'half_yearly_minor'), annual: integer(row, 'annual_minor') },
+    createdAt: text(row, 'created_at'), updatedAt: text(row, 'updated_at'),
+  };
+}
+
+export function parseCustomerRow(row: Row): CustomerRecord {
+  return {
+    id: text(row, 'id'), tenantId: text(row, 'tenant_id'), companyName: text(row, 'company_name'), contactName: text(row, 'contact_name'), email: text(row, 'email'), phone: text(row, 'phone'),
+    gstin: text(row, 'gstin'), stateCode: text(row, 'state_code'), billingAddress: text(row, 'billing_address'), invoiceDelivery: oneOf(row, 'invoice_delivery', ['monthly', 'quarterly', 'email', 'manual']),
+    status: oneOf(row, 'status', ['active', 'inactive']), invoiceFormatId: nullableText(row, 'invoice_format_id'), createdAt: text(row, 'created_at'), updatedAt: text(row, 'updated_at'),
+  };
+}
+
+export function parseQuotationLineRow(row: Row): QuotationLine {
+  return {
+    id: text(row, 'id'), serviceId: text(row, 'service_id'), serviceName: text(row, 'service_name'), frequency: oneOf(row, 'frequency', billingFrequencies),
+    quantity: integer(row, 'quantity'), unitPriceMinor: integer(row, 'unit_price_minor'), lineTotalMinor: integer(row, 'line_total_minor'),
+  };
+}
+
+/** A quotations row with its lines. A set archived_at is what makes it archived; the status column only ever holds draft. */
+export function parseQuotationRow(row: Row, lines: QuotationLine[]): Quotation {
+  return {
+    id: text(row, 'id'), quoteNumber: text(row, 'quote_number'), customerName: text(row, 'customer_name'), customerEmail: nullableText(row, 'customer_email'),
+    status: nullableText(row, 'archived_at') === null ? 'draft' : 'archived', lines, totalMinor: integer(row, 'total_minor'), createdAt: text(row, 'created_at'),
+  };
 }

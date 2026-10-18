@@ -1,12 +1,13 @@
 import { expect, it } from 'vitest';
 import { describeStore, storeForTest } from './test-store';
+import { tenantContextOf } from '../auth/session-context';
 
 describeStore(['customers', 'taskNotes'], 'task notes', () => {
   it('creates, filters, edits, and deletes task notes within the tenant', async () => {
     const store = await storeForTest();
     const nexio = await store.authenticate('nexio-admin'); const evo = await store.authenticate('evo-admin');
     if (!nexio || !evo) throw new Error('Expected tenant sessions');
-    const nexioCustomer = (await store.listCustomers(nexio)).items[0]; const evoCustomer = (await store.listCustomers(evo)).items[0];
+    const nexioCustomer = (await store.listCustomers(tenantContextOf(nexio))).items[0]; const evoCustomer = (await store.listCustomers(tenantContextOf(evo))).items[0];
     const input = { customerId: nexioCustomer.id, date: '2026-10-07', note: 'Call customer about renewal' };
     await expect(store.createTaskNote(nexio, { ...input, customerId: evoCustomer.id })).rejects.toThrow('does not belong');
     await expect(store.createTaskNote(nexio, { ...input, date: '2026-02-30' })).rejects.toThrow('valid date');

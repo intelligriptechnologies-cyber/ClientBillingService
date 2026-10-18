@@ -76,8 +76,8 @@ describe('sending an invoice', () => {
 
   it('follows the customer when the billing email changes, and falls back to the issue-time snapshot', async () => {
     await configure(admin);
-    const customer = must((await store.listCustomers(admin)).items[0]);
-    await store.updateCustomer(admin, customer.id, { companyName: customer.companyName, contactName: customer.contactName, email: 'new-billing@nexio.example', phone: customer.phone, gstin: customer.gstin, billingAddress: customer.billingAddress, invoiceDelivery: customer.invoiceDelivery });
+    const customer = must((await store.listCustomers(tenantContextOf(admin))).items[0]);
+    await store.updateCustomer(tenantContextOf(admin), customer.id, { companyName: customer.companyName, contactName: customer.contactName, email: 'new-billing@nexio.example', phone: customer.phone, gstin: customer.gstin, billingAddress: customer.billingAddress, invoiceDelivery: customer.invoiceDelivery });
     expect(await getInvoiceEmailDefaults(store, admin, INVOICE, deps)).toMatchObject({ to: 'new-billing@nexio.example', configured: true });
     await sendInvoiceEmail(store, admin, INVOICE, {}, deps);
     expect(sent[0].to).toEqual(['new-billing@nexio.example']);

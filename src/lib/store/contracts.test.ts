@@ -1,5 +1,6 @@
 import { expect, it } from 'vitest';
 import { describeStore, storeForTest } from './test-store';
+import { tenantContextOf } from '../auth/session-context';
 
 describeStore(['customers', 'services', 'contracts', 'deposits'], 'contracts and security deposits', () => {
   it('creates a tenant-scoped quarterly contract with its opening security deposit', async () => {
@@ -7,8 +8,8 @@ describeStore(['customers', 'services', 'contracts', 'deposits'], 'contracts and
     const nexio = await store.authenticate('nexio-admin');
     const evo = await store.authenticate('evo-admin');
     if (!nexio || !evo) throw new Error('Expected seeded sessions');
-    const customer = (await store.listCustomers(nexio, {})).items[0];
-    const service = await store.createService(nexio, { name: 'Analytics support', prices: { monthly: 100000, quarterly: 280000, halfYearly: 540000, annual: 1000000 } });
+    const customer = (await store.listCustomers(tenantContextOf(nexio), {})).items[0];
+    const service = await store.createService(tenantContextOf(nexio), { name: 'Analytics support', prices: { monthly: 100000, quarterly: 280000, halfYearly: 540000, annual: 1000000 } });
     if (!customer) throw new Error('Expected seeded customer');
 
     const contract = await store.createContract(nexio, {
@@ -27,8 +28,8 @@ describeStore(['customers', 'services', 'contracts', 'deposits'], 'contracts and
     const nexio = await store.authenticate('nexio-admin');
     const evo = await store.authenticate('evo-admin');
     if (!nexio || !evo) throw new Error('Expected seeded sessions');
-    const customer = (await store.listCustomers(nexio, {})).items[0];
-    const service = (await store.listServices(nexio))[0];
+    const customer = (await store.listCustomers(tenantContextOf(nexio), {})).items[0];
+    const service = (await store.listServices(tenantContextOf(nexio)))[0];
     if (!customer || !service) throw new Error('Expected seeded customer and service');
     const contract = await store.createContract(nexio, {
       customerId: customer.id, serviceIds: [service.id], name: 'Renewal and deposit contract', startDate: '2025-01-01', endDate: '2026-10-01',
@@ -55,8 +56,8 @@ describeStore(['customers', 'services', 'contracts', 'deposits'], 'contracts and
     const nexio = await store.authenticate('nexio-admin');
     const evo = await store.authenticate('evo-admin');
     if (!nexio || !evo) throw new Error('Expected seeded sessions');
-    const customer = (await store.listCustomers(nexio, {})).items[0];
-    const service = await store.createService(nexio, { name: 'Analytics support', prices: { monthly: 100000, quarterly: 280000, halfYearly: 540000, annual: 1000000 } });
+    const customer = (await store.listCustomers(tenantContextOf(nexio), {})).items[0];
+    const service = await store.createService(tenantContextOf(nexio), { name: 'Analytics support', prices: { monthly: 100000, quarterly: 280000, halfYearly: 540000, annual: 1000000 } });
     if (!customer) throw new Error('Expected seeded customer');
     const input = { customerId: customer.id, serviceIds: [service.id], name: 'Invalid schedule', startDate: '2026-04-01', endDate: '2027-03-31', valueMinor: 100000, paymentTermsDays: 14, billingFrequency: 'quarterly' as const, invoiceMonths: [4, 7], cycleDay: 1, escalationPercent: 0, escalationReviewDate: '', renewalNoticeDays: 30, securityDepositMinor: 0 };
     await expect(store.createContract(nexio, input)).rejects.toThrow('3 invoice months');
