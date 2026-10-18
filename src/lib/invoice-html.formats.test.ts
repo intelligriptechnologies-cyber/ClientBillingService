@@ -73,6 +73,18 @@ describe('renderInvoiceHtml prints from the snapshotted format', () => {
     expect(html).not.toMatch(/https?:\/\/|upi:\/\//);
   });
 
+  it('the UPI ID prints as plain text in classic and compact, beside the bank details and apart from the QR slot', () => {
+    const on = render({ upiId: 'test@upi.example', blocks: { upiId: true } });
+    expect(on).toContain('<p>UPI ID: test@upi.example</p>');
+    expect(on).not.toContain('<div class="upi-slot">');
+    expect(on).not.toMatch(/https?:\/\/|upi:\/\//);
+    expect(render({ upiId: 'test@upi.example', bankDetails: 'HDFC Bank', blocks: { upiId: true } })).toMatch(/<h3>Bank details<\/h3><p class="multiline">HDFC Bank<\/p><p>UPI ID: test@upi.example<\/p>/);
+    expect(render({ upiId: 'test@upi.example', layout: 'compact', blocks: { upiId: true, upiQr: true } })).toContain('class="upi-slot"');
+    expect(render({ upiId: 'test@upi.example' })).not.toContain('test@upi.example');
+    expect(render({ upiId: '', blocks: { upiId: true } })).not.toContain('UPI ID');
+    expect(render({ upiId: '<b>x</b>', blocks: { upiId: true } })).not.toContain('<b>x</b>');
+  });
+
   it('the accent colour reaches the rule and the table headings, and only then', () => {
     const html = render({ accent: '#1f3a5f' });
     expect(html).toContain('border-bottom: 2px solid #1f3a5f');
