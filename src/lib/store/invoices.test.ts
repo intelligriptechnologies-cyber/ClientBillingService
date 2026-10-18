@@ -122,6 +122,37 @@ describeStore(['settings', 'customers', 'invoices'], 'invoices under concurrent 
   });
 });
 
+describeStore(['settings', 'customers', 'contracts', 'invoices', 'bulkInvoices'], 'invoice lists and input rules', () => {
+  it('filters invoices and the GST register by month at the month edges, and refuses values a date or numeric column cannot hold', async () => {
+    const store = await storeForTest();
+    const nexio = await memberContext(store, 'nexio-admin');
+    await store.updateTenantSettings(nexio, { ...await store.getTenantSettings(nexio), gstin: '29AAGCB7383J1Z4' });
+    const customerId = (await store.listCustomers(nexio)).items[0].id;
+    const issue = (invoiceDate: string, extra: { gstRate?: number; dueDate?: string } = {}) => store.createIssuedInvoice(nexio, { customerId, invoiceDate, dueDate: extra.dueDate ?? '2026-12-31', taxableMinor: 10000, gstRate: extra.gstRate });
+    const lastOfOctober = await issue('2026-10-31');
+    const firstOfNovember = await issue('2026-11-01', { gstRate: 12.345 });
+    const ids = async (month: string) => (await store.listInvoices(nexio, { month, pageSize: 100 })).items.map((invoice) => invoice.id);
+
+    expect(await ids('2026-10')).toContain(lastOfOctober.id);
+    expect(await ids('2026-10')).not.toContain(firstOfNovember.id);
+    expect(await ids('2026-11')).toEqual([firstOfNovember.id]);
+    expect(await ids('2026-13')).toEqual([]);
+    expect((await store.listInvoices(nexio, { month: 'October', pageSize: 100 })).total).toBe(4);
+    expect((await store.getGstSalesReport(nexio, '2026-11')).items.map((row) => row.invoiceId)).toEqual([firstOfNovember.id]);
+    expect(firstOfNovember).toMatchObject({ gstRate: 12.345, gstMinor: 1235 });
+    expect((await store.getInvoice(nexio, firstOfNovember.id))?.gstRate).toBe(12.345);
+
+    await expect(store.getGstSalesReport(nexio, '2026-13')).rejects.toThrow('Choose a valid report month.');
+    await expect(issue('2026-02-31')).rejects.toThrow('Enter valid invoice and due dates.');
+    await expect(issue('2026-11-02', { dueDate: '2026-11-31' })).rejects.toThrow('Enter valid invoice and due dates.');
+    await expect(issue('2026-11-02', { gstRate: 18.1234 })).rejects.toThrow('GST rate must be between 0 and 100, with at most three decimals.');
+    await expect(store.createIssuedInvoice(nexio, { customerId, invoiceDate: '2026-11-02', dueDate: '2026-11-16', taxableMinor: 2 ** 53 })).rejects.toThrow('Taxable amount must be a non-negative whole minor amount.');
+    await expect(store.previewBulkInvoices(nexio, '2026-13')).rejects.toThrow('Billing period must use YYYY-MM.');
+    await expect(store.generateBulkInvoices(nexio, '2026-13')).rejects.toThrow('Billing period must use YYYY-MM.');
+    expect((await store.listBulkInvoiceRuns(nexio))).toEqual([]);
+  });
+});
+
 describeStore(['settings', 'customers', 'invoices'], 'invoice corrections', () => {
   it('leaves the original issued and spends no number when the replacement is refused', async () => {
     const store = await storeForTest();
