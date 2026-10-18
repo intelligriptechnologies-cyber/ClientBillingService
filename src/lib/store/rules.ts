@@ -1,7 +1,12 @@
-import { parseBillingState, parseGstin, parseHsnSac } from '../invoice-gst';
+import { gstr1Section, validateGstin } from '../gst';
+import type { SnapshotFormat } from '../invoice-format';
+import { amountOnlyLine, gstSnapshotFields, parseBillingState, parseGstin, parseHsnSac, resolveSupply, sellerRegisteredIn, type GstSnapshotFields, type SupplyContext } from '../invoice-gst';
+import { calculateInvoiceLines } from '../invoice-lines';
 import type {
-  AdditionalService, AdditionalServiceInput, AdditionalServiceUpdate, BillingFrequency, Contract, ContractInput, ContractUpdate, CustomerInput, DepositSettlementInput, QuotationInput, QuotationLine,
-  RenewalList, RenewalQuery, RenewalRecord, RenewalStatus, SecurityDeposit, ServiceInput, ServiceUpdate, TaskNoteInput, TenantService, TenantSettingsInput, TenantUser, TenantUserInput, TenantUserUpdate,
+  AdditionalService, AdditionalServiceInput, AdditionalServiceUpdate, BillingFrequency, BulkInvoiceAdditionalLine, BulkInvoicePreview, BulkInvoiceProposal, BulkInvoiceSkip, Contract, ContractInput,
+  ContractUpdate, CustomerInput, CustomerRecord, DeliveryStatus, DepositSettlementInput, GstSalesReport, GstSalesRow, HsnSummaryRow, InvoiceInput, InvoiceSnapshot, InvoiceStatus, PaymentInput,
+  PaymentMethod, PaymentReminder, PendingPayment, QuotationInput, QuotationLine, RenewalList, RenewalQuery, RenewalRecord, RenewalStatus, SecurityDeposit, ServiceInput, ServiceUpdate, TaskNoteInput,
+  TenantInvoice, TenantPayment, TenantService, TenantSettings, TenantSettingsInput, TenantUser, TenantUserInput, TenantUserUpdate,
 } from './types';
 
 // Input rules for the ported store areas. Both drivers apply them before any SQL runs.
@@ -280,3 +285,255 @@ export function updatedAdditionalService(current: AdditionalService, update: Add
 export function checkBillingPeriod(period: string) {
   if (!/^\d{4}-\d{2}$/.test(period)) throw new Error('Billing period must use YYYY-MM.');
 }
+
+export const INVOICE_NOT_FOUND = 'Invoice not found.';
+export const INVOICE_CONTRACT_MESSAGE = 'The selected contract must belong to your tenant.';
+export const INVOICE_CUSTOMER_MESSAGE = 'The selected customer must belong to your tenant.';
+
+/** An issued invoice's number: the tenant prefix and the invoice's place among the tenant's invoices, counted from 1. */
+export function invoiceNumber(prefix: string, sequence: number) {
+  return `${prefix}-${String(sequence).padStart(4, '0')}`;
+}
+
+export type InvoiceAmounts = ReturnType<typeof invoiceAmounts>;
+
+/**
+ * The checks an invoice request needs no database for, and its amounts. Dates must be real days, money safe whole
+ * minor units, and a typed GST rate at most three decimals, because gst_rate is numeric(6,3).
+ */
+export function invoiceAmounts(input: InvoiceInput) {
+  if (!isCalendarDate(input.invoiceDate) || !isCalendarDate(input.dueDate) || input.dueDate < input.invoiceDate) throw new Error('Enter valid invoice and due dates.');
+  const totals = input.lines ? calculateInvoiceLines(input.lines) : null;
+  if (!totals && (!Number.isSafeInteger(input.taxableMinor) || (input.taxableMinor ?? -1) < 0)) throw new Error('Taxable amount must be a non-negative whole minor amount.');
+  const gstRate = totals ? (totals.taxableMinor ? Math.round(totals.gstMinor / totals.taxableMinor * 10000) / 100 : 0) : input.gstRate ?? 0;
+  if (!Number.isFinite(gstRate) || gstRate < 0 || gstRate > 100 || Math.round(gstRate * 1000) / 1000 !== gstRate) throw new Error('GST rate must be between 0 and 100, with at most three decimals.');
+  if (input.gstApplicable === false && totals?.gstMinor) throw new Error('Turn on GST applicable before adding taxed lines.');
+  if (input.customerPan && !/^[A-Z]{5}[0-9]{4}[A-Z]$/.test(input.customerPan.trim().toUpperCase())) throw new Error('Enter a valid customer PAN.');
+  const taxableMinor = totals?.taxableMinor ?? input.taxableMinor!;
+  const gstMinor = totals?.gstMinor ?? Math.round(taxableMinor * gstRate / 100);
+  if (!Number.isSafeInteger(taxableMinor + gstMinor)) throw new Error('The invoice total is too large.');
+  return { lines: totals?.lines, gstRate, taxableMinor, gstMinor, totalMinor: taxableMinor + gstMinor };
+}
+
+/** The state a client supplies to: the typed GSTIN when it differs from the stored one, otherwise what the client record holds. */
+export function clientForSupply(customer: CustomerRecord | null, typedGstin: string | undefined, billingStateCode?: string) {
+  const stored = customer ? customer.gstin.trim().toUpperCase() : '';
+  const typed = typedGstin?.trim().toUpperCase() ?? '';
+  const storedState = customer ? customer.stateCode : parseBillingState(billingStateCode);
+  if (!typed || typed === stored) return { gstin: stored, stateCode: storedState };
+  const registration = parseGstin(typed, 'customer GST number');
+  return { gstin: registration.gstin, stateCode: registration.gstin ? registration.stateCode : storedState };
+}
+
+export type InvoiceTax = { supply: SupplyContext; gstFields: GstSnapshotFields };
+
+/** Where the invoice's tax lands and the GST fields it keeps. Every GST rule, the unregistered-seller rule among them, comes from invoice-gst. */
+export function invoiceTax(input: InvoiceInput, amounts: InvoiceAmounts, seller: TenantSettings, customer: CustomerRecord): InvoiceTax {
+  const supply = resolveSupply(seller.stateCode, clientForSupply(customer, input.customerGstin));
+  const lines = amounts.lines ?? [amountOnlyLine(supply, amounts.gstRate)];
+  return { supply, gstFields: gstSnapshotFields({ seller, supply, lines, requireHsn: Boolean(amounts.lines), overrideReason: input.taxSplitOverrideReason }) };
+}
+
+/** What an issued invoice prints, so later edits to the seller, the client or the format never change it. */
+export function issuedInvoiceSnapshot(input: InvoiceInput, amounts: InvoiceAmounts, seller: TenantSettings, customer: CustomerRecord, tax: InvoiceTax, format: SnapshotFormat): InvoiceSnapshot {
+  return {
+    companyName: seller.companyName, gstin: seller.gstin, address: seller.address, logoDataUrl: seller.logoDataUrl, stampDataUrl: seller.stampDataUrl, signatureDataUrl: seller.signatureDataUrl,
+    customerName: customer.companyName, customerEmail: customer.email, customerAddress: input.billingAddress?.trim() || customer.billingAddress, customerPan: input.customerPan?.trim().toUpperCase() || undefined,
+    customerGstin: input.customerGstin?.trim().toUpperCase() || customer.gstin, venue: input.venue?.trim(), gstApplicable: tax.supply.sellerRegistered && (input.gstApplicable ?? amounts.gstMinor > 0),
+    notes: input.notes?.trim(), lines: amounts.lines, gstRate: amounts.gstRate, footer: seller.footer, invoiceTemplate: seller.invoiceTemplate, format, ...tax.gstFields,
+  };
+}
+
+/** The reason a void needs, once the invoice is known to be unpaid and not void already. */
+export function voidReason(invoice: TenantInvoice | null, reason: string) {
+  if (!invoice) throw new Error(INVOICE_NOT_FOUND);
+  if (invoice.status === 'void') throw new Error('This invoice is already void.');
+  if (invoice.paidMinor > 0) throw new Error('An invoice with recorded payments cannot be voided.');
+  if (!reason.trim()) throw new Error('Enter a reason for voiding the invoice.');
+  return reason.trim();
+}
+
+/** The reason a correction needs, once the invoice is known to be unpaid and not void. */
+export function correctionReason(invoice: TenantInvoice | null, reason: string): string {
+  if (!invoice) throw new Error(INVOICE_NOT_FOUND);
+  if (invoice.status === 'void') throw new Error('A void invoice cannot be corrected.');
+  if (invoice.paidMinor > 0) throw new Error('An invoice with recorded payments cannot be corrected.');
+  if (!reason.trim()) throw new Error('Enter a correction reason.');
+  return reason.trim();
+}
+
+/** The replacement's request: the correction, with the original's contract, customer and printed details for what it leaves out. `formatId` is the original's format while it still exists. */
+export function replacementInput(current: TenantInvoice, correction: InvoiceInput, formatId: string | undefined): InvoiceInput {
+  const kept = current.snapshot;
+  return {
+    ...correction, contractId: current.contractId ?? undefined, customerId: current.customerId, venue: correction.venue ?? kept.venue, customerPan: correction.customerPan ?? kept.customerPan,
+    customerGstin: correction.customerGstin ?? kept.customerGstin, billingAddress: correction.billingAddress ?? kept.customerAddress, gstApplicable: correction.gstApplicable ?? kept.gstApplicable,
+    notes: correction.notes ?? kept.notes, formatId: correction.formatId ?? formatId,
+  };
+}
+
+/** A real `YYYY-MM` month as a half-open range of days. The bulk run refuses anything else before it reads a row. */
+export function billingPeriodDays(period: string) {
+  const days = /^\d{4}-\d{2}$/.test(period) ? monthDays(period) : null;
+  if (!days) throw new Error('Billing period must use YYYY-MM.');
+  return days;
+}
+
+function addCalendarDays(date: string, days: number) {
+  const value = new Date(`${date}T00:00:00Z`);
+  value.setUTCDate(value.getUTCDate() + days);
+  return value.toISOString().slice(0, 10);
+}
+
+export type BulkAddition = BulkInvoiceAdditionalLine & { contractId: string };
+
+/**
+ * The invoices a run for `billingPeriod` would issue and the contracts it skips, in the order of `contracts`.
+ * `additions` are the period's unbilled active additional services, `invoiced` the contracts already invoiced in it.
+ */
+export function bulkInvoicePreview(billingPeriod: string, contracts: readonly Contract[], additions: readonly BulkAddition[], invoiced: ReadonlySet<string>, sellerStateCode: string): BulkInvoicePreview {
+  const days = billingPeriodDays(billingPeriod);
+  const month = Number(billingPeriod.slice(5));
+  const gstRate = sellerRegisteredIn(sellerStateCode) ? 18 : 0;
+  const proposed: BulkInvoiceProposal[] = []; const skipped: BulkInvoiceSkip[] = [];
+  for (const contract of contracts) {
+    const common = { contractId: contract.id, contractName: contract.name, customerName: contract.customerName };
+    if (contract.status !== 'active') { skipped.push({ ...common, reason: 'Contract is inactive.' }); continue; }
+    if (contract.startDate >= days.end || contract.endDate < days.start) { skipped.push({ ...common, reason: 'Contract is outside this billing period.' }); continue; }
+    if (contract.billingFrequency !== 'monthly' && !contract.invoiceMonths.includes(month)) { skipped.push({ ...common, reason: `Billing is not scheduled for ${new Date(`${days.start}T00:00:00Z`).toLocaleString('en-IN', { month: 'long', timeZone: 'UTC' })}.` }); continue; }
+    if (invoiced.has(contract.id)) { skipped.push({ ...common, reason: 'An invoice already exists for this contract and period.' }); continue; }
+    const additionalLines = additions.filter((line) => line.contractId === contract.id).map(({ id, description, priceMinor, serviceDate }) => ({ id, description, priceMinor, serviceDate }));
+    const taxableMinor = contract.valueMinor + additionalLines.reduce((total, line) => total + line.priceMinor, 0);
+    const gstMinor = Math.round(taxableMinor * gstRate / 100);
+    proposed.push({ ...common, customerId: contract.customerId, billingPeriod, invoiceDate: days.start, dueDate: addCalendarDays(days.start, contract.paymentTermsDays), taxableMinor, gstRate, gstMinor, totalMinor: taxableMinor + gstMinor, additionalLines });
+  }
+  return { billingPeriod, proposed, skipped };
+}
+
+/** What a bulk-issued invoice prints: the contract amount on one amount-only line, taxed by the place of supply. */
+export function bulkInvoiceSnapshot(proposal: BulkInvoiceProposal, seller: TenantSettings, customer: CustomerRecord, format: SnapshotFormat): InvoiceSnapshot {
+  const supply = resolveSupply(seller.stateCode, { gstin: customer.gstin, stateCode: customer.stateCode });
+  const gstFields = gstSnapshotFields({ seller, supply, lines: [amountOnlyLine(supply, proposal.gstRate)], requireHsn: false });
+  return {
+    companyName: seller.companyName, gstin: seller.gstin, address: seller.address, logoDataUrl: seller.logoDataUrl, stampDataUrl: seller.stampDataUrl, signatureDataUrl: seller.signatureDataUrl,
+    customerName: customer.companyName, customerEmail: customer.email, customerAddress: customer.billingAddress, customerGstin: customer.gstin, gstRate: proposal.gstRate, footer: seller.footer,
+    invoiceTemplate: seller.invoiceTemplate, format, ...gstFields,
+  };
+}
+
+export function bulkRunMessage(billingPeriod: string, generatedCount: number, skippedCount: number) {
+  return `Bulk invoice run for ${billingPeriod} issued ${generatedCount} invoice(s); ${skippedCount} contract(s) skipped.`;
+}
+
+/** A real `YYYY-MM` report month as a half-open range of days. */
+export function reportMonthDays(month: string) {
+  const days = /^\d{4}-(0[1-9]|1[0-2])$/.test(month) ? monthDays(month) : null;
+  if (!days) throw new Error('Choose a valid report month.');
+  return days;
+}
+
+function gstState(gstin: string) { return /^\d{2}/.test(gstin.trim()) ? gstin.trim().slice(0, 2) : null; }
+
+/** One invoice in the GST register. `customerGstin` is the client's GSTIN now, for invoices whose snapshot predates keeping it. */
+function gstSalesRow(invoice: TenantInvoice, customerGstin: string, companyGstin: string): GstSalesRow {
+  const { snapshot, gstMinor, totalMinor } = invoice;
+  const gstin = snapshot.customerGstin ?? customerGstin;
+  const interstate = snapshot.taxSplit ? snapshot.taxSplit === 'inter' : Boolean(gstState(companyGstin) && gstState(gstin) && gstState(companyGstin) !== gstState(gstin));
+  const igstMinor = snapshot.lines?.length ? snapshot.lines.filter((line) => line.taxType === 'igst').reduce((sum, line) => sum + line.gstMinor, 0) : interstate ? gstMinor : 0;
+  const domesticGstMinor = gstMinor - igstMinor;
+  const cgstMinor = Math.floor(domesticGstMinor / 2); const sgstMinor = domesticGstMinor - cgstMinor;
+  const taxable = snapshot.documentType ? snapshot.documentType === 'Tax Invoice' : gstMinor > 0;
+  const registration = validateGstin(gstin);
+  const section = gstr1Section({ taxability: taxable ? 'taxable' : 'nil', clientRegistered: registration.ok && registration.registered, split: interstate ? 'inter' : 'intra', invoiceTotalMinor: totalMinor });
+  return { section, invoiceId: invoice.id, invoiceNumber: invoice.invoiceNumber, invoiceDate: invoice.invoiceDate, customerName: invoice.customerName, customerGstin: gstin, taxableMinor: invoice.taxableMinor, gstMinor, totalMinor, igstMinor, cgstMinor, sgstMinor, netGstMinor: gstMinor };
+}
+
+/** One row per HSN/SAC code across the month's lines. Lines without a code (older invoices, optional codes) are left out. */
+function hsnSummary(invoices: readonly TenantInvoice[]): HsnSummaryRow[] {
+  const byCode = new Map<string, HsnSummaryRow>();
+  for (const line of invoices.flatMap((invoice) => invoice.snapshot.lines ?? [])) {
+    if (!line.hsnSac) continue;
+    const current = byCode.get(line.hsnSac) ?? { hsn: line.hsnSac, description: line.description, quantity: 0, taxableMinor: 0, taxMinor: 0 };
+    byCode.set(line.hsnSac, { ...current, quantity: Math.round((current.quantity + line.quantity) * 1000) / 1000, taxableMinor: current.taxableMinor + line.amountMinor, taxMinor: current.taxMinor + line.gstMinor });
+  }
+  return [...byCode.values()].sort((a, b) => a.hsn.localeCompare(b.hsn));
+}
+
+/** The GST register for `month` from its non-void invoices in register order, each with its client's GSTIN now. */
+export function gstSalesReport(month: string, seller: TenantSettings, invoices: ReadonlyArray<{ invoice: TenantInvoice; customerGstin: string }>): GstSalesReport {
+  const items = invoices.map(({ invoice, customerGstin }) => gstSalesRow(invoice, customerGstin, seller.gstin));
+  const totals = items.reduce((total, item) => ({ taxableMinor: total.taxableMinor + item.taxableMinor, gstMinor: total.gstMinor + item.gstMinor, totalMinor: total.totalMinor + item.totalMinor, igstMinor: total.igstMinor + item.igstMinor, cgstMinor: total.cgstMinor + item.cgstMinor, sgstMinor: total.sgstMinor + item.sgstMinor, netGstMinor: total.netGstMinor + item.netGstMinor }), { taxableMinor: 0, gstMinor: 0, totalMinor: 0, igstMinor: 0, cgstMinor: 0, sgstMinor: 0, netGstMinor: 0 });
+  return { month, companyName: seller.companyName, gstin: seller.gstin, items, hsnSummary: hsnSummary(invoices.map(({ invoice }) => invoice)), totals };
+}
+
+const deliveryStatuses: readonly DeliveryStatus[] = ['sent', 'failed', 'not-configured'];
+export function checkDeliveryStatus(status: DeliveryStatus) {
+  if (!deliveryStatuses.includes(status)) throw new Error('Unknown delivery status.');
+}
+
+export const paymentMethods = ['bank_transfer', 'cash', 'card', 'cheque', 'other'] as const satisfies readonly PaymentMethod[];
+export const FOREIGN_PAYMENT_INVOICE_MESSAGE = 'This invoice does not belong to your tenant.';
+
+/** What a payment applies to its invoice: the payment, TDS and write-off together, each a safe whole minor amount. */
+export function paymentApplied(input: PaymentInput) {
+  if (!isCalendarDate(input.paymentDate)) throw new Error('Enter a valid payment date.');
+  for (const value of [input.amountMinor, input.tdsMinor, input.writeOffMinor]) if (!Number.isSafeInteger(value) || value < 0) throw new Error('Payment, TDS, and write-off values must be non-negative whole minor amounts.');
+  const appliedMinor = input.amountMinor + input.tdsMinor + input.writeOffMinor;
+  if (appliedMinor <= 0) throw new Error('Enter a payment, TDS, or write-off amount.');
+  if (!(paymentMethods as readonly string[]).includes(input.method)) throw new Error('Choose a valid payment method.');
+  return appliedMinor;
+}
+
+type Balance = Pick<TenantInvoice, 'status' | 'totalMinor' | 'paidMinor'>;
+
+/** The invoice's paid amount and status once `appliedMinor` lands on it, or the reason it cannot. */
+export function allocation(invoice: Balance | null, appliedMinor: number): { paidMinor: number; status: InvoiceStatus } {
+  if (!invoice) throw new Error(FOREIGN_PAYMENT_INVOICE_MESSAGE);
+  if (invoice.status === 'void' || invoice.status === 'paid') throw new Error('Payments can only be allocated to an outstanding invoice.');
+  if (appliedMinor > invoice.totalMinor - invoice.paidMinor) throw new Error('Allocation cannot exceed the outstanding invoice balance.');
+  const paidMinor = invoice.paidMinor + appliedMinor;
+  return { paidMinor, status: paidMinor === invoice.totalMinor ? 'paid' : 'partial' };
+}
+
+/** The write-off that closes an outstanding invoice from pending payments. */
+export function closeout(invoice: Balance | null, note: string, today = new Date().toISOString().slice(0, 10)): Omit<PaymentInput, 'invoiceId'> {
+  if (!invoice) throw new Error(FOREIGN_PAYMENT_INVOICE_MESSAGE);
+  const outstanding = invoice.totalMinor - invoice.paidMinor;
+  if (outstanding <= 0 || invoice.status === 'void') throw new Error('Only an outstanding invoice can be closed.');
+  return { paymentDate: today, amountMinor: 0, tdsMinor: 0, writeOffMinor: outstanding, method: 'other', reference: 'CLOSEOUT', notes: note.trim() || 'Closed from pending payments.' };
+}
+
+export function paymentDetails(update: Pick<TenantPayment, 'method' | 'reference' | 'notes'>) {
+  if (!(paymentMethods as readonly string[]).includes(update.method)) throw new Error('Choose a valid payment method.');
+  if (typeof update.reference !== 'string' || typeof update.notes !== 'string') throw new Error('Reference and notes must be text.');
+  return { method: update.method, reference: update.reference.trim(), notes: update.notes.trim() };
+}
+
+function daysLate(dueDate: string, today: string) {
+  const [year, month, day] = dueDate.split('-').map(Number); const [todayYear, todayMonth, todayDay] = today.split('-').map(Number);
+  return Math.max(0, Math.floor((Date.UTC(todayYear, todayMonth - 1, todayDay) - Date.UTC(year, month - 1, day)) / 86_400_000));
+}
+
+function agingFor(days: number): PendingPayment['agingBucket'] { if (days === 0) return 'Current'; if (days <= 30) return '1–30'; if (days <= 60) return '31–60'; if (days <= 90) return '61–90'; return '90+'; }
+
+export function pendingPayment(invoice: TenantInvoice, reminders: PaymentReminder[], today = new Date().toISOString().slice(0, 10)): PendingPayment {
+  const daysOverdue = daysLate(invoice.dueDate, today);
+  return { ...invoice, outstandingMinor: invoice.totalMinor - invoice.paidMinor, daysOverdue, agingBucket: agingFor(daysOverdue), reminders };
+}
+
+/** The reminder's note, once the channel is known and the invoice still has something to pay. */
+export function reminderNote(invoice: Pick<TenantInvoice, 'totalMinor' | 'paidMinor'> | null, input: { channel: PaymentReminder['channel']; note?: string }) {
+  if (input.channel !== 'email' && input.channel !== 'whatsapp') throw new Error('Choose email or WhatsApp for the reminder.');
+  if (!invoice) throw new Error(FOREIGN_PAYMENT_INVOICE_MESSAGE);
+  if (invoice.paidMinor >= invoice.totalMinor) throw new Error('Paid invoices do not need payment reminders.');
+  return input.note?.trim() ?? '';
+}
+
+export const reminderMessage = (channel: PaymentReminder['channel'], invoiceNumber: string) => `${channel === 'email' ? 'Email' : 'WhatsApp'} payment reminder recorded for ${invoiceNumber}.`;
+
+export const FORMAT_NOT_FOUND = 'Invoice format not found.';
+export const DUPLICATE_FORMAT_MESSAGE = 'A format with that name already exists.';
+export const DEFAULT_FORMAT_DELETE_MESSAGE = 'The default invoice format cannot be deleted. Make another format the default first.';
+
+/** The id every tenant's first format takes. Listing formats creates it once, so two first lists at once insert it once. */
+export const standardFormatId = (tenantId: string) => `${tenantId}-format-standard`;

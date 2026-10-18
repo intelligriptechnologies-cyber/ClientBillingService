@@ -2,43 +2,36 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
-import { afterEach, describe, expect, it } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import { gstSalesCsv, hsnSummaryCsv } from '../gst-sales-export';
 import { UNREGISTERED_SELLER_TAX_MESSAGE } from '../invoice-gst';
 import { renderInvoiceHtml } from '../invoice-html';
 import type { InvoiceLineInput } from '../invoice-lines';
 import { createTenantStore } from '../tenant-store';
 import { tenantContextOf } from '../auth/session-context';
+import { describeStore, memberContext, storeForTest, type StoreArea } from './test-store';
 
 const KARNATAKA = '29AAGCB7383J1Z4';
 const MAHARASHTRA = '27AAPFU0939F1ZV';
-const stores: Array<ReturnType<typeof createTenantStore>> = [];
-
-function storeForTest() {
-  const store = createTenantStore(':memory:');
-  stores.push(store);
-  return store;
-}
-afterEach(async () => { for (const store of stores.splice(0)) await store.close(); });
+const INVOICING: StoreArea[] = ['settings', 'customers', 'services', 'contracts', 'invoices', 'bulkInvoices'];
 
 async function setup() {
-  const store = storeForTest();
-  const session = await store.authenticate('nexio-admin');
-  if (!session) throw new Error('Expected seeded session');
-  const register = async (gstin = KARNATAKA) => store.updateTenantSettings(tenantContextOf(session), { ...await store.getTenantSettings(tenantContextOf(session)), gstin, legalName: 'Nexio Hyper Private Limited' });
-  const customer = (fields: { gstin?: string; stateCode?: string; name?: string } = {}) => store.createCustomer(tenantContextOf(session), { companyName: fields.name ?? `Buyer ${crypto.randomUUID()}`, contactName: 'Buyer', email: 'buyer@example.com', phone: '9000000000', gstin: fields.gstin ?? '', stateCode: fields.stateCode, billingAddress: 'Somewhere', invoiceDelivery: 'manual' });
+  const store = await storeForTest();
+  const session = await memberContext(store, 'nexio-admin');
+  const register = async (gstin = KARNATAKA) => store.updateTenantSettings(session, { ...await store.getTenantSettings(session), gstin, legalName: 'Nexio Hyper Private Limited' });
+  const customer = (fields: { gstin?: string; stateCode?: string; name?: string } = {}) => store.createCustomer(session, { companyName: fields.name ?? `Buyer ${crypto.randomUUID()}`, contactName: 'Buyer', email: 'buyer@example.com', phone: '9000000000', gstin: fields.gstin ?? '', stateCode: fields.stateCode, billingAddress: 'Somewhere', invoiceDelivery: 'manual' });
   const line = (fields: Partial<InvoiceLineInput> = {}): InvoiceLineInput => ({ description: 'Consulting', quantity: 1, rateMinor: 100_000, taxType: 'cgst_sgst', gstRate: 18, hsnSac: '998311', ...fields });
   const invoice = (customerId: string, lines: InvoiceLineInput[], extra: { taxSplitOverrideReason?: string; invoiceDate?: string } = {}) => store.createIssuedInvoice(session, { customerId, invoiceDate: extra.invoiceDate ?? '2026-11-02', dueDate: '2026-11-30', gstApplicable: true, lines, taxSplitOverrideReason: extra.taxSplitOverrideReason });
   return { store, session, register, customer, line, invoice };
 }
 
-describe('seller GST setup', () => {
+describeStore(['settings'], 'seller GST setup', () => {
   it('rejects an invalid GSTIN with a message that names the problem', async () => {
     const { store, session } = await setup();
-    const settings = await store.getTenantSettings(tenantContextOf(session));
-    await expect(store.updateTenantSettings(tenantContextOf(session), { ...settings, gstin: '29AAGCB7383J1Z5' })).rejects.toThrow(/check digit/);
-    await expect(store.updateTenantSettings(tenantContextOf(session), { ...settings, gstin: '29ABC' })).rejects.toThrow(/15 characters/);
-    expect((await store.getTenantSettings(tenantContextOf(session))).gstin).toBe('');
+    const settings = await store.getTenantSettings(session);
+    await expect(store.updateTenantSettings(session, { ...settings, gstin: '29AAGCB7383J1Z5' })).rejects.toThrow(/check digit/);
+    await expect(store.updateTenantSettings(session, { ...settings, gstin: '29ABC' })).rejects.toThrow(/15 characters/);
+    expect((await store.getTenantSettings(session)).gstin).toBe('');
   });
 
   it('stores a valid GSTIN in capitals with the legal name and the state taken from its first two digits', async () => {
@@ -50,25 +43,25 @@ describe('seller GST setup', () => {
   it('treats a blank GSTIN as unregistered and clears the state', async () => {
     const { store, session, register } = await setup();
     await register();
-    const saved = await store.updateTenantSettings(tenantContextOf(session), { ...await store.getTenantSettings(tenantContextOf(session)), gstin: '  ' });
+    const saved = await store.updateTenantSettings(session, { ...await store.getTenantSettings(session), gstin: '  ' });
     expect(saved).toMatchObject({ gstin: '', stateCode: '' });
   });
 
   it('keeps the stored legal name when an update does not send one', async () => {
     const { store, session, register } = await setup();
     await register();
-    const { legalName, ...rest } = await store.getTenantSettings(tenantContextOf(session));
+    const { legalName, ...rest } = await store.getTenantSettings(session);
     expect(legalName).toBe('Nexio Hyper Private Limited');
-    expect((await store.updateTenantSettings(tenantContextOf(session), { ...rest, footer: 'Updated footer' })).legalName).toBe('Nexio Hyper Private Limited');
+    expect((await store.updateTenantSettings(session, { ...rest, footer: 'Updated footer' })).legalName).toBe('Nexio Hyper Private Limited');
   });
 });
 
-describe('client GST setup', () => {
+describeStore(['customers'], 'client GST setup', () => {
   it('rejects an invalid client GSTIN on create and update', async () => {
     const { store, session, customer } = await setup();
     await expect(customer({ gstin: '27AAPFU0939F1ZX' })).rejects.toThrow(/check digit/);
     const created = await customer();
-    await expect(store.updateCustomer(tenantContextOf(session), created.id, { ...created, gstin: 'BADGSTIN' })).rejects.toThrow(/15 characters/);
+    await expect(store.updateCustomer(session, created.id, { ...created, gstin: 'BADGSTIN' })).rejects.toThrow(/15 characters/);
   });
 
   it('sets the state code from a valid GSTIN and ignores a conflicting billing state', async () => {
@@ -82,7 +75,7 @@ describe('client GST setup', () => {
     expect(created).toMatchObject({ gstin: '', stateCode: '29' });
     expect((await customer({})).stateCode).toBe('');
     await expect(customer({ stateCode: '25' })).rejects.toThrow(/billing state/);
-    const cleared = await store.updateCustomer(tenantContextOf(session), created.id, { ...created, stateCode: '' });
+    const cleared = await store.updateCustomer(session, created.id, { ...created, stateCode: '' });
     expect(cleared.stateCode).toBe('');
   });
 
@@ -90,24 +83,24 @@ describe('client GST setup', () => {
     const { store, session, customer } = await setup();
     const created = await customer({ gstin: KARNATAKA });
     expect(created.stateCode).toBe('29');
-    expect((await store.updateCustomer(tenantContextOf(session), created.id, { ...created, gstin: MAHARASHTRA })).stateCode).toBe('27');
+    expect((await store.updateCustomer(session, created.id, { ...created, gstin: MAHARASHTRA })).stateCode).toBe('27');
   });
 });
 
-describe('HSN/SAC on services', () => {
+describeStore(['services'], 'HSN/SAC on services', () => {
   it('validates, stores and updates the code on a service', async () => {
     const { store, session } = await setup();
     const prices = { monthly: 1000, quarterly: 2000, halfYearly: 3000, annual: 4000 };
-    await expect(store.createService(tenantContextOf(session), { name: 'Bad code', prices, hsnSac: '12' })).rejects.toThrow(/HSN\/SAC/);
-    const service = await store.createService(tenantContextOf(session), { name: 'Consulting', prices, hsnSac: '998311' });
+    await expect(store.createService(session, { name: 'Bad code', prices, hsnSac: '12' })).rejects.toThrow(/HSN\/SAC/);
+    const service = await store.createService(session, { name: 'Consulting', prices, hsnSac: '998311' });
     expect(service.hsnSac).toBe('998311');
-    expect((await store.createService(tenantContextOf(session), { name: 'No code', prices })).hsnSac).toBe('');
-    expect((await store.updateService(tenantContextOf(session), service.id, { hsnSac: '' })).hsnSac).toBe('');
-    await expect(store.updateService(tenantContextOf(session), service.id, { hsnSac: 'ABC' })).rejects.toThrow(/HSN\/SAC/);
+    expect((await store.createService(session, { name: 'No code', prices })).hsnSac).toBe('');
+    expect((await store.updateService(session, service.id, { hsnSac: '' })).hsnSac).toBe('');
+    await expect(store.updateService(session, service.id, { hsnSac: 'ABC' })).rejects.toThrow(/HSN\/SAC/);
   });
 });
 
-describe('place of supply and tax split', () => {
+describeStore(INVOICING, 'place of supply and tax split', () => {
   it('preselects CGST + SGST inside the seller state and IGST outside it', async () => {
     const { store, session, register, customer } = await setup();
     await register();
@@ -125,7 +118,7 @@ describe('place of supply and tax split', () => {
     expect(issued.snapshot).toMatchObject({ documentType: 'Tax Invoice', sellerLegalName: 'Nexio Hyper Private Limited', sellerStateCode: '29', placeOfSupplyStateCode: '29', taxSplit: 'intra' });
     expect(issued.snapshot.taxSplitOverrideReason).toBeUndefined();
 
-    await store.updateCustomer(tenantContextOf(session), buyer.id, { ...buyer, stateCode: '27' });
+    await store.updateCustomer(session, buyer.id, { ...buyer, stateCode: '27' });
     expect((await store.getInvoice(session, issued.id))?.snapshot).toMatchObject({ placeOfSupplyStateCode: '29', taxSplit: 'intra' });
   });
 
@@ -179,7 +172,7 @@ describe('place of supply and tax split', () => {
   });
 });
 
-describe('document type', () => {
+describeStore(INVOICING, 'document type', () => {
   it('issues a Bill of Supply when the seller is unregistered or nothing is taxable', async () => {
     const { store, session, register, customer, line, invoice } = await setup();
     expect((await invoice((await customer()).id, [line({ taxType: 'none', gstRate: 0, hsnSac: '' })])).snapshot.documentType).toBe('Bill of Supply');
@@ -215,7 +208,7 @@ describe('document type', () => {
   });
 });
 
-describe('an unregistered seller cannot charge GST', () => {
+describeStore(INVOICING, 'an unregistered seller cannot charge GST', () => {
   it.each(['igst', 'cgst_sgst'] as const)('rejects a %s line with the message that says how to fix it and issues nothing', async (taxType) => {
     const { store, session, customer, line, invoice } = await setup();
     const buyer = await customer({ stateCode: '29' });
@@ -271,7 +264,7 @@ describe('an unregistered seller cannot charge GST', () => {
   });
 });
 
-describe('bulk invoices follow the place of supply', () => {
+describeStore(INVOICING, 'bulk invoices follow the place of supply', () => {
   it('splits a bulk invoice to a client in the seller state into CGST + SGST', async () => {
     const { store, session, register } = await setup();
     await register();
@@ -288,7 +281,7 @@ describe('bulk invoices follow the place of supply', () => {
   });
 });
 
-describe('HSN/SAC on invoice lines', () => {
+describeStore(INVOICING, 'HSN/SAC on invoice lines', () => {
   it('requires a valid code on taxable lines of a Tax Invoice and keeps it optional elsewhere', async () => {
     const { register, customer, line, invoice } = await setup();
     await register();
@@ -300,7 +293,7 @@ describe('HSN/SAC on invoice lines', () => {
   });
 });
 
-describe('GSTR-1 export', () => {
+describeStore(INVOICING, 'GSTR-1 export', () => {
   it('classifies each invoice into a section and summarises HSN/SAC codes', async () => {
     const { store, session, register, customer, line, invoice } = await setup();
     await register();
@@ -349,11 +342,11 @@ describe('additive migration', () => {
 
       for (let open = 0; open < 2; open += 1) {
         const store = createTenantStore(filename);
-        const session = { id: 'legacy-admin', name: 'A', email: 'a@example.com', role: 'admin' as const, tenantId: 'legacy', tenantName: 'Legacy Co' };
-        const customers = (await store.listCustomers(tenantContextOf(session), {})).items;
+        const session = tenantContextOf({ id: 'legacy-admin', name: 'A', email: 'a@example.com', role: 'admin' as const, tenantId: 'legacy', tenantName: 'Legacy Co' });
+        const customers = (await store.listCustomers(session, {})).items;
         expect(customers.map((item) => [item.id, item.gstin, item.stateCode]).sort()).toEqual([['c-blank', '', ''], ['c-junk', 'NA', ''], ['c-valid', MAHARASHTRA, '27']]);
-        expect(await store.getTenantSettings(tenantContextOf(session))).toMatchObject({ gstin: KARNATAKA, stateCode: '29', legalName: '' });
-        expect(await store.listServices(tenantContextOf(session))).toEqual([expect.objectContaining({ id: 'svc', hsnSac: '' })]);
+        expect(await store.getTenantSettings(session)).toMatchObject({ gstin: KARNATAKA, stateCode: '29', legalName: '' });
+        expect(await store.listServices(session)).toEqual([expect.objectContaining({ id: 'svc', hsnSac: '' })]);
         await store.close();
       }
     } finally {

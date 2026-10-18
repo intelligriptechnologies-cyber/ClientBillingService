@@ -34,7 +34,7 @@ it('starts a new app database with every saved record and keeps later edits on r
 
     store = createTenantStore(filename);
     expect((await store.listCustomers(tenantContextOf(session), { search: 'After first open' })).items).toHaveLength(1);
-    expect((await store.listInvoices(session, {})).items).toHaveLength(0);
+    expect((await store.listInvoices(tenantContextOf(session), {})).items).toHaveLength(0);
     await store.close();
   } finally {
     if (previousSeedMode === undefined) delete process.env.CLIENT_BILLING_SEED_MODE;

@@ -1,8 +1,10 @@
+import { parseFormatDefinition, type InvoiceFormat } from '../invoice-format';
 import type { SmtpSettings } from '../mailer';
 import type {
-  AdditionalService, Contract, ContractAuditEvent, CustomerRecord, DemoIdentity, OperationalLog, Quotation, QuotationLine, SecurityDeposit, TaskNote, Tenant, TenantHistoryEvent, TenantRecord,
-  TenantService, TenantSettings, TenantUser,
+  AdditionalService, BulkInvoiceRun, Contract, ContractAuditEvent, CustomerRecord, DeliveryRecord, DemoIdentity, InvoiceSnapshot, OperationalLog, PaymentReminder, Quotation, QuotationLine,
+  SecurityDeposit, TaskNote, Tenant, TenantHistoryEvent, TenantInvoice, TenantPayment, TenantRecord, TenantService, TenantSettings, TenantUser,
 } from './types';
+import { paymentMethods } from './rules';
 
 // One parser per table, at the store boundary (ADR 0001, the graft from candidate C). SQLite and Postgres rows
 // with the same columns parse the same way. A column with the wrong type throws here instead of leaking a bad value.
@@ -158,6 +160,57 @@ export function parseAdditionalServiceRow(row: Row): AdditionalService {
     contractName: text(row, 'contract_name'), serviceDate: text(row, 'service_date'), description: text(row, 'description'), priceMinor: integer(row, 'price_minor'), notes: text(row, 'notes'),
     status: oneOf(row, 'status', ['active', 'archived']), billedAt: nullableText(row, 'billed_at') || null, createdAt: text(row, 'created_at'), updatedAt: text(row, 'updated_at'),
   };
+}
+
+/** A JSON object: text from SQLite, already parsed from a Postgres jsonb column. */
+function object(row: Row, column: string): Record<string, unknown> {
+  const raw = row[column];
+  const value: unknown = typeof raw === 'string' ? JSON.parse(raw) : raw;
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) throw new TypeError(`Column ${column} holds ${String(raw)}, not a JSON object.`);
+  return value as Record<string, unknown>;
+}
+
+/** An invoices row joined with its customer's name. The snapshot is what the invoice printed when it was issued. */
+export function parseInvoiceRow(row: Row): TenantInvoice {
+  return {
+    id: text(row, 'id'), tenantId: text(row, 'tenant_id'), contractId: nullableText(row, 'contract_id') || null, customerId: text(row, 'customer_id'), customerName: text(row, 'customer_name'),
+    invoiceNumber: text(row, 'invoice_number'), invoiceDate: text(row, 'invoice_date'), dueDate: text(row, 'due_date'), taxableMinor: integer(row, 'taxable_minor'), gstRate: finite(row, 'gst_rate'),
+    gstMinor: integer(row, 'gst_minor'), totalMinor: integer(row, 'total_minor'), paidMinor: integer(row, 'paid_minor'), status: oneOf(row, 'status', ['issued', 'paid', 'partial', 'overdue', 'void']),
+    snapshot: object(row, 'snapshot') as InvoiceSnapshot, issuedAt: text(row, 'issued_at'),
+  };
+}
+
+export function parseBulkRunRow(row: Row): BulkInvoiceRun {
+  return { id: text(row, 'id'), billingPeriod: text(row, 'billing_period'), generatedCount: integer(row, 'generated_count'), skippedCount: integer(row, 'skipped_count'), createdAt: text(row, 'created_at') };
+}
+
+const addresses = (row: Row, column: string) => text(row, column).split(',').filter(Boolean);
+
+/** A delivery_log row joined with the name of the user who made the attempt, which is blank once that user is gone. */
+export function parseDeliveryRow(row: Row): DeliveryRecord {
+  return {
+    id: text(row, 'id'), invoiceId: text(row, 'invoice_id'), channel: oneOf(row, 'channel', ['email']), to: addresses(row, 'to_address'), cc: addresses(row, 'cc_address'), subject: text(row, 'subject'),
+    status: oneOf(row, 'status', ['sent', 'failed', 'not-configured']), error: text(row, 'error'), attemptedAt: text(row, 'attempted_at'), attemptedBy: text(row, 'attempted_by'),
+    attemptedByName: nullableText(row, 'attempted_by_name') ?? '',
+  };
+}
+
+/** A payments row joined with its invoice's number and customer. What it applies to the invoice is the payment, TDS and write-off together. */
+export function parsePaymentRow(row: Row): TenantPayment {
+  const amountMinor = integer(row, 'amount_minor'); const tdsMinor = integer(row, 'tds_minor'); const writeOffMinor = integer(row, 'write_off_minor');
+  return {
+    id: text(row, 'id'), invoiceId: text(row, 'invoice_id'), invoiceNumber: text(row, 'invoice_number'), customerId: text(row, 'customer_id'), customerName: text(row, 'customer_name'), paymentDate: text(row, 'payment_date'),
+    amountMinor, tdsMinor, writeOffMinor, appliedMinor: amountMinor + tdsMinor + writeOffMinor, method: oneOf(row, 'method', paymentMethods), reference: text(row, 'reference'), notes: text(row, 'notes'),
+    recordedAt: text(row, 'recorded_at'),
+  };
+}
+
+export function parseReminderRow(row: Row): PaymentReminder {
+  return { id: text(row, 'id'), invoiceId: text(row, 'invoice_id'), channel: oneOf(row, 'channel', ['email', 'whatsapp']), note: text(row, 'note'), createdAt: text(row, 'created_at') };
+}
+
+export function parseInvoiceFormatRow(row: Row): InvoiceFormat {
+  return { id: text(row, 'id'), name: text(row, 'name'), isDefault: integer(row, 'is_default') === 1, definition: parseFormatDefinition(object(row, 'definition')) };
 }
 
 /** A quotations row with its lines. A set archived_at is what makes it archived; the status column only ever holds draft. */

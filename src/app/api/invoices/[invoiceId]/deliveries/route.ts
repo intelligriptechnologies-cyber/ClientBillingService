@@ -3,6 +3,7 @@ import { getInvoiceEmailDefaults, MailServiceError } from '@/lib/mail-service';
 import { recordOperationException } from '@/lib/operational-error';
 import { getCurrentSession } from '@/lib/session';
 import { getTenantStore } from '@/lib/tenant-store';
+import { tenantContextOf } from "@/lib/auth/session-context";
 
 export async function GET(_: Request, context: { params: Promise<{ invoiceId: string }> }) {
   const session = await getCurrentSession();
@@ -10,7 +11,7 @@ export async function GET(_: Request, context: { params: Promise<{ invoiceId: st
   try {
     const store = getTenantStore(); const { invoiceId } = await context.params;
     const defaults = await getInvoiceEmailDefaults(store, session, invoiceId);
-    return NextResponse.json({ deliveries: await store.listDeliveries(session, invoiceId), defaults });
+    return NextResponse.json({ deliveries: await store.listDeliveries(tenantContextOf(session), invoiceId), defaults });
   } catch (cause) {
     if (cause instanceof MailServiceError) return NextResponse.json({ message: cause.message }, { status: cause.status });
     await recordOperationException(session, '/api/invoices/[invoiceId]/deliveries', cause);

@@ -44,7 +44,7 @@ describe('SMTP settings never expose the password', () => {
     expect((await store.getSmtpSettings(tenantContextOf(evo))).password).toBe(''); expect((await store.getTenantSettings(tenantContextOf(evo))).smtpPasswordSet).toBe(false);
     await testSmtp(store, admin, deps); await sendInvoiceEmail(store, admin, INVOICE, {}, deps);
     expect(JSON.stringify(await store.listOperationalLogs(tenantContextOf(admin)))).not.toContain(PASSWORD);
-    expect(JSON.stringify(await store.listDeliveries(admin, INVOICE))).not.toContain(PASSWORD);
+    expect(JSON.stringify(await store.listDeliveries(tenantContextOf(admin), INVOICE))).not.toContain(PASSWORD);
   });
 });
 
@@ -60,7 +60,7 @@ describe('sending an invoice', () => {
     expect(sent[0].attachments).toHaveLength(1);
     expect(sent[0].attachments![0]).toMatchObject({ filename: 'NEX-2026-001.pdf', contentType: 'application/pdf' });
     expect(Buffer.from(sent[0].attachments![0].content).subarray(0, 4).toString()).toBe('%PDF');
-    const [row] = await store.listDeliveries(admin, INVOICE);
+    const [row] = await store.listDeliveries(tenantContextOf(admin), INVOICE);
     expect(row).toMatchObject({ invoiceId: INVOICE, channel: 'email', to: ['billing@nexio.example'], cc: [], status: 'sent', error: '', attemptedBy: admin.id, attemptedByName: admin.name });
     expect(row.subject).toBe(sent[0].subject); expect(Date.parse(row.attemptedAt)).not.toBeNaN();
     expect(result.delivery).toEqual(row);
@@ -71,7 +71,7 @@ describe('sending an invoice', () => {
     await sendInvoiceEmail(store, admin, INVOICE, { to: 'ap@acme.example; fin@acme.example', cc: ['boss@acme.example'], message: 'Hi <b>team</b> & co\nSecond line' }, deps);
     expect(sent[0]).toMatchObject({ to: ['ap@acme.example', 'fin@acme.example'], cc: ['boss@acme.example'], text: 'Hi <b>team</b> & co\nSecond line' });
     expect(sent[0].html).toContain('Hi &lt;b&gt;team&lt;/b&gt; &amp; co'); expect(sent[0].html).not.toContain('<b>team</b>');
-    expect((await store.listDeliveries(admin, INVOICE))[0]).toMatchObject({ to: ['ap@acme.example', 'fin@acme.example'], cc: ['boss@acme.example'] });
+    expect((await store.listDeliveries(tenantContextOf(admin), INVOICE))[0]).toMatchObject({ to: ['ap@acme.example', 'fin@acme.example'], cc: ['boss@acme.example'] });
   });
 
   it('follows the customer when the billing email changes, and falls back to the issue-time snapshot', async () => {
@@ -96,21 +96,21 @@ describe('sending an invoice', () => {
     await configure(admin);
     const failure = await rejection(sendInvoiceEmail(store, admin, INVOICE, input, deps));
     expect(failure).toBeInstanceOf(MailServiceError); expect((failure as MailServiceError).status).toBe(400); expect((failure as Error).message).toMatch(pattern);
-    expect(sent).toEqual([]); expect(renderPdf).not.toHaveBeenCalled(); expect(await store.listDeliveries(admin, INVOICE)).toEqual([]);
+    expect(sent).toEqual([]); expect(renderPdf).not.toHaveBeenCalled(); expect(await store.listDeliveries(tenantContextOf(admin), INVOICE)).toEqual([]);
   });
 
   it('refuses a void invoice with a 409', async () => {
-    await configure(admin); await store.voidInvoice(admin, INVOICE, 'Issued in error');
+    await configure(admin); await store.voidInvoice(tenantContextOf(admin), INVOICE, 'Issued in error');
     const failure = await rejection(sendInvoiceEmail(store, admin, INVOICE, {}, deps));
     expect(failure).toMatchObject({ status: 409, message: expect.stringMatching(/void/i) });
-    expect(sent).toEqual([]); expect(await store.listDeliveries(admin, INVOICE)).toEqual([]);
+    expect(sent).toEqual([]); expect(await store.listDeliveries(tenantContextOf(admin), INVOICE)).toEqual([]);
   });
 
   it('answers not-configured, and logs it, while the tenant has no SMTP host', async () => {
     const result = await sendInvoiceEmail(store, admin, INVOICE, {}, deps);
     expect(result).toMatchObject({ status: 'not-configured', message: expect.stringMatching(/not set up|not configured/i) });
     expect(sent).toEqual([]);
-    expect(await store.listDeliveries(admin, INVOICE)).toMatchObject([{ status: 'not-configured', error: expect.stringMatching(/SMTP/i) }]);
+    expect(await store.listDeliveries(tenantContextOf(admin), INVOICE)).toMatchObject([{ status: 'not-configured', error: expect.stringMatching(/SMTP/i) }]);
   });
 
   it('logs a failed send with the clean reason and never repeats the raw SMTP text', async () => {
@@ -118,7 +118,7 @@ describe('sending an invoice', () => {
     transportBehaviour = { sendMail: async () => { throw Object.assign(new Error(`535 5.7.8 ${PASSWORD} rejected for billing at 10.1.2.3`), { code: 'EAUTH', responseCode: 535 }); } };
     const result = await sendInvoiceEmail(store, admin, INVOICE, {}, deps);
     expect(result.status).toBe('failed');
-    const [row] = await store.listDeliveries(admin, INVOICE);
+    const [row] = await store.listDeliveries(tenantContextOf(admin), INVOICE);
     expect(row).toMatchObject({ status: 'failed', error: expect.stringContaining('(EAUTH)') });
     for (const text of [JSON.stringify(result), JSON.stringify(row)]) for (const raw of [PASSWORD, '10.1.2.3', '535 5.7.8']) expect(text).not.toContain(raw);
   });
@@ -128,18 +128,18 @@ describe('sending an invoice', () => {
     const result = await sendInvoiceEmail(store, admin, INVOICE, {}, deps);
     expect(result).toMatchObject({ status: 'failed', message: expect.stringMatching(/PDF/) });
     expect(sent).toEqual([]); expect(JSON.stringify(result)).not.toContain('/secret/path');
-    expect(await store.listDeliveries(admin, INVOICE)).toMatchObject([{ status: 'failed' }]);
+    expect(await store.listDeliveries(tenantContextOf(admin), INVOICE)).toMatchObject([{ status: 'failed' }]);
   });
 
   it('lets a tenant user send, but not a superadmin, and treats another tenant invoice as missing', async () => {
     await configure(admin);
     expect((await sendInvoiceEmail(store, user, INVOICE, {}, deps)).status).toBe('sent');
-    expect(await store.listDeliveries(user, INVOICE)).toHaveLength(1);
+    expect(await store.listDeliveries(tenantContextOf(user), INVOICE)).toHaveLength(1);
     await expect(sendInvoiceEmail(store, superadmin, INVOICE, {}, deps)).rejects.toBeInstanceOf(Error);
     const foreign = await rejection(sendInvoiceEmail(store, evo, INVOICE, {}, deps));
     expect(foreign).toMatchObject({ status: 404 });
-    expect(sent).toHaveLength(1); expect(await store.listDeliveries(evo, 'evo-invoice-001')).toEqual([]);
-    await expect(store.listDeliveries(evo, INVOICE)).rejects.toThrow();
+    expect(sent).toHaveLength(1); expect(await store.listDeliveries(tenantContextOf(evo), 'evo-invoice-001')).toEqual([]);
+    await expect(store.listDeliveries(tenantContextOf(evo), INVOICE)).rejects.toThrow();
   });
 });
 
@@ -168,8 +168,8 @@ describe('payment reminders', () => {
     expect(result).toMatchObject({ status: 'sent', reminder: { channel: 'email', note: 'Please pay by Friday.' }, message: expect.stringContaining('sent') });
     expect(sent[0]).toMatchObject({ to: ['billing@nexio.example'] }); expect(sent[0].subject).toMatch(/reminder/i); expect(sent[0].text).toContain('Please pay by Friday.');
     expect(sent[0].attachments ?? []).toEqual([]);
-    expect(await store.listDeliveries(admin, INVOICE)).toMatchObject([{ status: 'sent', subject: sent[0].subject }]);
-    expect((await store.listPendingPayments(admin)).find((item) => item.id === INVOICE)?.reminders).toHaveLength(1);
+    expect(await store.listDeliveries(tenantContextOf(admin), INVOICE)).toMatchObject([{ status: 'sent', subject: sent[0].subject }]);
+    expect((await store.listPendingPayments(tenantContextOf(admin))).find((item) => item.id === INVOICE)?.reminders).toHaveLength(1);
   });
 
   it('records the reminder but says it was not sent when email is not set up or the send fails', async () => {
@@ -178,15 +178,15 @@ describe('payment reminders', () => {
     await configure(admin); transportBehaviour = { sendMail: async () => { throw Object.assign(new Error('boom'), { code: 'ECONNECTION' }); } };
     const failed = await sendPaymentReminder(store, admin, INVOICE, { channel: 'email' }, deps);
     expect(failed).toMatchObject({ status: 'failed', message: expect.stringMatching(/recorded, not sent/i) });
-    expect((await store.listPendingPayments(admin)).find((item) => item.id === INVOICE)?.reminders).toHaveLength(2);
-    expect((await store.listDeliveries(admin, INVOICE)).map((row) => row.status).sort()).toEqual(['failed', 'not-configured']);
+    expect((await store.listPendingPayments(tenantContextOf(admin))).find((item) => item.id === INVOICE)?.reminders).toHaveLength(2);
+    expect((await store.listDeliveries(tenantContextOf(admin), INVOICE)).map((row) => row.status).sort()).toEqual(['failed', 'not-configured']);
   });
 
   it('records a WhatsApp reminder without sending and says so', async () => {
     await configure(admin);
     const result = await sendPaymentReminder(store, admin, INVOICE, { channel: 'whatsapp' }, deps);
     expect(result).toMatchObject({ status: 'recorded', message: expect.stringMatching(/recorded, not sent/i), reminder: { channel: 'whatsapp' } });
-    expect(sent).toEqual([]); expect(await store.listDeliveries(admin, INVOICE)).toEqual([]);
+    expect(sent).toEqual([]); expect(await store.listDeliveries(tenantContextOf(admin), INVOICE)).toEqual([]);
   });
 
   it('keeps refusing a paid invoice and another tenant invoice', async () => {

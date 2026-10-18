@@ -10,8 +10,8 @@ type ContractFields = ReturnType<typeof contractFields>;
 
 const contractWithCustomer = 'SELECT contracts.*, customers.company_name AS customer_name FROM contracts JOIN customers ON customers.tenant_id = contracts.tenant_id AND customers.id = contracts.customer_id';
 
-/** Contracts with the services each covers, in SQLite's bytewise name order. */
-async function withServices(tx: Tx, tenantId: string, rows: Row[]): Promise<Contract[]> {
+/** Contracts with the services each covers, in SQLite's bytewise name order. Bulk invoicing reads contracts through it too. */
+export async function withServices(tx: Tx, tenantId: string, rows: Row[]): Promise<Contract[]> {
   if (!rows.length) return [];
   const { rows: services } = await tx.query<Row>(
     `SELECT contract_services.contract_id, services.id, services.name FROM contract_services JOIN services ON services.tenant_id = contract_services.tenant_id AND services.id = contract_services.service_id

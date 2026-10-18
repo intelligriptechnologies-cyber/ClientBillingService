@@ -3,24 +3,25 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { createTenantStore, type AppSession } from '@/lib/tenant-store';
+import { createTenantStore, type AppSession, type DeliveryInput, type TenantStore } from '@/lib/tenant-store';
+import type { TenantContext } from '../auth/principal';
 import { tenantContextOf } from '../auth/session-context';
+import { describeStore, memberContext, storeForTest } from './test-store';
 
 const INVOICE = 'nexio-invoice-001';
-let store: ReturnType<typeof createTenantStore>; let admin: AppSession; let user: AppSession; let evo: AppSession; let superadmin: AppSession;
 
 function must<T>(value: T | null | undefined): T { if (value === null || value === undefined) throw new Error('Expected fixture'); return value; }
-const attempt = (overrides: Partial<Parameters<typeof store.recordDelivery>[1]> = {}) => ({ invoiceId: INVOICE, to: ['a@acme.example'], cc: [], subject: 'Invoice', status: 'sent' as const, error: '', ...overrides });
+const attempt = (overrides: Partial<DeliveryInput> = {}): DeliveryInput => ({ invoiceId: INVOICE, to: ['a@acme.example'], cc: [], subject: 'Invoice', status: 'sent' as const, error: '', ...overrides });
 
-beforeEach(async () => { store = createTenantStore(':memory:'); admin = must(await store.authenticate('nexio-admin')); user = must(await store.authenticate('nexio-user')); evo = must(await store.authenticate('evo-admin')); superadmin = must(await store.authenticate('superadmin')); });
-afterEach(async () => store.close());
+describeStore(['users', 'invoices'], 'delivery log', () => {
+  let store: TenantStore; let admin: TenantContext; let user: TenantContext; let evo: TenantContext;
+  beforeEach(async () => { store = await storeForTest(); admin = await memberContext(store, 'nexio-admin'); user = await memberContext(store, 'nexio-user'); evo = await memberContext(store, 'evo-admin'); });
 
-describe('delivery log', () => {
   it('lists an invoice\'s attempts newest first, with who made them', async () => {
     const first = await store.recordDelivery(admin, attempt({ subject: 'First' }));
     const second = await store.recordDelivery(user, attempt({ subject: 'Second', status: 'failed', error: 'The connection timed out (ETIMEDOUT).', cc: ['b@acme.example'], to: ['a@acme.example', 'c@acme.example'] }));
     expect((await store.listDeliveries(admin, INVOICE)).map((row) => row.id)).toEqual([second.id, first.id]);
-    expect(second).toMatchObject({ channel: 'email', to: ['a@acme.example', 'c@acme.example'], cc: ['b@acme.example'], status: 'failed', error: 'The connection timed out (ETIMEDOUT).', attemptedBy: user.id, attemptedByName: user.name });
+    expect(second).toMatchObject({ channel: 'email', to: ['a@acme.example', 'c@acme.example'], cc: ['b@acme.example'], status: 'failed', error: 'The connection timed out (ETIMEDOUT).', attemptedBy: 'nexio-user', attemptedByName: 'Nexio Hyper User' });
   });
 
   it('keeps one invoice\'s log apart from another invoice and from another tenant', async () => {
@@ -33,9 +34,10 @@ describe('delivery log', () => {
   });
 
   it('is for tenant members only and rejects a status the log does not know', async () => {
-    await expect(store.recordDelivery(superadmin, attempt())).rejects.toThrow();
-    await expect(store.listDeliveries(superadmin, INVOICE)).rejects.toThrow();
-    await expect(store.recordDelivery(admin, attempt({ status: 'queued' as never }))).rejects.toThrow();
+    const superadmin: AppSession = { id: 'superadmin', name: 'Demo Superadmin', email: 'superadmin@ledgerly.demo', role: 'superadmin', tenantId: null, tenantName: null };
+    expect(() => tenantContextOf(superadmin)).toThrow('tenant');
+    await expect(store.recordDelivery(admin, attempt({ status: 'queued' as never }))).rejects.toThrow('Unknown delivery status.');
+    expect(await store.listDeliveries(admin, INVOICE)).toEqual([]);
   });
 });
 
@@ -55,7 +57,7 @@ describe('additive migration', () => {
     try {
       const session = must(await upgraded.authenticate('nexio-admin'));
       expect(await upgraded.getTenantSettings(tenantContextOf(session))).toMatchObject({ smtpHost: 'smtp.old.example', smtpFrom: 'old@nexio.example', smtpUser: '', smtpPasswordSet: false });
-      expect((await upgraded.recordDelivery(session, attempt())).status).toBe('sent');
+      expect((await upgraded.recordDelivery(tenantContextOf(session), attempt())).status).toBe('sent');
     } finally { await upgraded.close(); }
   });
 });

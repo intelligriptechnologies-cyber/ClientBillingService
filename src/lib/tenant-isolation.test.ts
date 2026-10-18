@@ -83,19 +83,19 @@ async function seedTenantA(session: AppSession) {
   const customerId = must((await store.listCustomers(tenantContextOf(session))).items[0]).id;
   const contractId = must((await store.listContracts(tenantContextOf(session))).items[0]).id;
   const serviceId = must((await store.listServices(tenantContextOf(session))).find((item) => item.status === 'active')).id;
-  const pending = must((await store.listPendingPayments(session))[0]);
+  const pending = must((await store.listPendingPayments(tenantContextOf(session)))[0]);
   const additionalServiceId = (await store.createAdditionalService(tenantContextOf(session), { customerId, contractId, serviceDate: '2026-10-05', description: 'Nexio-secret extra work', priceMinor: 5000 })).id;
   const noteId = (await store.createTaskNote(tenantContextOf(session), { customerId, date: '2026-10-05', note: 'Nexio-secret note' })).id;
   const quotationId = (await store.createQuotation(tenantContextOf(session), { customerName: 'Nexio-secret prospect', lines: [{ serviceId, frequency: 'monthly', quantity: 1 }] })).id;
   const userId = (await store.createTenantUser(tenantContextOf(session), { name: 'Nexio-secret colleague', email: 'secret@nexio.example', role: 'user' })).id;
-  const formatId = (await store.createInvoiceFormat(session, { name: 'Nexio-secret format', definition: formatDefinition })).id;
+  const formatId = (await store.createInvoiceFormat(tenantContextOf(session), { name: 'Nexio-secret format', definition: formatDefinition })).id;
   await store.recordOperationalError(tenantContextOf(session), 'nexio-secret-operation', new Error('Nexio-secret failure'));
-  const deliveryId = (await store.recordDelivery(session, { invoiceId: pending.id, to: ['secret-recipient@nexio-secret.example'], cc: [], subject: 'Nexio-secret subject', status: 'sent', error: '' })).id;
+  const deliveryId = (await store.recordDelivery(tenantContextOf(session), { invoiceId: pending.id, to: ['secret-recipient@nexio-secret.example'], cc: [], subject: 'Nexio-secret subject', status: 'sent', error: '' })).id;
   return {
     customerId, contractId, serviceId, additionalServiceId, noteId, quotationId, userId, formatId, deliveryId,
     invoiceId: pending.id,
     invoiceNumber: pending.invoiceNumber,
-    paymentId: must((await store.listPayments(session)).items[0]).id,
+    paymentId: must((await store.listPayments(tenantContextOf(session))).items[0]).id,
     depositId: must((await store.listSecurityDeposits(tenantContextOf(session)))[0]).id,
   };
 }
@@ -104,13 +104,13 @@ async function snapshot(session: AppSession) {
   const query = { pageSize: 1000 };
   const contractItems = (await store.listContracts(tenantContextOf(session), query)).items;
   return {
-    customers: await store.listCustomers(tenantContextOf(session), query), contracts: contractItems, invoices: await store.listInvoices(session, query),
-    payments: await store.listPayments(session, query), pending: await store.listPendingPayments(session), deposits: await store.listSecurityDeposits(tenantContextOf(session)),
+    customers: await store.listCustomers(tenantContextOf(session), query), contracts: contractItems, invoices: await store.listInvoices(tenantContextOf(session), query),
+    payments: await store.listPayments(tenantContextOf(session), query), pending: await store.listPendingPayments(tenantContextOf(session)), deposits: await store.listSecurityDeposits(tenantContextOf(session)),
     renewals: await store.listRenewals(tenantContextOf(session), query), services: await store.listServices(tenantContextOf(session)), additional: await store.listAdditionalServices(tenantContextOf(session), query),
     quotations: await store.listQuotations(tenantContextOf(session)), notes: await store.listTaskNotes(tenantContextOf(session)), users: await store.listTenantUsers(tenantContextOf(session)),
-    logs: await store.listOperationalLogs(tenantContextOf(session)), settings: await store.getTenantSettings(tenantContextOf(session)), bulkRuns: await store.listBulkInvoiceRuns(session), formats: await store.listInvoiceFormats(session),
+    logs: await store.listOperationalLogs(tenantContextOf(session)), settings: await store.getTenantSettings(tenantContextOf(session)), bulkRuns: await store.listBulkInvoiceRuns(tenantContextOf(session)), formats: await store.listInvoiceFormats(tenantContextOf(session)),
     audit: await Promise.all(contractItems.map(async (item) => store.listContractAudit(tenantContextOf(session), item.id))),
-    deliveries: await Promise.all((await store.listInvoices(session, query)).items.map(async (item) => store.listDeliveries(session, item.id))),
+    deliveries: await Promise.all((await store.listInvoices(tenantContextOf(session), query)).items.map(async (item) => store.listDeliveries(tenantContextOf(session), item.id))),
     smtp: await store.getSmtpSettings(tenantContextOf(session)),
   };
 }
@@ -267,10 +267,10 @@ describe('store functions reached by id without a route', () => {
     const attempts: Array<[string, () => Promise<unknown>]> = [
       ['getService', async () => await store.getService(tenantContextOf(tenantB), f.serviceId)],
       ['getQuotation', async () => await store.getQuotation(tenantContextOf(tenantB), f.quotationId)],
-      ['getInvoice', async () => await store.getInvoice(tenantB, f.invoiceId)],
-      ['getPayment', async () => await store.getPayment(tenantB, f.paymentId)],
-      ['listDeliveries', async () => await store.listDeliveries(tenantB, f.invoiceId)],
-      ['recordDelivery', async () => await store.recordDelivery(tenantB, { invoiceId: f.invoiceId, to: ['x@y.example'], cc: [], subject: 'planted', status: 'sent', error: '' })],
+      ['getInvoice', async () => await store.getInvoice(tenantContextOf(tenantB), f.invoiceId)],
+      ['getPayment', async () => await store.getPayment(tenantContextOf(tenantB), f.paymentId)],
+      ['listDeliveries', async () => await store.listDeliveries(tenantContextOf(tenantB), f.invoiceId)],
+      ['recordDelivery', async () => await store.recordDelivery(tenantContextOf(tenantB), { invoiceId: f.invoiceId, to: ['x@y.example'], cc: [], subject: 'planted', status: 'sent', error: '' })],
       ['getCustomer', async () => await store.getCustomer(tenantContextOf(tenantB), f.customerId)],
     ];
     for (const [name, run] of attempts) {
@@ -307,7 +307,7 @@ describe('the delivery log and mail settings', () => {
     const send = (body: string) => invoiceSend.POST(new Request('http://localhost/', { method: 'POST', body }), { params: Promise.resolve({ invoiceId: f.invoiceId }) });
     expect((await send('{"to":"ap@acme.example"')).status).toBe(400);
     expect(existsSync(captureFile)).toBe(false);
-    expect(await store.listDeliveries(tenantA, f.invoiceId)).toHaveLength(1);
+    expect(await store.listDeliveries(tenantContextOf(tenantA), f.invoiceId)).toHaveLength(1);
     expect((await send('')).status).toBe(200);
     expect(JSON.parse(readFileSync(captureFile, 'utf8'))[0].to).toEqual(['billing@nexio.example']);
   }, 30_000);
@@ -320,7 +320,7 @@ describe('the delivery log and mail settings', () => {
     expect(captured).toHaveLength(1);
     expect(captured[0]).toMatchObject({ to: ['ap@acme.example'], from: 'billing@nexio-secret.example' });
     expect(Buffer.from(captured[0].attachments[0].contentBase64, 'base64').subarray(0, 4).toString()).toBe('%PDF');
-    expect(await store.listDeliveries(tenantA, f.invoiceId)).toHaveLength(2);
+    expect(await store.listDeliveries(tenantContextOf(tenantA), f.invoiceId)).toHaveLength(2);
   }, 30_000);
 
   it('never returns the SMTP password from the settings or SMTP test routes, to its owner or anyone else', async () => {

@@ -22,7 +22,7 @@ const fileSafe = (name: string) => name.replace(/[^A-Za-z0-9._-]+/g, '_');
 
 async function loadInvoice(store: Store, session: AppSession, invoiceId: string): Promise<TenantInvoice> {
   let invoice: TenantInvoice | null = null;
-  try { invoice = await store.getInvoice(session, invoiceId); } catch { /* Another tenant's invoice answers the same as a missing one. */ }
+  try { invoice = await store.getInvoice(tenantContextOf(session), invoiceId); } catch { /* Another tenant's invoice answers the same as a missing one. */ }
   if (!invoice) throw new MailServiceError('Invoice not found.', 404);
   return invoice;
 }
@@ -70,7 +70,7 @@ export async function sendInvoiceEmail(store: Store, session: AppSession, invoic
   const { to, cc, message } = parseSendInput(input, await billingEmail(store, session, invoice));
   const smtp = await store.getSmtpSettings(tenantContextOf(session));
   const subject = invoiceSubject(invoice); const text = message || invoiceMessage(invoice);
-  const record = (status: DeliveryStatus, error: string) => store.recordDelivery(session, { invoiceId, to, cc, subject, status, error });
+  const record = (status: DeliveryStatus, error: string) => store.recordDelivery(tenantContextOf(session), { invoiceId, to, cc, subject, status, error });
   const finish = async (status: DeliveryStatus, reason: string, summary: string): Promise<SendInvoiceResult> => {
     const delivery = await record(status, reason);
     await store.logFeatureFlow(tenantContextOf(session), `Invoice ${invoice.invoiceNumber} email to ${to.join(', ')}: ${status}${reason ? ` (${reason})` : ''}`);
@@ -105,7 +105,7 @@ export type ReminderResult = { reminder: PaymentReminder; status: DeliveryStatus
 
 /** Records the reminder, then emails it when the channel is email and SMTP works. The message always says whether anything left the building. */
 export async function sendPaymentReminder(store: Store, session: AppSession, invoiceId: string, input: { channel: PaymentReminder['channel']; note?: string }, deps: MailDeps = defaultMailDeps): Promise<ReminderResult> {
-  const reminder = await store.recordPaymentReminder(session, invoiceId, input);
+  const reminder = await store.recordPaymentReminder(tenantContextOf(session), invoiceId, input);
   if (input.channel !== 'email') return { reminder, status: 'recorded', message: 'WhatsApp reminder recorded, not sent. Sending over WhatsApp is not available yet.' };
   const invoice = await loadInvoice(store, session, invoiceId);
   const to = [await billingEmail(store, session, invoice)]; const smtp = await store.getSmtpSettings(tenantContextOf(session));
@@ -114,7 +114,7 @@ export async function sendPaymentReminder(store: Store, session: AppSession, inv
   const text = `Hello ${invoice.customerName},\n\nThis is a reminder that invoice ${invoice.invoiceNumber} from ${invoice.snapshot.companyName} (${money(invoice.totalMinor)}, ${money(outstanding)} outstanding) was due on ${invoice.dueDate}.${note ? `\n\n${note}` : ''}\n\nThank you,\n${invoice.snapshot.companyName}`;
   const result = await deps.mailer.sendMail({ from: smtp.from.trim(), to, cc: [], subject, text, html: htmlFor(text) }, smtp);
   const status: DeliveryStatus = result.status;
-  await store.recordDelivery(session, { invoiceId, to, cc: [], subject, status, error: result.status === 'sent' ? '' : result.reason });
+  await store.recordDelivery(tenantContextOf(session), { invoiceId, to, cc: [], subject, status, error: result.status === 'sent' ? '' : result.reason });
   await store.logFeatureFlow(tenantContextOf(session), `Payment reminder email for ${invoice.invoiceNumber}: ${status}${result.status === 'sent' ? '' : ` (${result.reason})`}`);
   return { reminder, status, message: result.status === 'sent' ? `Email reminder sent to ${to.join(', ')}.` : `Reminder recorded, not sent. ${result.reason}` };
 }

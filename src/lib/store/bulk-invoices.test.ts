@@ -1,5 +1,5 @@
 import { expect, it } from 'vitest';
-import { describeStore, storeForTest, registerSeller } from './test-store';
+import { describeStore, memberContext, storeForTest, registerSeller } from './test-store';
 import { tenantContextOf } from '../auth/session-context';
 
 describeStore(['settings', 'customers', 'services', 'contracts', 'additionalServices', 'invoices', 'bulkInvoices'], 'bulk invoice runs', () => {
@@ -24,17 +24,52 @@ describeStore(['settings', 'customers', 'services', 'contracts', 'additionalServ
     });
     await store.createAdditionalService(tenantContextOf(nexio), { customerId: customer.id, contractId: eligible.id, serviceDate: '2026-10-15', description: 'On-site workshop', priceMinor: 25000, notes: '' });
 
-    const preview = await store.previewBulkInvoices(nexio, '2026-10');
+    const preview = await store.previewBulkInvoices(tenantContextOf(nexio), '2026-10');
     expect(preview.proposed).toEqual(expect.arrayContaining([expect.objectContaining({ contractId: eligible.id, taxableMinor: 125000, additionalLines: [expect.objectContaining({ description: 'On-site workshop', priceMinor: 25000 })] })]));
     expect(preview.skipped).toEqual(expect.arrayContaining([expect.objectContaining({ reason: 'Billing is not scheduled for October.' })]));
 
-    const first = await store.generateBulkInvoices(nexio, '2026-10');
+    const first = await store.generateBulkInvoices(tenantContextOf(nexio), '2026-10');
     expect(first).toMatchObject({ alreadyGenerated: false, generatedCount: 1 });
-    expect((await store.listInvoices(nexio, { month: '2026-10' })).items).toEqual(expect.arrayContaining([expect.objectContaining({ contractId: eligible.id, taxableMinor: 125000, gstMinor: 22500 })]));
+    expect((await store.listInvoices(tenantContextOf(nexio), { month: '2026-10' })).items).toEqual(expect.arrayContaining([expect.objectContaining({ contractId: eligible.id, taxableMinor: 125000, gstMinor: 22500 })]));
     expect((await store.listAdditionalServices(tenantContextOf(nexio), { billingPeriod: '2026-10' })).items).toEqual([expect.objectContaining({ description: 'On-site workshop', billedAt: expect.any(String) })]);
-    expect(await store.listBulkInvoiceRuns(nexio)).toEqual(expect.arrayContaining([expect.objectContaining({ billingPeriod: '2026-10', generatedCount: 1 })]));
+    expect(await store.listBulkInvoiceRuns(tenantContextOf(nexio))).toEqual(expect.arrayContaining([expect.objectContaining({ billingPeriod: '2026-10', generatedCount: 1 })]));
 
-    expect(await store.generateBulkInvoices(nexio, '2026-10')).toMatchObject({ alreadyGenerated: true, generatedCount: 1 });
-    expect((await store.listInvoices(nexio, { month: '2026-10' })).items.filter((invoice) => invoice.contractId === eligible.id)).toHaveLength(1);
+    expect(await store.generateBulkInvoices(tenantContextOf(nexio), '2026-10')).toMatchObject({ alreadyGenerated: true, generatedCount: 1 });
+    expect((await store.listInvoices(tenantContextOf(nexio), { month: '2026-10' })).items.filter((invoice) => invoice.contractId === eligible.id)).toHaveLength(1);
+  });
+});
+
+describeStore(['settings', 'customers', 'contracts', 'additionalServices', 'invoices', 'bulkInvoices'], 'bulk invoice runs under concurrent requests', () => {
+  it('creates one run and one invoice per contract when a run for one period is started twice at once', async () => {
+    const store = await storeForTest();
+    const nexio = await memberContext(store, 'nexio-admin');
+    // Open two pooled connections first, so the racing requests start together instead of one waiting to connect.
+    await Promise.all([store.listBulkInvoiceRuns(nexio), store.listBulkInvoiceRuns(nexio)]);
+    const proposed = (await store.previewBulkInvoices(nexio, '2026-11')).proposed;
+    expect(proposed.length).toBeGreaterThan(0);
+
+    const results = await Promise.all([store.generateBulkInvoices(nexio, '2026-11'), store.generateBulkInvoices(nexio, '2026-11')]);
+
+    expect(results.map((result) => result.alreadyGenerated).sort()).toEqual([false, true]);
+    expect(results[0].run).toEqual(results[1].run);
+    expect((await store.listBulkInvoiceRuns(nexio)).filter((run) => run.billingPeriod === '2026-11')).toHaveLength(1);
+    expect((await store.listInvoices(nexio, { month: '2026-11', pageSize: 100 })).items.map((invoice) => invoice.contractId).sort()).toEqual(proposed.map((item) => item.contractId).sort());
+  });
+
+  it('bills an additional service at the price it ends with when its price changes during the run', async () => {
+    const store = await storeForTest();
+    const nexio = await memberContext(store, 'nexio-admin');
+    await Promise.all([store.listBulkInvoiceRuns(nexio), store.listBulkInvoiceRuns(nexio)]);
+    const contract = (await store.listContracts(nexio)).items[0];
+
+    // Which request goes first varies from run to run, so five months make a stale price show up in nearly every run.
+    for (const month of ['2026-03', '2026-04', '2026-05', '2026-06', '2026-07']) {
+      const extra = await store.createAdditionalService(nexio, { customerId: contract.customerId, contractId: contract.id, serviceDate: `${month}-10`, description: `Extra ${month}`, priceMinor: 10000 });
+      await Promise.allSettled([store.generateBulkInvoices(nexio, month), store.updateAdditionalService(nexio, extra.id, { priceMinor: 40000 })]);
+      const service = (await store.listAdditionalServices(nexio, { billingPeriod: month })).items.find((item) => item.id === extra.id)!;
+      const invoice = (await store.listInvoices(nexio, { month })).items.find((item) => item.contractId === contract.id)!;
+      expect(service.billedAt).not.toBeNull();
+      expect(invoice.taxableMinor).toBe(contract.valueMinor + service.priceMinor);
+    }
   });
 });
