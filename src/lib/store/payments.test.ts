@@ -1,6 +1,6 @@
 import { expect, it } from 'vitest';
 import { describeStore, memberContext, storeForTest, registerSeller } from './test-store';
-import type { TenantInvoice } from './types';
+import type { PaymentInput, PaymentQuery, TenantInvoice } from './types';
 import { tenantContextOf } from '../auth/session-context';
 
 describeStore(['settings', 'customers', 'invoices', 'payments'], 'payments', () => {
@@ -44,6 +44,29 @@ describeStore(['settings', 'customers', 'invoices', 'payments'], 'payments', () 
     expect((await store.listPendingPayments(tenantContextOf(nexio))).map((item) => item.id)).not.toContain(invoice.id);
     expect((await store.listOperationalLogs(tenantContextOf(nexio))).some((log) => log.message.includes(`Invoice ${invoice.invoiceNumber} was closed`))).toBe(true);
     await expect(store.closeInvoice(tenantContextOf(evo), invoice.id)).rejects.toThrow('tenant');
+  });
+});
+
+describeStore(['invoices', 'payments'], 'payment register and input rules', () => {
+  it('filters payments by month at the month edges and by search, totals what they apply, and refuses values a date column or the method list cannot hold', async () => {
+    const store = await storeForTest();
+    const nexio = await memberContext(store, 'nexio-admin');
+    const pay = (paymentDate: string, extra: Partial<PaymentInput> = {}) => store.recordPayment(nexio, { invoiceId: 'nexio-invoice-001', paymentDate, amountMinor: 1000, tdsMinor: 100, writeOffMinor: 0, method: 'cash', reference: 'Zq-ref', ...extra });
+    const lastOfOctober = await pay('2026-10-31');
+    const firstOfNovember = await pay('2026-11-01', { amountMinor: 2000, writeOffMinor: 50 });
+    const list = (query: PaymentQuery) => store.listPayments(nexio, { pageSize: 100, ...query });
+
+    expect((await list({ month: '2026-10' })).items.map((item) => item.id)).toEqual([lastOfOctober.id]);
+    expect(await list({ month: '2026-11' })).toMatchObject({ total: 1, totalAppliedMinor: 2150, items: [{ id: firstOfNovember.id, appliedMinor: 2150 }] });
+    expect((await list({ month: '2026-13' })).total).toBe(0);
+    expect((await list({ search: 'zq-REF' })).items.map((item) => item.id)).toEqual([firstOfNovember.id, lastOfOctober.id]);
+    expect(await list({})).toMatchObject({ total: 3, totalAppliedMinor: 118000 + 1100 + 2150 });
+
+    await expect(pay('2026-02-31')).rejects.toThrow('Enter a valid payment date.');
+    await expect(pay('2026-11-02', { method: 'barter' as never })).rejects.toThrow('Choose a valid payment method.');
+    await expect(pay('2026-11-02', { amountMinor: 2 ** 53 })).rejects.toThrow('Payment, TDS, and write-off values must be non-negative whole minor amounts.');
+    await expect(store.updatePaymentDetails(nexio, lastOfOctober.id, { method: 'barter' as never, reference: '', notes: '' })).rejects.toThrow('Choose a valid payment method.');
+    expect(await store.getInvoice(nexio, 'nexio-invoice-001')).toMatchObject({ paidMinor: 3250, status: 'partial' });
   });
 });
 
