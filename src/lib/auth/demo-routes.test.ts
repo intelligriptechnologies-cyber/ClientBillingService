@@ -27,7 +27,7 @@ function stubEnv(values: Record<string, string>) {
 const login = (userId: string) => new Request('http://localhost/api/auth/demo-login', { method: 'POST', body: JSON.stringify({ userId }) });
 
 beforeEach(() => { world.store = createTenantStore(':memory:'); });
-afterEach(() => { (world.store as ReturnType<typeof createTenantStore>).close(); vi.unstubAllEnvs(); });
+afterEach(async () => { await (world.store as ReturnType<typeof createTenantStore>).close(); vi.unstubAllEnvs(); });
 
 describe('demo auth routes', () => {
   it('sign in and list identities in demo mode, the default', async () => {

@@ -64,7 +64,7 @@ vi.mock('@/lib/tenant-store', async (importOriginal) => ({
 
 type Reply = { status: number; text: string };
 type Handler = (request: Request, context: never) => Promise<Response> | Response;
-type Fixtures = ReturnType<typeof seedTenantA>;
+type Fixtures = Awaited<ReturnType<typeof seedTenantA>>;
 
 let store: Store;
 let tenantA: AppSession;
@@ -77,40 +77,40 @@ function must<T>(value: T | null | undefined): T {
 
 const SMTP_SECRET = 'nexio-smtp-secret-9f3a';
 
-function seedTenantA(session: AppSession) {
-  store.updateTenantSettings(session, { ...settingsInput(store.getTenantSettings(session)), smtpHost: 'smtp.nexio-secret.example', smtpFrom: 'billing@nexio-secret.example', smtpUser: 'nexio-smtp-user', smtpPassword: SMTP_SECRET });
-  const customerId = must(store.listCustomers(session).items[0]).id;
-  const contractId = must(store.listContracts(session).items[0]).id;
-  const serviceId = must(store.listServices(session).find((item) => item.status === 'active')).id;
-  const pending = must(store.listPendingPayments(session)[0]);
-  const additionalServiceId = store.createAdditionalService(session, { customerId, contractId, serviceDate: '2026-10-05', description: 'Nexio-secret extra work', priceMinor: 5000 }).id;
-  const noteId = store.createTaskNote(session, { customerId, date: '2026-10-05', note: 'Nexio-secret note' }).id;
-  const quotationId = store.createQuotation(session, { customerName: 'Nexio-secret prospect', lines: [{ serviceId, frequency: 'monthly', quantity: 1 }] }).id;
-  const userId = store.createTenantUser(session, { name: 'Nexio-secret colleague', email: 'secret@nexio.example', role: 'user' }).id;
-  const formatId = store.createInvoiceFormat(session, { name: 'Nexio-secret format', definition: formatDefinition }).id;
-  store.recordOperationalError(session, 'nexio-secret-operation', new Error('Nexio-secret failure'));
-  const deliveryId = store.recordDelivery(session, { invoiceId: pending.id, to: ['secret-recipient@nexio-secret.example'], cc: [], subject: 'Nexio-secret subject', status: 'sent', error: '' }).id;
+async function seedTenantA(session: AppSession) {
+  await store.updateTenantSettings(session, { ...settingsInput(await store.getTenantSettings(session)), smtpHost: 'smtp.nexio-secret.example', smtpFrom: 'billing@nexio-secret.example', smtpUser: 'nexio-smtp-user', smtpPassword: SMTP_SECRET });
+  const customerId = must((await store.listCustomers(session)).items[0]).id;
+  const contractId = must((await store.listContracts(session)).items[0]).id;
+  const serviceId = must((await store.listServices(session)).find((item) => item.status === 'active')).id;
+  const pending = must((await store.listPendingPayments(session))[0]);
+  const additionalServiceId = (await store.createAdditionalService(session, { customerId, contractId, serviceDate: '2026-10-05', description: 'Nexio-secret extra work', priceMinor: 5000 })).id;
+  const noteId = (await store.createTaskNote(session, { customerId, date: '2026-10-05', note: 'Nexio-secret note' })).id;
+  const quotationId = (await store.createQuotation(session, { customerName: 'Nexio-secret prospect', lines: [{ serviceId, frequency: 'monthly', quantity: 1 }] })).id;
+  const userId = (await store.createTenantUser(session, { name: 'Nexio-secret colleague', email: 'secret@nexio.example', role: 'user' })).id;
+  const formatId = (await store.createInvoiceFormat(session, { name: 'Nexio-secret format', definition: formatDefinition })).id;
+  await store.recordOperationalError(session, 'nexio-secret-operation', new Error('Nexio-secret failure'));
+  const deliveryId = (await store.recordDelivery(session, { invoiceId: pending.id, to: ['secret-recipient@nexio-secret.example'], cc: [], subject: 'Nexio-secret subject', status: 'sent', error: '' })).id;
   return {
     customerId, contractId, serviceId, additionalServiceId, noteId, quotationId, userId, formatId, deliveryId,
     invoiceId: pending.id,
     invoiceNumber: pending.invoiceNumber,
-    paymentId: must(store.listPayments(session).items[0]).id,
-    depositId: must(store.listSecurityDeposits(session)[0]).id,
+    paymentId: must((await store.listPayments(session)).items[0]).id,
+    depositId: must((await store.listSecurityDeposits(session))[0]).id,
   };
 }
 
-function snapshot(session: AppSession) {
+async function snapshot(session: AppSession) {
   const query = { pageSize: 1000 };
-  const contractItems = store.listContracts(session, query).items;
+  const contractItems = (await store.listContracts(session, query)).items;
   return {
-    customers: store.listCustomers(session, query), contracts: contractItems, invoices: store.listInvoices(session, query),
-    payments: store.listPayments(session, query), pending: store.listPendingPayments(session), deposits: store.listSecurityDeposits(session),
-    renewals: store.listRenewals(session, query), services: store.listServices(session), additional: store.listAdditionalServices(session, query),
-    quotations: store.listQuotations(session), notes: store.listTaskNotes(session), users: store.listTenantUsers(session),
-    logs: store.listOperationalLogs(session), settings: store.getTenantSettings(session), bulkRuns: store.listBulkInvoiceRuns(session), formats: store.listInvoiceFormats(session),
-    audit: contractItems.map((item) => store.listContractAudit(session, item.id)),
-    deliveries: store.listInvoices(session, query).items.map((item) => store.listDeliveries(session, item.id)),
-    smtp: store.getSmtpSettings(session),
+    customers: await store.listCustomers(session, query), contracts: contractItems, invoices: await store.listInvoices(session, query),
+    payments: await store.listPayments(session, query), pending: await store.listPendingPayments(session), deposits: await store.listSecurityDeposits(session),
+    renewals: await store.listRenewals(session, query), services: await store.listServices(session), additional: await store.listAdditionalServices(session, query),
+    quotations: await store.listQuotations(session), notes: await store.listTaskNotes(session), users: await store.listTenantUsers(session),
+    logs: await store.listOperationalLogs(session), settings: await store.getTenantSettings(session), bulkRuns: await store.listBulkInvoiceRuns(session), formats: await store.listInvoiceFormats(session),
+    audit: await Promise.all(contractItems.map(async (item) => store.listContractAudit(session, item.id))),
+    deliveries: await Promise.all((await store.listInvoices(session, query)).items.map(async (item) => store.listDeliveries(session, item.id))),
+    smtp: await store.getSmtpSettings(session),
   };
 }
 
@@ -134,16 +134,16 @@ async function call(handler: Handler, as: AppSession, init: { url?: string; meth
 
 let captureDirectory: string; let captureFile: string;
 
-beforeEach(() => {
+beforeEach(async () => {
   store = createTenantStore(':memory:');
   world.store = store;
-  tenantA = must(store.authenticate('nexio-admin'));
-  tenantB = must(store.authenticate('evo-admin'));
+  tenantA = must(await store.authenticate('nexio-admin'));
+  tenantB = must(await store.authenticate('evo-admin'));
   captureDirectory = mkdtempSync(join(tmpdir(), 'isolation-mail-')); captureFile = join(captureDirectory, 'mail-capture.json');
   vi.stubEnv('CLIENT_BILLING_MAIL_TRANSPORT', 'capture'); vi.stubEnv('CLIENT_BILLING_MAIL_CAPTURE_FILE', captureFile);
 });
 
-afterEach(() => { store.close(); vi.unstubAllEnvs(); rmSync(captureDirectory, { recursive: true, force: true }); });
+afterEach(async () => { await store.close(); vi.unstubAllEnvs(); rmSync(captureDirectory, { recursive: true, force: true }); });
 
 const customerBody = { companyName: 'Hijacked Co', contactName: 'Mallory', email: 'm@evil.example', phone: '1', gstin: '', billingAddress: 'Evil street', invoiceDelivery: 'manual' };
 const contractBody = (f: Fixtures) => ({ name: 'Cross-tenant contract', customerId: f.customerId, serviceIds: [f.serviceId], startDate: '2026-01-01', endDate: '2026-12-31', valueMinor: 1000, paymentTermsDays: 14, billingFrequency: 'monthly', invoiceMonths: [], cycleDay: 1, escalationPercent: 0, escalationReviewDate: '', renewalNoticeDays: 30, securityDepositMinor: 0 });
@@ -176,8 +176,8 @@ const cases: Case[] = [
   { kind: 'invoice formats', name: 'PUT /api/invoice-formats/[id] updates', run: (as, f) => call(invoiceFormat.PUT, as, { method: 'PUT', body: { name: 'Hijacked', definition: formatDefinition }, params: { formatId: f.formatId } }) },
   { kind: 'invoice formats', name: 'DELETE /api/invoice-formats/[id] deletes', run: (as, f) => call(invoiceFormat.DELETE, as, { method: 'DELETE', params: { formatId: f.formatId } }) },
   { kind: 'invoice formats', name: 'POST /api/invoice-formats/[id]/default makes default', run: (as, f) => call(invoiceFormatDefault.POST, as, { method: 'POST', params: { formatId: f.formatId } }) },
-  { kind: 'invoice formats', name: 'PATCH /api/customers/[id] with foreign formatId', run: (as, f) => call(customer.PATCH, as, { method: 'PATCH', body: { ...customerBody, invoiceFormatId: f.formatId }, params: { customerId: must(store.listCustomers(as).items[0]).id } }) },
-  { kind: 'invoice formats', name: 'POST /api/invoices with foreign formatId', run: (as, f) => call(invoices.POST, as, { method: 'POST', body: { customerId: must(store.listCustomers(as).items[0]).id, formatId: f.formatId, invoiceDate: '2026-10-07', dueDate: '2026-10-21', taxableMinor: 100 } }) },
+  { kind: 'invoice formats', name: 'PATCH /api/customers/[id] with foreign formatId', run: async (as, f) => call(customer.PATCH, as, { method: 'PATCH', body: { ...customerBody, invoiceFormatId: f.formatId }, params: { customerId: must((await store.listCustomers(as)).items[0]).id } }) },
+  { kind: 'invoice formats', name: 'POST /api/invoices with foreign formatId', run: async (as, f) => call(invoices.POST, as, { method: 'POST', body: { customerId: must((await store.listCustomers(as)).items[0]).id, formatId: f.formatId, invoiceDate: '2026-10-07', dueDate: '2026-10-21', taxableMinor: 100 } }) },
   { kind: 'invoices', name: 'GET /api/pending-payments lists', owns: id('invoiceId'), run: (as) => call(pendingPayments.GET, as) },
   { kind: 'invoices', name: 'POST /api/pending-payments/[id]/close', run: (as, f) => call(pendingClose.POST, as, { method: 'POST', body: { note: 'hijack' }, params: { invoiceId: f.invoiceId } }) },
   { kind: 'invoices', name: 'POST /api/pending-payments/[id]/reminders', run: (as, f) => call(pendingReminders.POST, as, { method: 'POST', body: { channel: 'email', note: 'hijack' }, params: { invoiceId: f.invoiceId } }) },
@@ -222,15 +222,15 @@ describe.each(cases)('$kind: $name', (scenario) => {
   const isRead = Boolean(scenario.owns) || scenario.read === true;
 
   it('works for the owning tenant (control)', async () => {
-    const fixtures = seedTenantA(tenantA);
+    const fixtures = await seedTenantA(tenantA);
     const reply = await scenario.run(tenantA, fixtures);
     expect(reply.status).toBeLessThan(400);
     if (scenario.owns) expect(reply.text).toContain(scenario.owns(fixtures));
   });
 
   (knownLeak ? it.fails : it)(`${knownLeak ? `LEAK ${knownLeak}: ` : ''}is not reachable from another tenant`, async () => {
-    const fixtures = seedTenantA(tenantA);
-    const before = snapshot(tenantA);
+    const fixtures = await seedTenantA(tenantA);
+    const before = await snapshot(tenantA);
     const foreignIds = [...collectIds(before)];
 
     const reply = await scenario.run(tenantB, fixtures);
@@ -239,8 +239,8 @@ describe.each(cases)('$kind: $name', (scenario) => {
     else expect(reply.status).toBeGreaterThanOrEqual(400);
     for (const foreign of foreignIds) expect(reply.text).not.toContain(foreign);
     expect(reply.text).not.toContain('Nexio');
-    expect(snapshot(tenantA)).toEqual(before);
-    const bSnapshot = JSON.stringify(snapshot(tenantB));
+    expect(await snapshot(tenantA)).toEqual(before);
+    const bSnapshot = JSON.stringify(await snapshot(tenantB));
     for (const foreign of foreignIds) expect(bSnapshot).not.toContain(foreign);
   });
 });
@@ -252,38 +252,38 @@ describe('superadmin-only routes reject tenant sessions', () => {
     ['PATCH /api/tenants/[id]', () => call(tenant.PATCH, tenantB, { method: 'PATCH', body: { status: 'disabled' }, params: { tenantId: 'nexio' } })],
     ['GET /api/tenants/[id]/history', () => call(tenantHistory.GET, tenantB, { params: { tenantId: 'nexio' } })],
   ])('%s', async (_name, run) => {
-    const before = snapshot(tenantA);
+    const before = await snapshot(tenantA);
     expect((await run()).status).toBe(403);
-    expect(store.authenticate('nexio-admin')).not.toBeNull();
-    expect(snapshot(tenantA)).toEqual(before);
+    expect(await store.authenticate('nexio-admin')).not.toBeNull();
+    expect(await snapshot(tenantA)).toEqual(before);
   });
 });
 
 describe('store functions reached by id without a route', () => {
-  it('rejects every id-taking store call made with another tenant session', () => {
-    const f = seedTenantA(tenantA);
-    const before = snapshot(tenantA);
-    const attempts: Array<[string, () => unknown]> = [
-      ['getService', () => store.getService(tenantB, f.serviceId)],
-      ['getQuotation', () => store.getQuotation(tenantB, f.quotationId)],
-      ['getInvoice', () => store.getInvoice(tenantB, f.invoiceId)],
-      ['getPayment', () => store.getPayment(tenantB, f.paymentId)],
-      ['listDeliveries', () => store.listDeliveries(tenantB, f.invoiceId)],
-      ['recordDelivery', () => store.recordDelivery(tenantB, { invoiceId: f.invoiceId, to: ['x@y.example'], cc: [], subject: 'planted', status: 'sent', error: '' })],
-      ['getCustomer', () => store.getCustomer(tenantB, f.customerId)],
+  it('rejects every id-taking store call made with another tenant session', async () => {
+    const f = await seedTenantA(tenantA);
+    const before = await snapshot(tenantA);
+    const attempts: Array<[string, () => Promise<unknown>]> = [
+      ['getService', async () => await store.getService(tenantB, f.serviceId)],
+      ['getQuotation', async () => await store.getQuotation(tenantB, f.quotationId)],
+      ['getInvoice', async () => await store.getInvoice(tenantB, f.invoiceId)],
+      ['getPayment', async () => await store.getPayment(tenantB, f.paymentId)],
+      ['listDeliveries', async () => await store.listDeliveries(tenantB, f.invoiceId)],
+      ['recordDelivery', async () => await store.recordDelivery(tenantB, { invoiceId: f.invoiceId, to: ['x@y.example'], cc: [], subject: 'planted', status: 'sent', error: '' })],
+      ['getCustomer', async () => await store.getCustomer(tenantB, f.customerId)],
     ];
     for (const [name, run] of attempts) {
       let outcome: unknown;
-      try { outcome = run(); } catch { outcome = null; }
+      try { outcome = await run(); } catch { outcome = null; }
       expect(outcome, name).toBeNull();
     }
-    expect(snapshot(tenantA)).toEqual(before);
+    expect(await snapshot(tenantA)).toEqual(before);
   });
 });
 
 describe('the delivery log and mail settings', () => {
   it('lists an invoice\'s deliveries to the owning tenant, with the defaults the send dialog needs', async () => {
-    const f = seedTenantA(tenantA);
+    const f = await seedTenantA(tenantA);
     const reply = await call(invoiceDeliveries.GET, tenantA, { params: { invoiceId: f.invoiceId } });
     const body = JSON.parse(reply.text) as { deliveries: Array<{ id: string; status: string; to: string[] }>; defaults: { to: string; subject: string; message: string; configured: boolean } };
     expect(body.deliveries.map((item) => item.id)).toEqual([f.deliveryId]);
@@ -291,40 +291,40 @@ describe('the delivery log and mail settings', () => {
   });
 
   it('writes no delivery row and no captured message when another tenant sends a foreign invoice', async () => {
-    const f = seedTenantA(tenantA);
-    const before = snapshot(tenantA); const evoBefore = snapshot(tenantB);
+    const f = await seedTenantA(tenantA);
+    const before = await snapshot(tenantA); const evoBefore = await snapshot(tenantB);
     const reply = await call(invoiceSend.POST, tenantB, { method: 'POST', body: { to: 'ap@acme.example' }, params: { invoiceId: f.invoiceId } });
     expect(reply.status).toBe(404);
     expect(existsSync(captureFile)).toBe(false);
-    expect(snapshot(tenantA)).toEqual(before);
-    expect(snapshot(tenantB)).toEqual(evoBefore);
+    expect(await snapshot(tenantA)).toEqual(before);
+    expect(await snapshot(tenantB)).toEqual(evoBefore);
   });
 
   it('answers 400 and sends nothing when the request body is not valid JSON, and uses the defaults for an empty body', async () => {
-    const f = seedTenantA(tenantA);
+    const f = await seedTenantA(tenantA);
     world.session = tenantA;
     const send = (body: string) => invoiceSend.POST(new Request('http://localhost/', { method: 'POST', body }), { params: Promise.resolve({ invoiceId: f.invoiceId }) });
     expect((await send('{"to":"ap@acme.example"')).status).toBe(400);
     expect(existsSync(captureFile)).toBe(false);
-    expect(store.listDeliveries(tenantA, f.invoiceId)).toHaveLength(1);
+    expect(await store.listDeliveries(tenantA, f.invoiceId)).toHaveLength(1);
     expect((await send('')).status).toBe(200);
     expect(JSON.parse(readFileSync(captureFile, 'utf8'))[0].to).toEqual(['billing@nexio.example']);
   }, 30_000);
 
   it('delivers the owning tenant\'s message with the PDF through the capture transport', async () => {
-    const f = seedTenantA(tenantA);
+    const f = await seedTenantA(tenantA);
     const reply = await call(invoiceSend.POST, tenantA, { method: 'POST', body: { to: 'ap@acme.example' }, params: { invoiceId: f.invoiceId } });
     expect(reply.status).toBe(200);
     const captured = JSON.parse(readFileSync(captureFile, 'utf8')) as Array<{ to: string[]; from: string; attachments: Array<{ contentBase64: string }> }>;
     expect(captured).toHaveLength(1);
     expect(captured[0]).toMatchObject({ to: ['ap@acme.example'], from: 'billing@nexio-secret.example' });
     expect(Buffer.from(captured[0].attachments[0].contentBase64, 'base64').subarray(0, 4).toString()).toBe('%PDF');
-    expect(store.listDeliveries(tenantA, f.invoiceId)).toHaveLength(2);
+    expect(await store.listDeliveries(tenantA, f.invoiceId)).toHaveLength(2);
   }, 30_000);
 
   it('never returns the SMTP password from the settings or SMTP test routes, to its owner or anyone else', async () => {
-    seedTenantA(tenantA);
-    const input = settingsInput(store.getTenantSettings(tenantA));
+    await seedTenantA(tenantA);
+    const input = settingsInput(await store.getTenantSettings(tenantA));
     const replies = [
       await call(settings.GET, tenantA), await call(settings.PUT, tenantA, { method: 'PUT', body: { ...input, companyName: 'Nexio Renamed' } }),
       await call(settings.PUT, tenantA, { method: 'PUT', body: { ...input, smtpPassword: SMTP_SECRET } }), await call(smtpTest.POST, tenantA, { method: 'POST' }),
@@ -332,37 +332,37 @@ describe('the delivery log and mail settings', () => {
     ];
     for (const reply of replies) expect(reply.text).not.toContain(SMTP_SECRET);
     expect(JSON.parse(replies[0].text).settings).toMatchObject({ smtpUser: 'nexio-smtp-user', smtpPasswordSet: true });
-    expect(store.getSmtpSettings(tenantA).password).toBe(SMTP_SECRET);
-    expect(store.getSmtpSettings(tenantB).password).toBe('');
+    expect((await store.getSmtpSettings(tenantA)).password).toBe(SMTP_SECRET);
+    expect((await store.getSmtpSettings(tenantB)).password).toBe('');
   });
 
   it('refuses a tenant user who tries to change SMTP settings', async () => {
-    seedTenantA(tenantA);
-    const user = must(store.authenticate('nexio-user'));
-    const input = settingsInput(store.getTenantSettings(tenantA));
+    await seedTenantA(tenantA);
+    const user = must(await store.authenticate('nexio-user'));
+    const input = settingsInput(await store.getTenantSettings(tenantA));
     expect((await call(settings.PUT, user, { method: 'PUT', body: { ...input, smtpPassword: 'planted' } })).status).toBeGreaterThanOrEqual(400);
-    expect(store.getSmtpSettings(tenantA).password).toBe(SMTP_SECRET);
+    expect((await store.getSmtpSettings(tenantA)).password).toBe(SMTP_SECRET);
   });
 });
 
 describe('global uniqueness constraints do not disclose another tenant', () => {
   it.fails('LEAK users.email is globally UNIQUE: POST /api/users with another tenant email is refused, revealing it exists (tenant-store.ts:96,388)', async () => {
-    const f = seedTenantA(tenantA);
-    const taken = must(store.listTenantUsers(tenantA).find((item) => item.id === f.userId)).email;
+    const f = await seedTenantA(tenantA);
+    const taken = must((await store.listTenantUsers(tenantA)).find((item) => item.id === f.userId)).email;
     const reply = await call(users.POST, tenantB, { method: 'POST', body: { name: 'Same person, other tenant', email: taken, role: 'user' } });
     expect(reply.status).toBe(201);
   });
 
   it.fails('LEAK users.email is globally UNIQUE: PATCH /api/users/[id] to another tenant email is refused, revealing it exists (tenant-store.ts:96,406)', async () => {
-    const f = seedTenantA(tenantA);
-    const taken = must(store.listTenantUsers(tenantA).find((item) => item.id === f.userId)).email;
-    const own = must(store.listTenantUsers(tenantB).find((item) => item.role === 'user'));
+    const f = await seedTenantA(tenantA);
+    const taken = must((await store.listTenantUsers(tenantA)).find((item) => item.id === f.userId)).email;
+    const own = must((await store.listTenantUsers(tenantB)).find((item) => item.role === 'user'));
     const reply = await call(user.PATCH, tenantB, { method: 'PATCH', body: { email: taken }, params: { userId: own.id } });
     expect(reply.status).toBe(200);
   });
 
   it('PATCH /api/users/[id] to an unused email works (control)', async () => {
-    const own = must(store.listTenantUsers(tenantB).find((item) => item.role === 'user'));
+    const own = must((await store.listTenantUsers(tenantB)).find((item) => item.role === 'user'));
     expect((await call(user.PATCH, tenantB, { method: 'PATCH', body: { email: 'fresh@evo.example' }, params: { userId: own.id } })).status).toBe(200);
   });
 });

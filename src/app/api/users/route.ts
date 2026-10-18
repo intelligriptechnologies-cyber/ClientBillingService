@@ -11,8 +11,8 @@ export async function GET() {
   const session = await getCurrentSession();
   if (!session) return NextResponse.json({ message: 'Sign in to manage users.' }, { status: 401 });
   try {
-    return NextResponse.json({ users: getTenantStore().listTenantUsers(session) });
-  } catch (error) { recordOperationException(session, '/api/users', error);
+    return NextResponse.json({ users: await getTenantStore().listTenantUsers(session) });
+  } catch (error) { await recordOperationException(session, '/api/users', error);
     return NextResponse.json({ message: messageFor(error) }, { status: 403 });
   }
 }
@@ -22,9 +22,9 @@ export async function POST(request: Request) {
   if (!session) return NextResponse.json({ message: 'Sign in to manage users.' }, { status: 401 });
   try {
     const input = await request.json() as TenantUserInput;
-    const user = getTenantStore().createTenantUser(session, input);
+    const user = await getTenantStore().createTenantUser(session, input);
     return NextResponse.json({ user }, { status: 201 });
-  } catch (error) { recordOperationException(session, '/api/users', error);
+  } catch (error) { await recordOperationException(session, '/api/users', error);
     const message = messageFor(error);
     return NextResponse.json({ message }, { status: message.includes('admin') ? 403 : 400 });
   }

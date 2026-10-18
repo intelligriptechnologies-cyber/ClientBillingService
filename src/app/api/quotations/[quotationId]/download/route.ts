@@ -7,9 +7,9 @@ export async function GET(_: Request, { params }: { params: Promise<{ quotationI
   const session = await getCurrentSession();
   if (!session) return new Response('Sign in to download quotations.', { status: 401 });
   try {
-    const quotation = getTenantStore().getQuotation(session, (await params).quotationId);
+    const quotation = await getTenantStore().getQuotation(session, (await params).quotationId);
     if (!quotation) return new Response('Quotation not found.', { status: 404 });
-    const settings = getTenantStore().getTenantSettings(session);
+    const settings = await getTenantStore().getTenantSettings(session);
     return pdfDownload(`${quotation.quoteNumber}.pdf`, `QUOTATION ${quotation.quoteNumber}`, [`Prepared for: ${quotation.customerName}`, quotation.customerEmail ?? '', '', ...quotation.lines.map((line) => `${line.serviceName} | ${line.frequency} | Qty ${line.quantity} | INR ${(line.lineTotalMinor / 100).toFixed(2)}`), '', `Total: INR ${(quotation.totalMinor / 100).toFixed(2)}`], settings);
-  } catch (error) { recordOperationException(session, '/api/quotations/[quotationId]/download', error); return new Response(error instanceof Error ? error.message : 'Quotation could not be downloaded.', { status: 403 }); }
+  } catch (error) { await recordOperationException(session, '/api/quotations/[quotationId]/download', error); return new Response(error instanceof Error ? error.message : 'Quotation could not be downloaded.', { status: 403 }); }
 }

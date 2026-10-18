@@ -14,7 +14,7 @@ export async function POST() {
     return NextResponse.json({ status: result.status, message: result.message }, { status: statusFor[result.status] });
   } catch (error) {
     if (error instanceof MailServiceError) return NextResponse.json({ message: error.message }, { status: error.status });
-    recordOperationException(session, '/api/settings/smtp-test', error);
+    await recordOperationException(session, '/api/settings/smtp-test', error);
     return NextResponse.json({ message: 'Unable to test SMTP.' }, { status: 403 });
   }
 }

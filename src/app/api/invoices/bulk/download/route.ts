@@ -10,7 +10,7 @@ export async function GET(request: Request) {
   const billingPeriod = new URL(request.url).searchParams.get('period') ?? '';
   try {
     const store = getTenantStore();
-    const html = renderBulkPreviewHtml(store.previewBulkInvoices(session, billingPeriod), store.getTenantSettings(session));
+    const html = renderBulkPreviewHtml(await store.previewBulkInvoices(session, billingPeriod), await store.getTenantSettings(session));
     return await pdfResponse(`bulk-invoice-preview-${billingPeriod}.pdf`, html);
-  } catch (cause) { recordOperationException(session, '/api/invoices/bulk/download', cause); return new Response(cause instanceof Error ? cause.message : 'Unable to download preview.', { status: 400 }); }
+  } catch (cause) { await recordOperationException(session, '/api/invoices/bulk/download', cause); return new Response(cause instanceof Error ? cause.message : 'Unable to download preview.', { status: 400 }); }
 }

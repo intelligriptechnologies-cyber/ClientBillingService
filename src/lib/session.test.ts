@@ -24,7 +24,7 @@ function stubEnv(values: Record<string, string>) {
 }
 
 beforeEach(() => { world.store = createTenantStore(':memory:'); world.cookie = 'superadmin'; });
-afterEach(() => { (world.store as ReturnType<typeof createTenantStore>).close(); vi.unstubAllEnvs(); });
+afterEach(async () => { await (world.store as ReturnType<typeof createTenantStore>).close(); vi.unstubAllEnvs(); });
 
 describe('getCurrentSession', () => {
   it('reads the demo cookie in demo mode', async () => {

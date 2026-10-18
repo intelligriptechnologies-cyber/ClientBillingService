@@ -18,7 +18,7 @@ export async function POST(request: Request, context: { params: Promise<{ invoic
     return NextResponse.json({ status: result.status, message: result.message, delivery: result.delivery }, { status: statusFor[result.status] });
   } catch (cause) {
     if (cause instanceof MailServiceError) return NextResponse.json({ message: cause.message }, { status: cause.status });
-    recordOperationException(session, '/api/invoices/[invoiceId]/send', cause);
+    await recordOperationException(session, '/api/invoices/[invoiceId]/send', cause);
     return NextResponse.json({ message: 'Unable to send the invoice by email.' }, { status: 400 });
   }
 }

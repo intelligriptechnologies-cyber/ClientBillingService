@@ -10,7 +10,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ cu
   try {
     const body = await request.json() as CustomerInput & { status?: CustomerStatus };
     const store = getTenantStore();
-    const customer = body.status ? store.setCustomerStatus(session, customerId, body.status) : store.updateCustomer(session, customerId, body);
+    const customer = body.status ? await store.setCustomerStatus(session, customerId, body.status) : await store.updateCustomer(session, customerId, body);
     return NextResponse.json(customer);
-  } catch (error) { recordOperationException(session, '/api/customers/[customerId]', error); return NextResponse.json({ message: error instanceof Error ? error.message : 'Unable to update customer.' }, { status: 400 }); }
+  } catch (error) { await recordOperationException(session, '/api/customers/[customerId]', error); return NextResponse.json({ message: error instanceof Error ? error.message : 'Unable to update customer.' }, { status: 400 }); }
 }

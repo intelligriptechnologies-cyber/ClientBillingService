@@ -8,6 +8,6 @@ export async function POST(request: Request, { params }: { params: Promise<{ inv
   if (!session?.tenantId) return NextResponse.json({ message: 'A tenant session is required.' }, { status: 401 });
   try {
     const body = await request.json().catch(() => ({}));
-    return NextResponse.json(getTenantStore().closeInvoice(session, (await params).invoiceId, String(body.note ?? '')));
-  } catch (cause) { recordOperationException(session, '/api/pending-payments/[invoiceId]/close', cause); return NextResponse.json({ message: cause instanceof Error ? cause.message : 'Unable to close invoice.' }, { status: 400 }); }
+    return NextResponse.json(await getTenantStore().closeInvoice(session, (await params).invoiceId, String(body.note ?? '')));
+  } catch (cause) { await recordOperationException(session, '/api/pending-payments/[invoiceId]/close', cause); return NextResponse.json({ message: cause instanceof Error ? cause.message : 'Unable to close invoice.' }, { status: 400 }); }
 }

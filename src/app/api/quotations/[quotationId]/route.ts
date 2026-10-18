@@ -7,10 +7,10 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ qu
   if (!session?.tenantId) return Response.json({ message: 'A tenant session is required.' }, { status: 401 });
   try {
     const input = await request.json() as Partial<QuotationInput> & { status?: Quotation['status'] };
-    const quotation = getTenantStore().updateQuotation(session, (await params).quotationId, input);
+    const quotation = await getTenantStore().updateQuotation(session, (await params).quotationId, input);
     return Response.json({ quotation });
   } catch (error) {
-    recordOperationException(session, '/api/quotations/[quotationId]', error);
+    await recordOperationException(session, '/api/quotations/[quotationId]', error);
     return Response.json({ message: error instanceof Error ? error.message : 'Unable to update quotation.' }, { status: 400 });
   }
 }

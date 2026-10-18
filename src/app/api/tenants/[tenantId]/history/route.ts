@@ -8,8 +8,8 @@ export async function GET(_request: Request, context: { params: Promise<{ tenant
   if (!session) return NextResponse.json({ message: 'Sign in is required.' }, { status: 401 });
   try {
     const { tenantId } = await context.params;
-    return NextResponse.json({ events: getTenantStore().listTenantHistory(session, tenantId) });
-  } catch (error) { recordOperationException(session, '/api/tenants/[tenantId]/history', error);
+    return NextResponse.json({ events: await getTenantStore().listTenantHistory(session, tenantId) });
+  } catch (error) { await recordOperationException(session, '/api/tenants/[tenantId]/history', error);
     const message = error instanceof Error ? error.message : 'Unable to load tenant history.';
     return NextResponse.json({ message }, { status: message.includes('superadmin') ? 403 : 400 });
   }
