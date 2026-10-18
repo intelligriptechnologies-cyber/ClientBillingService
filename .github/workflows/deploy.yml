@@ -22,7 +22,9 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Check the image builds
-        run: docker build -t client-billing:ci .
+        run: |
+          docker build -t client-billing:ci .
+          docker build --target migrator -t client-billing-migrator:ci .
 
       - name: Deploy to Hetzner
         env:

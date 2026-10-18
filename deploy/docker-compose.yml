@@ -1,8 +1,13 @@
 name: client-billing
 
+# Each environment has its own Postgres (ADR 0001, unit D11). The database sits on an internal network that only its
+# own app and migrator join, so Caddy, the other environment and the internet cannot reach it, and it publishes no
+# port. The apps stay on the default network, which Caddy shares.
+
 x-app: &app
   build:
     context: ..
+    target: runner
   restart: unless-stopped
   healthcheck:
     test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/api/health').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"]
@@ -10,6 +15,26 @@ x-app: &app
     timeout: 5s
     retries: 5
     start_period: 20s
+
+x-db: &db
+  image: postgres:16-alpine
+  restart: unless-stopped
+  environment:
+    POSTGRES_USER: postgres
+    POSTGRES_DB: cbs
+  healthcheck:
+    test: ["CMD-SHELL", "pg_isready -U postgres -d cbs"]
+    interval: 5s
+    timeout: 3s
+    retries: 30
+
+# A one-off container: deploy-remote.sh runs it with `run --rm`. The profile keeps `up` from starting it.
+x-migrator: &migrator
+  build:
+    context: ..
+    target: migrator
+  profiles: ["migrate"]
+  restart: "no"
 
 services:
   app-staging:
@@ -20,6 +45,29 @@ services:
         required: false
     volumes:
       - staging_data:/data
+    networks:
+      - default
+      - staging-db
+
+  db-staging:
+    <<: *db
+    env_file:
+      - path: ../.env.staging.db
+        required: false
+    volumes:
+      - staging_pgdata:/var/lib/postgresql/data
+    networks:
+      - staging-db
+
+  migrator-staging:
+    <<: *migrator
+    env_file:
+      - path: ../.env.staging
+        required: false
+      - path: ../.env.staging.db
+        required: false
+    networks:
+      - staging-db
 
   app-production:
     <<: *app
@@ -29,6 +77,29 @@ services:
         required: false
     volumes:
       - production_data:/data
+    networks:
+      - default
+      - production-db
+
+  db-production:
+    <<: *db
+    env_file:
+      - path: ../.env.production.db
+        required: false
+    volumes:
+      - production_pgdata:/var/lib/postgresql/data
+    networks:
+      - production-db
+
+  migrator-production:
+    <<: *migrator
+    env_file:
+      - path: ../.env.production
+        required: false
+      - path: ../.env.production.db
+        required: false
+    networks:
+      - production-db
 
   caddy:
     image: caddy:2-alpine
@@ -44,8 +115,16 @@ services:
       - caddy_data:/data
       - caddy_config:/config
 
+networks:
+  staging-db:
+    internal: true
+  production-db:
+    internal: true
+
 volumes:
   staging_data:
   production_data:
+  staging_pgdata:
+  production_pgdata:
   caddy_data:
   caddy_config:
