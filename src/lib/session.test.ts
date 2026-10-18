@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { createTenantStore } from '@/lib/tenant-store';
+import { storeForTest } from '@/lib/store/test-store';
 import { getCurrentSession, sessionCookie } from './session';
 
 const world = vi.hoisted(() => ({ store: undefined as unknown, cookie: undefined as string | undefined }));
@@ -23,8 +23,8 @@ function stubEnv(values: Record<string, string>) {
   for (const [key, value] of Object.entries(values)) vi.stubEnv(key, value);
 }
 
-beforeEach(() => { world.store = createTenantStore(':memory:'); world.cookie = 'superadmin'; });
-afterEach(async () => { await (world.store as ReturnType<typeof createTenantStore>).close(); vi.unstubAllEnvs(); });
+beforeEach(async () => { world.store = await storeForTest(); world.cookie = 'superadmin'; });
+afterEach(() => { vi.unstubAllEnvs(); });
 
 describe('getCurrentSession', () => {
   it('reads the demo cookie in demo mode', async () => {

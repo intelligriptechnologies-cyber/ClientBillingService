@@ -14,7 +14,8 @@
     "db:up": "node scripts/db.mjs up",
     "db:down": "node scripts/db.mjs down",
     "db:migrate": "node-pg-migrate up -m db/migrations -d DATABASE_MIGRATE_URL",
-    "db:seed": "node db/seed/demo.ts"
+    "db:seed": "node db/seed/demo.ts",
+    "db:import-sqlite": "node scripts/import-sqlite.ts"
   },
   "dependencies": {
     "@phosphor-icons/react": "^2.1.10",

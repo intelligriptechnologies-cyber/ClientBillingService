@@ -1,10 +1,8 @@
 import { renderInvoiceHtml } from './invoice-html';
 import { mailer, parseAddressList, type MailMessage, type Mailer } from './mailer';
 import { renderHtmlToPdf } from './pdf-renderer';
-import type { AppSession, DeliveryRecord, DeliveryStatus, PaymentReminder, TenantInvoice, createTenantStore } from './tenant-store';
+import type { AppSession, DeliveryRecord, DeliveryStatus, PaymentReminder, TenantInvoice, TenantStore as Store } from './tenant-store';
 import { tenantContextOf } from './auth/session-context';
-
-type Store = ReturnType<typeof createTenantStore>;
 
 /** What a caller can do wrong or is not allowed to do, with the HTTP status a route should answer. */
 export class MailServiceError extends Error {

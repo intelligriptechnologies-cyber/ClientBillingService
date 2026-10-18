@@ -1,6 +1,8 @@
 import { randomUUID } from 'node:crypto';
 import pg from 'pg';
 import { createDatabase, type Database } from './database';
+import { migrate } from './migrate';
+import { SCHEMA_GRANTS } from './schema-grants';
 
 export const DATABASE_TESTS_SKIP_REASON = 'needs DATABASE_MIGRATE_URL; skipped without it, start Postgres with `npm run db:up`';
 export const TEMPLATE_DATABASE = 'cbs_test_template';
@@ -30,6 +32,15 @@ export async function withClient<T>(url: string, fn: (client: pg.Client) => Prom
   } finally {
     await client.end();
   }
+}
+
+/** Creates an empty database, applies the per-database half of db/roles.sql and migrates it as cbs_owner. Returns the cbs_owner URL on it. */
+export async function createMigratedDatabase(name: string, urls = testDatabaseUrls()) {
+  await withClient(urls.admin, (admin) => admin.query(`CREATE DATABASE ${name}`));
+  await withClient(onDatabase(urls.admin, name), (admin) => admin.query(SCHEMA_GRANTS));
+  const ownerUrl = onDatabase(urls.owner, name);
+  await migrate(ownerUrl);
+  return ownerUrl;
 }
 
 export interface TestDatabase {

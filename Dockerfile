@@ -3,6 +3,17 @@ WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci
 
+# The one-off migrator (ADR 0001, unit D11). Next's standalone output trims node_modules, so node-pg-migrate runs
+# from this stage instead. It also carries the demo seed and the one-shot SQLite import, which run as cbs_owner too.
+# deploy/deploy-remote.sh runs it with DATABASE_MIGRATE_URL before it swaps the app container.
+FROM deps AS migrator
+ENV NODE_ENV=production
+COPY db ./db
+COPY scripts/import-sqlite.ts ./scripts/import-sqlite.ts
+COPY seed ./seed
+USER node
+CMD ["node", "node_modules/node-pg-migrate/bin/node-pg-migrate.js", "up", "-m", "db/migrations", "-d", "DATABASE_MIGRATE_URL"]
+
 FROM node:22-bookworm-slim AS build
 WORKDIR /app
 ENV NEXT_TELEMETRY_DISABLED=1

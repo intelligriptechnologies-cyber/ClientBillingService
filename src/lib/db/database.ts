@@ -29,9 +29,16 @@ async function inTransaction<T>(pool: pg.Pool, fn: (tx: Tx) => Promise<T>, prepa
   }
 }
 
+/** An idle client that loses its connection (a database restart, or a dropped test database) is logged and discarded; unhandled, the error would end the process. */
+function pool(connectionString: string) {
+  const created = new pg.Pool({ connectionString, types: pgTypes });
+  created.on('error', (error) => console.error('An idle Postgres connection failed and was dropped from the pool.', error));
+  return created;
+}
+
 export function createDatabase(urls: { app: string; platform: string }): Database {
-  const app = new pg.Pool({ connectionString: urls.app, types: pgTypes });
-  const platform = new pg.Pool({ connectionString: urls.platform, types: pgTypes });
+  const app = pool(urls.app);
+  const platform = pool(urls.platform);
   return {
     async withTenant(tenantId, fn) {
       if (!tenantId) throw new Error('withTenant needs a tenant id.');
@@ -42,16 +49,4 @@ export function createDatabase(urls: { app: string; platform: string }): Databas
       await Promise.all([app.end(), platform.end()]);
     },
   };
-}
-
-let shared: Database | undefined;
-/** The app's database, from DATABASE_URL (cbs_app) and DATABASE_PLATFORM_URL (cbs_platform). */
-export function getDatabase(): Database {
-  if (!shared) {
-    const app = process.env.DATABASE_URL;
-    const platform = process.env.DATABASE_PLATFORM_URL;
-    if (!app || !platform) throw new Error('Set DATABASE_URL and DATABASE_PLATFORM_URL to use Postgres.');
-    shared = createDatabase({ app, platform });
-  }
-  return shared;
 }

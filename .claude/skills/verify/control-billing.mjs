@@ -455,7 +455,7 @@ async function cmdUp(flags) {
     const buildLog = join(workspace, 'build.log');
     const fd = openSync(buildLog, 'w');
     try {
-      execFileSync(process.execPath, [nextBin(deps), 'build'], { cwd: app, stdio: ['ignore', fd, fd], env: { ...process.env, NEXT_TELEMETRY_DISABLED: '1', NODE_ENV: 'production', CLIENT_BILLING_DATABASE: join(workspace, 'data', 'build-scratch.sqlite'), CLIENT_BILLING_SEED_MODE: 'demo' } });
+      execFileSync(process.execPath, [nextBin(deps), 'build'], { cwd: app, stdio: ['ignore', fd, fd], env: { ...process.env, NEXT_TELEMETRY_DISABLED: '1', NODE_ENV: 'production', CLIENT_BILLING_STORE: 'sqlite', DATABASE_URL: '', DATABASE_PLATFORM_URL: '', CLIENT_BILLING_DATABASE: join(workspace, 'data', 'build-scratch.sqlite'), CLIENT_BILLING_SEED_MODE: 'demo' } });
     } catch {
       closeSync(fd);
       throw new CliError(`next build failed. Last lines of ${buildLog}:\n${tailFile(buildLog, 25)}`, 'Fix the build error in the checkout (the build runs on a copy, so the checkout is untouched), then rerun `up`.');
@@ -471,7 +471,7 @@ async function cmdUp(flags) {
   mkdirSync(join(workspace, 'logs'), { recursive: true });
   const logFile = join(workspace, 'logs', `server-${runId}.log`);
   const out = openSync(logFile, 'a');
-  const env = { ...process.env, NODE_ENV: 'production', NEXT_TELEMETRY_DISABLED: '1', CLIENT_BILLING_DATABASE: dbPath, CLIENT_BILLING_SEED_MODE: 'demo', CLIENT_BILLING_MAIL_TRANSPORT: 'capture' };
+  const env = { ...process.env, NODE_ENV: 'production', NEXT_TELEMETRY_DISABLED: '1', CLIENT_BILLING_STORE: 'sqlite', DATABASE_URL: '', DATABASE_PLATFORM_URL: '', CLIENT_BILLING_DATABASE: dbPath, CLIENT_BILLING_SEED_MODE: 'demo', CLIENT_BILLING_MAIL_TRANSPORT: 'capture' };
   delete env.PORT; delete env.HOSTNAME;
   const child = spawn(process.execPath, [nextBin(deps), 'start', '-H', '127.0.0.1', '-p', String(port)], { cwd: app, env, detached: true, stdio: ['ignore', out, out], windowsHide: true });
   child.unref(); closeSync(out);
