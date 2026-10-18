@@ -45,7 +45,7 @@ jobs:
           node scripts/check-tests-ran.mjs "$RUNNER_TEMP/db-tests.json"
       - name: Store areas ported to Postgres run on it, none skipped
         run: |
-          TEST_DRIVER=pg npx vitest run src/lib/store/tenants.test.ts src/lib/store/users.test.ts src/lib/store/settings.test.ts --reporter=json --outputFile="$RUNNER_TEMP/pg-store-tests.json"
+          TEST_DRIVER=pg npx vitest run src/lib/store/tenants.test.ts src/lib/store/users.test.ts src/lib/store/settings.test.ts src/lib/store/customers.test.ts src/lib/store/quotations.test.ts --reporter=json --outputFile="$RUNNER_TEMP/pg-store-tests.json"
           node scripts/check-tests-ran.mjs "$RUNNER_TEMP/pg-store-tests.json"
       - run: npm test
       - run: npm run build
