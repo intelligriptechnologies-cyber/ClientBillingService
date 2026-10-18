@@ -1,2 +1,2 @@
 src/lib/__legacy__/*.html text eol=lf
-db/*.sql text eol=lf
+db/**/*.sql text eol=lf

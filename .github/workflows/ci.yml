@@ -12,6 +12,7 @@ jobs:
       DATABASE_URL: postgres://cbs_app:cbs_app_dev_only@localhost:5433/cbs
       DATABASE_PLATFORM_URL: postgres://cbs_platform:cbs_platform_dev_only@localhost:5433/cbs
       DATABASE_MIGRATE_URL: postgres://cbs_owner:cbs_owner_dev_only@localhost:5433/cbs
+      DATABASE_ADMIN_URL: postgres://postgres:postgres_dev_only@localhost:5433/postgres
     services:
       postgres:
         image: postgres:16-alpine
@@ -40,7 +41,7 @@ jobs:
       - run: npm run check:async-store
       - name: Database tests run, none skipped
         run: |
-          npx vitest run src/lib/db/roles.test.ts --reporter=json --outputFile="$RUNNER_TEMP/db-tests.json"
+          npx vitest run src/lib/db/roles.test.ts src/lib/db/isolation.test.ts --reporter=json --outputFile="$RUNNER_TEMP/db-tests.json"
           node scripts/check-tests-ran.mjs "$RUNNER_TEMP/db-tests.json"
       - run: npm test
       - run: npm run build
