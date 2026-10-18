@@ -12,3 +12,4 @@ test-results/
 .worktrees/
 !.env.example
 deploy/proxy.env
+.next-*/

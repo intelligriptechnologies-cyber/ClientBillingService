@@ -1,5 +1,7 @@
 'use client';
 
+import { apiFetch } from '@/lib/api-client';
+import { reportClientError } from '@/lib/client-error';
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
@@ -22,9 +24,8 @@ function groupFor(pathname: string) {
 export function AppShell({ session, children }: { session: AppSession; children: React.ReactNode }) {
   const router = useRouter();
   useEffect(() => {
-    const report = (message: string, stack?: string) => { void fetch('/api/logs', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ message, stack }), keepalive: true }).catch((error) => console.error('Unable to report client error', error)); };
-    const onError = (event: ErrorEvent) => report(event.message || 'Uncaught client error', event.error instanceof Error ? event.error.stack : undefined);
-    const onRejection = (event: PromiseRejectionEvent) => report(event.reason instanceof Error ? event.reason.message : String(event.reason), event.reason instanceof Error ? event.reason.stack : undefined);
+    const onError = (event: ErrorEvent) => reportClientError(event.message || 'Uncaught client error', event.error instanceof Error ? event.error.stack : undefined);
+    const onRejection = (event: PromiseRejectionEvent) => reportClientError(event.reason instanceof Error ? event.reason.message : String(event.reason), event.reason instanceof Error ? event.reason.stack : undefined);
     window.addEventListener('error', onError);
     window.addEventListener('unhandledrejection', onRejection);
     return () => { window.removeEventListener('error', onError); window.removeEventListener('unhandledrejection', onRejection); };
@@ -37,6 +38,6 @@ export function AppShell({ session, children }: { session: AppSession; children:
   function toggleGroup(label: string) {
     setOpenGroups((previous) => previous.includes(label) ? previous.filter((group) => group !== label) : [...previous, label]);
   }
-  async function signOut() { await fetch('/api/auth/logout', { method: 'POST' }); router.replace('/'); router.refresh(); }
+  async function signOut() { await apiFetch('/api/auth/logout', { method: 'POST' }); router.replace('/'); router.refresh(); }
   return <div className="app-shell"><aside className="sidebar"><Link href="/dashboard" className="brand">ledger<span>ly</span></Link><p className="session-identity"><strong>{session.role === 'superadmin' ? 'Platform access' : session.tenantName}</strong><span>{session.email}</span></p>{session.role !== 'superadmin' && <button className="nav-expand-toggle" type="button" onClick={() => setOpenGroups(allGroupsOpen ? [] : groups.map((group) => group.label))}>{allGroupsOpen ? 'Collapse all' : 'Expand all'}</button>}<nav className="nav" aria-label="Main navigation">{session.role === 'superadmin' ? <><Link href="/dashboard" aria-current={active(pathname, '/dashboard') ? 'page' : undefined}>Platform dashboard</Link><Link href="/tenants" aria-current={active(pathname, '/tenants') ? 'page' : undefined}>Tenants</Link></> : <><Link href="/dashboard" aria-current={active(pathname, '/dashboard') ? 'page' : undefined}>Dashboard</Link>{groups.map((group) => <div className="nav-group" key={group.label}><button type="button" className="nav-parent" aria-expanded={openGroups.includes(group.label)} aria-current={currentGroup === group.label ? 'location' : undefined} aria-controls={`nav-${group.label.replaceAll(' ', '-').toLowerCase()}`} onClick={() => toggleGroup(group.label)}>{group.label}<span aria-hidden="true">⌄</span></button><div className="nav-children" id={`nav-${group.label.replaceAll(' ', '-').toLowerCase()}`} hidden={!openGroups.includes(group.label)}>{group.links.map((link) => <Link key={link.href} href={link.href} aria-current={active(pathname, link.href) ? 'page' : undefined}>{link.label}</Link>)}</div></div>)}</>}</nav><button className="button button-secondary sign-out" type="button" onClick={signOut}>Sign out</button></aside><main className="main">{children}</main></div>;
 }

@@ -1,5 +1,6 @@
 'use client';
 
+import { apiFetch } from '@/lib/api-client';
 import { useCallback, useEffect, useState, type FormEvent } from 'react';
 import { ConfirmDialog } from '@/components/confirm-dialog';
 import { MonthYearFilter } from '@/components/month-year-filter';
@@ -20,12 +21,12 @@ export function TaskNotesRegister() {
   const [error, setError] = useState(''); const [message, setMessage] = useState('');
   const load = useCallback(async () => {
     const params = new URLSearchParams(); if (date) params.set('date', date); if (customerId) params.set('customerId', customerId);
-    const [notesResponse, customersResponse] = await Promise.all([fetch(`/api/task-notes?${params}`), fetch('/api/customers?pageSize=100')]);
+    const [notesResponse, customersResponse] = await Promise.all([apiFetch(`/api/task-notes?${params}`), apiFetch('/api/customers?pageSize=100')]);
     if (notesResponse.ok) setItems((await notesResponse.json() as { items: TaskNote[] }).items);
     else setError((await notesResponse.json() as { message?: string }).message ?? 'Unable to load task notes.');
     if (customersResponse.ok) {
       const first = await customersResponse.json() as { items: CustomerRecord[]; total: number };
-      const pages = await Promise.all(Array.from({ length: Math.max(0, Math.ceil(first.total / 100) - 1) }, (_, index) => fetch(`/api/customers?pageSize=100&page=${index + 2}`).then((response) => response.json() as Promise<{ items: CustomerRecord[] }>)));
+      const pages = await Promise.all(Array.from({ length: Math.max(0, Math.ceil(first.total / 100) - 1) }, (_, index) => apiFetch(`/api/customers?pageSize=100&page=${index + 2}`).then((response) => response.json() as Promise<{ items: CustomerRecord[] }>)));
       setCustomers([...first.items, ...pages.flatMap((page) => page.items)]);
     }
   }, [date, customerId]);
@@ -33,13 +34,13 @@ export function TaskNotesRegister() {
   function open(item: TaskNote | 'new') { setError(''); setInput(item === 'new' ? empty() : { date: item.date, customerId: item.customerId, note: item.note }); setEditing(item); }
   async function save(event: FormEvent<HTMLFormElement>) {
     event.preventDefault(); setError('');
-    const response = await fetch(editing === 'new' ? '/api/task-notes' : `/api/task-notes/${(editing as TaskNote).id}`, { method: editing === 'new' ? 'POST' : 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify(input) });
+    const response = await apiFetch(editing === 'new' ? '/api/task-notes' : `/api/task-notes/${(editing as TaskNote).id}`, { method: editing === 'new' ? 'POST' : 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify(input) });
     if (!response.ok) { setError((await response.json() as { message?: string }).message ?? 'Unable to save task note.'); return; }
     setMessage(editing === 'new' ? 'Task note added.' : 'Task note updated.'); setEditing(null); void load();
   }
   async function remove() {
     if (!deleting) return;
-    const response = await fetch(`/api/task-notes/${deleting.id}`, { method: 'DELETE' });
+    const response = await apiFetch(`/api/task-notes/${deleting.id}`, { method: 'DELETE' });
     if (!response.ok) setError((await response.json() as { message?: string }).message ?? 'Unable to delete task note.');
     else { setMessage('Task note deleted.'); void load(); }
     setDeleting(null);

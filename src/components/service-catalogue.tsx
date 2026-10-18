@@ -1,5 +1,6 @@
 'use client';
 
+import { apiFetch } from '@/lib/api-client';
 import { FormEvent, useEffect, useMemo, useState } from 'react';
 import type { BillingFrequency, Quotation, ServiceInput, TenantService } from '@/lib/tenant-store';
 import { TablePager } from './table-pager';
@@ -26,7 +27,7 @@ export function ServiceCatalogue() {
   const [error, setError] = useState('');
 
   async function load() {
-    const [servicesResponse, quotationsResponse] = await Promise.all([fetch('/api/services'), fetch('/api/quotations')]);
+    const [servicesResponse, quotationsResponse] = await Promise.all([apiFetch('/api/services'), apiFetch('/api/quotations')]);
     const servicesBody = await servicesResponse.json(); const quotationsBody = await quotationsResponse.json();
     if (servicesResponse.ok) setServices(servicesBody.services); else setError(servicesBody.message ?? 'Services could not be loaded.');
     if (quotationsResponse.ok) setQuotations(quotationsBody.quotations);
@@ -44,21 +45,21 @@ export function ServiceCatalogue() {
   function openEditService(service: TenantService) { setEditing(service); setServiceForm({ name: service.name, description: service.description, hsnSac: service.hsnSac, prices: { ...service.prices } }); setError(''); setQuotePage(1); setServiceTab('details'); setServiceOpen(true); }
   function openNewQuote(service: TenantService) { setEditingQuote(null); setCustomerName(''); setCustomerEmail(''); setQuoteLines([{ serviceId: service.id, frequency: 'monthly', quantity: 1 }]); setError(''); setQuoteOpen(true); }
   function openEditQuote(quote: Quotation) { setEditingQuote(quote); setCustomerName(quote.customerName); setCustomerEmail(quote.customerEmail ?? ''); setQuoteLines(quote.lines.map((line) => ({ serviceId: line.serviceId, frequency: line.frequency, quantity: line.quantity }))); setError(''); setQuoteOpen(true); }
-  async function toggleQuoteArchive(quote: Quotation) { const nextStatus = quote.status === 'archived' ? 'draft' : 'archived'; const response = await fetch(`/api/quotations/${quote.id}`, { method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ status: nextStatus }) }); const body = await response.json(); if (!response.ok) { setError(body.message ?? 'Quotation could not be archived.'); return; } setMessage(`${quote.quoteNumber} ${nextStatus === 'archived' ? 'archived' : 'restored'}.`); await load(); }
+  async function toggleQuoteArchive(quote: Quotation) { const nextStatus = quote.status === 'archived' ? 'draft' : 'archived'; const response = await apiFetch(`/api/quotations/${quote.id}`, { method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ status: nextStatus }) }); const body = await response.json(); if (!response.ok) { setError(body.message ?? 'Quotation could not be archived.'); return; } setMessage(`${quote.quoteNumber} ${nextStatus === 'archived' ? 'archived' : 'restored'}.`); await load(); }
   async function submitService(event: FormEvent<HTMLFormElement>) {
     event.preventDefault(); setError('');
-    const response = await fetch(editing ? `/api/services/${editing.id}` : '/api/services', { method: editing ? 'PATCH' : 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(serviceForm) });
+    const response = await apiFetch(editing ? `/api/services/${editing.id}` : '/api/services', { method: editing ? 'PATCH' : 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(serviceForm) });
     const body = await response.json(); if (!response.ok) { setError(body.message ?? 'Service could not be saved.'); return; }
     setMessage(editing ? 'Service updated.' : 'Service added.'); setServiceOpen(false); await load();
   }
   async function toggleService(service: TenantService) {
-    const response = await fetch(`/api/services/${service.id}`, { method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ status: service.status === 'active' ? 'inactive' : 'active' }) });
+    const response = await apiFetch(`/api/services/${service.id}`, { method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ status: service.status === 'active' ? 'inactive' : 'active' }) });
     const body = await response.json(); if (!response.ok) { setError(body.message ?? 'Service status could not be changed.'); return; }
     setMessage(`${service.name} is now ${body.service.status}.`); await load();
   }
   async function submitQuote(event: FormEvent<HTMLFormElement>) {
     event.preventDefault(); setError('');
-    const response = await fetch(editingQuote ? `/api/quotations/${editingQuote.id}` : '/api/quotations', { method: editingQuote ? 'PATCH' : 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ customerName, customerEmail, lines: quoteLines }) });
+    const response = await apiFetch(editingQuote ? `/api/quotations/${editingQuote.id}` : '/api/quotations', { method: editingQuote ? 'PATCH' : 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ customerName, customerEmail, lines: quoteLines }) });
     const body = await response.json(); if (!response.ok) { setError(body.message ?? 'Quotation could not be created.'); return; }
     setMessage(`Quotation ${body.quotation.quoteNumber} saved.`); setQuoteOpen(false); await load();
   }

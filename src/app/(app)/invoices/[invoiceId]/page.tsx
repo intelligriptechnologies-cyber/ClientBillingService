@@ -1,5 +1,6 @@
 'use client';
 
+import { apiFetch } from '@/lib/api-client';
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import { useEffect, useState } from 'react';
@@ -12,7 +13,7 @@ const money = (value: number) => new Intl.NumberFormat('en-IN', { style: 'curren
 
 export default function InvoiceDetailPage() {
   const { invoiceId } = useParams<{ invoiceId: string }>(); const [invoice, setInvoice] = useState<TenantInvoice | null>(null); const [message, setMessage] = useState('');
-  useEffect(() => { void fetch(`/api/invoices/${invoiceId}`).then(async (response) => { const body = await response.json(); if (!response.ok) setMessage(body.message ?? 'Unable to load invoice.'); else setInvoice(body.invoice); }); }, [invoiceId]);
+  useEffect(() => { void apiFetch(`/api/invoices/${invoiceId}`).then(async (response) => { const body = await response.json(); if (!response.ok) setMessage(body.message ?? 'Unable to load invoice.'); else setInvoice(body.invoice); }); }, [invoiceId]);
   if (!invoice) return <section className="page"><PageTitle eyebrow="Invoices" title="Invoice detail"/><p className="notice" role="status">{message || 'Loading invoice…'}</p></section>;
   const snapshot = invoice.snapshot; const gstColumns = printsGstColumns(snapshot); const hasHsn = Boolean(snapshot.lines?.some((line) => line.hsnSac));
   return <section className="page"><PageTitle eyebrow="Invoice detail" title={snapshot.documentType ? `${documentTitle(snapshot)} ${invoice.invoiceNumber}` : invoice.invoiceNumber}><div className="toolbar"><a className="button button-primary" href={`/api/invoices/${invoice.id}/download`}>Download invoice</a><Link className="button button-secondary" href="/invoices">Back to register</Link></div></PageTitle>

@@ -1,5 +1,6 @@
 'use client';
 
+import { apiFetch } from '@/lib/api-client';
 import { FormEvent, useEffect, useMemo, useState } from 'react';
 import type { TenantUser, TenantUserInput } from '@/lib/tenant-store';
 import { TablePager } from './table-pager';
@@ -19,7 +20,7 @@ export function TenantUsers() {
   const [error, setError] = useState('');
 
   async function load() {
-    const response = await fetch('/api/users');
+    const response = await apiFetch('/api/users');
     const body = await response.json();
     if (!response.ok) { setError(body.message ?? 'Users could not be loaded.'); return; }
     setUsers(body.users);
@@ -39,14 +40,14 @@ export function TenantUsers() {
   function close() { setOpen(false); setEditing(null); }
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault(); setError('');
-    const response = await fetch(editing ? `/api/users/${editing.id}` : '/api/users', { method: editing ? 'PATCH' : 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(form) });
+    const response = await apiFetch(editing ? `/api/users/${editing.id}` : '/api/users', { method: editing ? 'PATCH' : 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(form) });
     const body = await response.json();
     if (!response.ok) { setError(body.message ?? 'User could not be saved.'); return; }
     setMessage(editing ? 'User updated.' : 'User created.'); close(); await load();
   }
   async function toggle(user: TenantUser) {
     setError('');
-    const response = await fetch(`/api/users/${user.id}`, { method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ status: user.status === 'active' ? 'disabled' : 'active' }) });
+    const response = await apiFetch(`/api/users/${user.id}`, { method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ status: user.status === 'active' ? 'disabled' : 'active' }) });
     const body = await response.json();
     if (!response.ok) { setError(body.message ?? 'User status could not be changed.'); return; }
     setMessage(`${user.name} is now ${body.user.status}.`); await load();
