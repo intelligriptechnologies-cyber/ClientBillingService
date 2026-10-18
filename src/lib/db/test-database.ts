@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import pg from 'pg';
 import { createDatabase, type Database } from './database';
+import { migrate } from './migrate';
 
 export const DATABASE_TESTS_SKIP_REASON = 'needs DATABASE_MIGRATE_URL; skipped without it, start Postgres with `npm run db:up`';
 export const TEMPLATE_DATABASE = 'cbs_test_template';
@@ -30,6 +31,20 @@ export async function withClient<T>(url: string, fn: (client: pg.Client) => Prom
   } finally {
     await client.end();
   }
+}
+
+/** Creates an empty database, applies the per-database half of db/roles.sql and migrates it as cbs_owner. Returns the cbs_owner URL on it. */
+export async function createMigratedDatabase(name: string, urls = testDatabaseUrls()) {
+  await withClient(urls.admin, (admin) => admin.query(`CREATE DATABASE ${name}`));
+  // The roles themselves are cluster-wide and already exist; the isolation test asserts these grants on every clone.
+  await withClient(onDatabase(urls.admin, name), (admin) => admin.query(`
+    ALTER SCHEMA public OWNER TO cbs_owner;
+    REVOKE ALL ON SCHEMA public FROM PUBLIC;
+    GRANT USAGE ON SCHEMA public TO cbs_app, cbs_platform;
+  `));
+  const ownerUrl = onDatabase(urls.owner, name);
+  await migrate(ownerUrl);
+  return ownerUrl;
 }
 
 export interface TestDatabase {
