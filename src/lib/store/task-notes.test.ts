@@ -1,5 +1,5 @@
 import { expect, it } from 'vitest';
-import { describeStore, storeForTest } from './test-store';
+import { describeStore, memberContext, storeForTest } from './test-store';
 import { tenantContextOf } from '../auth/session-context';
 
 describeStore(['customers', 'taskNotes'], 'task notes', () => {
@@ -21,5 +21,21 @@ describeStore(['customers', 'taskNotes'], 'task notes', () => {
     await expect(store.deleteTaskNote(tenantContextOf(evo), created.id)).rejects.toThrow('not found');
     await store.deleteTaskNote(tenantContextOf(nexio), created.id);
     expect(await store.listTaskNotes(tenantContextOf(nexio))).toEqual([]);
+  });
+});
+
+describeStore(['customers', 'taskNotes'], 'task note lists', () => {
+  it('filters notes by customer and orders them by date', async () => {
+    const store = await storeForTest();
+    const nexio = await memberContext(store, 'nexio-admin');
+    const seeded = (await store.listCustomers(nexio)).items[0];
+    const other = await store.createCustomer(nexio, { companyName: 'Other buyer', contactName: 'Contact', email: 'o@example.com', phone: '1', gstin: '', billingAddress: 'Somewhere', invoiceDelivery: 'manual' });
+    const early = await store.createTaskNote(nexio, { customerId: seeded.id, date: '2026-10-01', note: 'Early' });
+    const late = await store.createTaskNote(nexio, { customerId: seeded.id, date: '2026-10-09', note: 'Late' });
+    const elsewhere = await store.createTaskNote(nexio, { customerId: other.id, date: '2026-10-05', note: 'Elsewhere' });
+
+    expect((await store.listTaskNotes(nexio, { customerId: seeded.id })).map((item) => item.id)).toEqual([late.id, early.id]);
+    expect((await store.listTaskNotes(nexio)).map((item) => item.id)).toEqual([late.id, elsewhere.id, early.id]);
+    expect((await store.listTaskNotes(nexio, { customerId: other.id })).map((item) => item.customerName)).toEqual(['Other buyer']);
   });
 });

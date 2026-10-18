@@ -40,3 +40,25 @@ describeStore(['customers', 'services', 'contracts', 'additionalServices'], 'add
     expect((await store.listAdditionalServices(nexio)).items.find((item) => item.id === additional.id)).toMatchObject({ description: 'Extended workshop', priceMinor: 5000 });
   });
 });
+
+describeStore(['customers', 'services', 'contracts', 'additionalServices'], 'additional service lists', () => {
+  it('bills a service in the month of its date, filters by search, status, customer and contract, and refuses a day that does not exist', async () => {
+    const store = await storeForTest();
+    const nexio = await memberContext(store, 'nexio-admin');
+    const contract = (await store.listContracts(nexio)).items[0];
+    const add = (serviceDate: string, description: string) => store.createAdditionalService(nexio, { customerId: contract.customerId, contractId: contract.id, serviceDate, description, priceMinor: 100 });
+    const lastDay = await add('2026-10-31', 'Month end visit');
+    const firstDay = await add('2026-11-01', 'Month start visit');
+    await store.updateAdditionalService(nexio, firstDay.id, { status: 'archived' });
+    const ids = async (query: Parameters<typeof store.listAdditionalServices>[1]) => (await store.listAdditionalServices(nexio, { pageSize: 100, ...query })).items.map((item) => item.id);
+
+    expect(await ids({ billingPeriod: '2026-10' })).toEqual([lastDay.id]);
+    expect(await ids({ billingPeriod: '2026-11' })).toEqual([firstDay.id]);
+    expect(await ids({ billingPeriod: '2026-13' })).toEqual([]);
+    await expect(store.listAdditionalServices(nexio, { billingPeriod: '2026-1' })).rejects.toThrow('YYYY-MM');
+    expect(await ids({ search: 'month end' })).toEqual([lastDay.id]);
+    expect(await ids({ status: 'archived' })).toEqual([firstDay.id]);
+    expect(await ids({ customerId: contract.customerId, contractId: contract.id })).toEqual([firstDay.id, lastDay.id]);
+    await expect(add('2026-02-31', 'No such day')).rejects.toThrow('Enter a valid service date.');
+  });
+});

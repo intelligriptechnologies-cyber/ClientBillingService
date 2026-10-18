@@ -109,3 +109,30 @@ describeStore(['customers', 'services', 'contracts', 'deposits'], 'contracts and
     }
   });
 });
+
+describeStore(['customers', 'services', 'contracts', 'deposits'], 'contract lists and input rules', () => {
+  it('filters contracts by month, search and customer, searches renewals, and refuses values a date or numeric column cannot hold', async () => {
+    const store = await storeForTest();
+    const nexio = await memberContext(store, 'nexio-admin');
+    const seeded = (await store.listCustomers(nexio)).items[0];
+    const other = await store.createCustomer(nexio, { companyName: 'Other Zq buyer', contactName: 'Contact', email: 'o@example.com', phone: '1', gstin: '', billingAddress: 'Somewhere', invoiceDelivery: 'manual' });
+    const service = (await store.listServices(nexio))[0];
+    const input = { serviceIds: [service.id], startDate: '2026-01-01', endDate: '2026-12-31', valueMinor: 1000, paymentTermsDays: 14, billingFrequency: 'monthly' as const, invoiceMonths: [], cycleDay: 1, escalationPercent: 0, escalationReviewDate: '', renewalNoticeDays: 30, securityDepositMinor: 0 };
+    const first = await store.createContract(nexio, { ...input, customerId: seeded.id, name: 'First Zq contract' });
+    const second = await store.createContract(nexio, { ...input, customerId: other.id, name: 'Second contract', escalationPercent: 8.125 });
+    const ids = async (query: Parameters<typeof store.listContracts>[1]) => (await store.listContracts(nexio, { pageSize: 100, ...query })).items.map((item) => item.id);
+
+    expect((await ids({ search: 'zq', month: first.createdAt.slice(0, 7) })).sort()).toEqual([first.id, second.id].sort());
+    expect(await ids({ search: 'zq', month: '2000-01' })).toEqual([]);
+    expect(await ids({ customerId: other.id })).toEqual([second.id]);
+    expect(second.escalationPercent).toBe(8.125);
+    expect((await store.listRenewals(nexio, { search: 'first zq' })).items.map((item) => item.contractId)).toEqual([first.id]);
+
+    await expect(store.createContract(nexio, { ...input, customerId: seeded.id, name: 'Bad day', endDate: '2026-02-31' })).rejects.toThrow('Enter a valid contract date range.');
+    await expect(store.createContract(nexio, { ...input, customerId: seeded.id, name: 'Bad rate', escalationPercent: 8.1234 })).rejects.toThrow('Enter valid billing, escalation, and renewal terms.');
+    await expect(store.createContract(nexio, { ...input, customerId: seeded.id, name: 'Huge rate', escalationPercent: 1000 })).rejects.toThrow('Enter valid billing, escalation, and renewal terms.');
+    await expect(store.createContract(nexio, { ...input, customerId: seeded.id, name: 'Long terms', paymentTermsDays: 2 ** 31 })).rejects.toThrow('Enter valid billing, escalation, and renewal terms.');
+    await expect(store.createContract(nexio, { ...input, customerId: seeded.id, name: 'Bad review', escalationReviewDate: '2027-02-30' })).rejects.toThrow('Enter a valid escalation review date.');
+    await expect(store.renewContract(nexio, first.id, { endDate: '2027-02-29', note: '' })).rejects.toThrow('later than the current end date');
+  });
+});
