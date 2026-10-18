@@ -3,5 +3,8 @@ import { fileURLToPath } from 'node:url';
 
 export default defineConfig({
   resolve: { alias: { '@': fileURLToPath(new URL('./src', import.meta.url)) } },
-  test: { exclude: ['**/e2e/**', '**/node_modules/**', '**/dist/**', '**/.next/**', '**/.claude/**', '**/.worktrees/**'] },
+  test: {
+    globalSetup: ['src/lib/db/global-setup.ts'],
+    exclude: ['**/e2e/**', '**/node_modules/**', '**/dist/**', '**/.next/**', '**/.claude/**', '**/.worktrees/**'],
+  },
 });

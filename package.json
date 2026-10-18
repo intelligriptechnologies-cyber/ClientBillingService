@@ -12,11 +12,14 @@
     "test": "vitest run",
     "test:e2e": "playwright test",
     "db:up": "node scripts/db.mjs up",
-    "db:down": "node scripts/db.mjs down"
+    "db:down": "node scripts/db.mjs down",
+    "db:migrate": "node-pg-migrate up -m db/migrations -d DATABASE_MIGRATE_URL",
+    "db:seed": "node db/seed/demo.ts"
   },
   "dependencies": {
     "@phosphor-icons/react": "^2.1.10",
     "next": "^16.3.0",
+    "node-pg-migrate": "9.0.0",
     "nodemailer": "10.0.11",
     "pg": "^8.23.1",
     "playwright-core": "1.63.0",

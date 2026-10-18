@@ -23,7 +23,8 @@ if (command === 'up') {
 Postgres is up on localhost:5433 with the roles from db/roles.sql. Export these to use it:
   DATABASE_URL=postgres://cbs_app:cbs_app_dev_only@localhost:5433/cbs
   DATABASE_PLATFORM_URL=postgres://cbs_platform:cbs_platform_dev_only@localhost:5433/cbs
-  DATABASE_MIGRATE_URL=postgres://cbs_owner:cbs_owner_dev_only@localhost:5433/cbs`);
+  DATABASE_MIGRATE_URL=postgres://cbs_owner:cbs_owner_dev_only@localhost:5433/cbs
+  DATABASE_ADMIN_URL=postgres://postgres:postgres_dev_only@localhost:5433/postgres   (tests only)`);
 } else if (command === 'down') {
   docker(['down', ...(flags.includes('--volumes') ? ['--volumes'] : [])]);
 } else {
