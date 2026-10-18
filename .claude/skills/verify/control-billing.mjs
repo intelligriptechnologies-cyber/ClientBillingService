@@ -73,7 +73,7 @@ const COMMANDS = {
   login: {
     summary: 'Sign in as a demo identity through the real picker (Playwright) and save the session. No identity lists the choices.',
     usage: 'login [<identity>] [--no-browser] [--name <instance>] [--evidence <dir>]',
-    flags: { ...INSTANCE, ...EVIDENCE, 'no-browser': { type: 'boolean', desc: 'Skip Playwright and call POST /api/auth/login directly.' } },
+    flags: { ...INSTANCE, ...EVIDENCE, 'no-browser': { type: 'boolean', desc: 'Skip Playwright and call POST /api/auth/demo-login directly.' } },
     examples: ['node control-billing.mjs login', 'node control-billing.mjs login nexio-admin', 'node control-billing.mjs login superadmin'],
   },
   snapshot: {
@@ -319,11 +319,11 @@ async function httpJson(base, path, init = {}) {
   return { response, body, text };
 }
 async function apiLogin(base, identity) {
-  const { response, body } = await httpJson(base, '/api/auth/login', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ userId: identity }) });
+  const { response, body } = await httpJson(base, '/api/auth/demo-login', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ userId: identity }) });
   if (!response.ok) throw new CliError(`Login as "${identity}" failed (${response.status}): ${body?.message ?? 'unknown'}.`, 'Run `node control-billing.mjs login` with no identity to list valid ones.');
   const raw = response.headers.getSetCookie?.().find((c) => c.startsWith(`${SESSION_COOKIE}=`)) ?? '';
   const value = raw.split(';')[0].slice(SESSION_COOKIE.length + 1);
-  if (!value) throw new CliError('Login succeeded but no session cookie was set.', 'The app contract changed. Read src/app/api/auth/login/route.ts and update control-billing.mjs.');
+  if (!value) throw new CliError('Login succeeded but no session cookie was set.', 'The app contract changed. Read src/app/api/auth/demo-login/route.ts and update control-billing.mjs.');
   return { value, session: body.session };
 }
 async function listIdentities(base) {

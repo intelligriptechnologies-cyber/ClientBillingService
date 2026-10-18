@@ -53,12 +53,12 @@ test.describe.serial('named invoice formats', () => {
   let standardInvoice: Issued;
 
   test.beforeEach(async ({ page }) => {
-    expect((await page.request.post('/api/auth/login', { data: { userId: 'nexio-admin' } })).ok()).toBeTruthy();
+    expect((await page.request.post('/api/auth/demo-login', { data: { userId: 'nexio-admin' } })).ok()).toBeTruthy();
   });
 
   test.afterAll(async ({ playwright }) => {
     const request = await playwright.request.newContext({ baseURL: `http://localhost:${Number(process.env.CLIENT_BILLING_TEST_PORT) || 3100}` });
-    await request.post('/api/auth/login', { data: { userId: 'nexio-admin' } });
+    await request.post('/api/auth/demo-login', { data: { userId: 'nexio-admin' } });
     const formats = await formatsOf(request);
     const standard = formats.find((format) => format.name === 'Standard');
     if (standard) await request.post(`/api/invoice-formats/${standard.id}/default`);
@@ -233,7 +233,7 @@ test.describe.serial('named invoice formats', () => {
   });
 
   test('a user without admin rights can pick a format but cannot change them', async ({ page }) => {
-    expect((await page.request.post('/api/auth/login', { data: { userId: 'nexio-user' } })).ok()).toBeTruthy();
+    expect((await page.request.post('/api/auth/demo-login', { data: { userId: 'nexio-user' } })).ok()).toBeTruthy();
     expect((await page.request.get('/api/invoice-formats')).ok()).toBeTruthy();
     const denied = await page.request.post('/api/invoice-formats', { data: { name: 'Sneaky', definition: { layout: 'classic', accent: NAVY, logo: 'show' } } });
     expect(denied.status()).toBe(400);
