@@ -8,6 +8,24 @@ jobs:
   ci:
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    env:
+      DATABASE_URL: postgres://cbs_app:cbs_app_dev_only@localhost:5433/cbs
+      DATABASE_PLATFORM_URL: postgres://cbs_platform:cbs_platform_dev_only@localhost:5433/cbs
+      DATABASE_MIGRATE_URL: postgres://cbs_owner:cbs_owner_dev_only@localhost:5433/cbs
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres_dev_only
+          POSTGRES_DB: cbs
+        ports:
+          - 5433:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d cbs"
+          --health-interval 2s
+          --health-timeout 3s
+          --health-retries 30
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -15,9 +33,15 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
+      - name: Create database roles
+        run: docker exec -i "$(docker ps -q --filter ancestor=postgres:16-alpine)" psql -U postgres -d cbs -v ON_ERROR_STOP=1 -q < db/roles.sql
       - run: npm run lint
       - run: npm run typecheck
       - run: npm run check:async-store
+      - name: Database tests run, none skipped
+        run: |
+          npx vitest run src/lib/db/roles.test.ts --reporter=json --outputFile="$RUNNER_TEMP/db-tests.json"
+          node scripts/check-tests-ran.mjs "$RUNNER_TEMP/db-tests.json"
       - run: npm test
       - run: npm run build
       - run: node scripts/check-boot-refusal.mjs 3212
