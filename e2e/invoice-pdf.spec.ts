@@ -16,11 +16,11 @@ async function readPdf(bytes: Uint8Array) {
   return { text, squashed: text.replace(/\s+/g, ''), images: operators.fnArray.filter((op) => imageOps.has(op)).length, pages: document.numPages };
 }
 
-async function issueInvoice(request: APIRequestContext, taxType: 'igst' | 'none') {
+async function issueInvoice(request: APIRequestContext, taxType: 'cgst_sgst' | 'none') {
   const customers = await (await request.get('/api/customers?pageSize=100')).json() as { items: Array<{ id: string; status: string }> };
   const customer = customers.items.find((item) => item.status === 'active');
   expect(customer).toBeDefined();
-  const response = await request.post('/api/invoices', { data: { customerId: customer!.id, invoiceDate: '2026-11-02', dueDate: '2026-11-16', taxSplitOverrideReason: 'Export to a registered buyer', lines: [{ description: 'Hall rental', quantity: 2, rateMinor: 150_050, taxType, gstRate: taxType === 'none' ? 0 : 18, hsnSac: '998311' }] } });
+  const response = await request.post('/api/invoices', { data: { customerId: customer!.id, invoiceDate: '2026-11-02', dueDate: '2026-11-16', lines: [{ description: 'Hall rental', quantity: 2, rateMinor: 150_050, taxType, gstRate: taxType === 'none' ? 0 : 18, hsnSac: '998311' }] } });
   expect(response.ok(), await response.text()).toBeTruthy();
   return (await response.json() as { invoice: { id: string; invoiceNumber: string } }).invoice;
 }
@@ -43,7 +43,7 @@ test.describe.serial('invoice PDF prints what the preview shows', () => {
   test('a Tax Invoice downloads as a real PDF with the rupee sign, branding, GST details and the amount in words', async ({ request, page }) => {
     const saved = await request.put('/api/settings', { data: { ...original, gstin: SELLER_GSTIN, legalName: 'Nexio Private Limited', logoDataUrl: PNG, stampDataUrl: PNG, signatureDataUrl: PNG } });
     expect(saved.ok(), await saved.text()).toBeTruthy();
-    const invoice = await issueInvoice(request, 'igst');
+    const invoice = await issueInvoice(request, 'cgst_sgst');
 
     const download = await request.get(`/api/invoices/${invoice.id}/download`);
     expect(download.status()).toBe(200);
@@ -55,7 +55,8 @@ test.describe.serial('invoice PDF prints what the preview shows', () => {
     const pdf = await readPdf(bytes);
     expect(pdf.pages).toBe(1);
     expect(pdf.squashed).toContain('₹');
-    for (const expected of [invoice.invoiceNumber, 'TaxInvoice', 'NexioPrivateLimited', SELLER_GSTIN, 'HSN/SAC', '998311', 'IGST', '₹3,541.00', 'Roundoff', '-₹0.18', 'IndianRupeesThreeThousandFiveHundredFortyOneOnly']) expect(pdf.squashed, expected).toContain(expected.replace(/\s+/g, ''));
+    for (const expected of [invoice.invoiceNumber, 'TaxInvoice', 'NexioPrivateLimited', SELLER_GSTIN, 'HSN/SAC', '998311', 'CGST', 'SGST', '₹3,541.00', 'Roundoff', '-₹0.18', 'IndianRupeesThreeThousandFiveHundredFortyOneOnly']) expect(pdf.squashed, expected).toContain(expected.replace(/\s+/g, ''));
+    expect(pdf.squashed, 'seller and buyer are both in Karnataka').not.toContain('IGST');
     expect(pdf.images).toBeGreaterThanOrEqual(3);
 
     await page.request.post('/api/auth/demo-login', { data: { userId: 'nexio-admin' } });

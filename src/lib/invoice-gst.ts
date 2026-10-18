@@ -24,7 +24,10 @@ export type GstSnapshotFields = {
   taxSplitOverrideReason?: string;
 };
 
-const GSTIN_MESSAGES: Record<GstinFailure, string> = {
+/** An unregistered seller issues a Bill of Supply, which carries no GST. */
+export const UNREGISTERED_SELLER_TAX_MESSAGE = 'Add your GSTIN in Settings to charge GST, or set the lines to no tax.';
+
+const GSTIN_MESSAGES:Record<GstinFailure, string> = {
   length: 'A GSTIN has 15 characters.',
   format: 'The GSTIN format is not valid.',
   state: 'The GSTIN starts with an unknown state code.',
@@ -58,16 +61,29 @@ export function invoiceDocumentType(sellerRegistered: boolean, lines: ReadonlyAr
   return documentType({ sellerRegistered, lines: lines.map((line) => ({ taxability: lineTaxability(line) })) });
 }
 
+/** An unregistered seller has no state of its own, so a seller is registered exactly when its state resolves. */
+export function sellerRegisteredIn(sellerStateCode: string): boolean { return stateName(sellerStateCode) !== undefined; }
+
+/** The tax type a line starts with before the place of supply is known, only for invoices issued without line items. */
+export function legacyTaxType(snapshot: { taxSplit?: TaxSplit }): ExpectedTaxType { return snapshot.taxSplit === 'inter' ? 'igst' : 'cgst_sgst'; }
+
 export function resolveSupply(sellerStateCode: string, client: { gstin: string; stateCode: string }): SupplyContext {
   const check = validateGstin(client.gstin);
   const clientState = check.ok && check.registered ? check.stateCode : stateName(client.stateCode) ? client.stateCode : '';
-  if (!stateName(sellerStateCode)) {
+  if (!sellerRegisteredIn(sellerStateCode)) {
     return { sellerRegistered: false, sellerStateCode: '', placeOfSupplyStateCode: clientState, placeOfSupplyState: stateName(clientState) ?? '', taxSplit: null, expectedTaxType: null };
   }
   const supply = placeOfSupply(sellerStateCode, { gstin: check.ok && check.registered ? check.gstin : '', billingStateCode: clientState });
   const placeOfSupplyStateCode = supply.ok ? supply.stateCode : sellerStateCode;
   const taxSplit: TaxSplit = placeOfSupplyStateCode === sellerStateCode ? 'intra' : 'inter';
   return { sellerRegistered: true, sellerStateCode, placeOfSupplyStateCode, placeOfSupplyState: stateName(placeOfSupplyStateCode) ?? '', taxSplit, expectedTaxType: taxSplit === 'intra' ? 'cgst_sgst' : 'igst' };
+}
+
+/** The one line an amount-only invoice stands for, taxed the way the place of supply says. Only a registered seller has a split to tax it with. */
+export function amountOnlyLine(supply: SupplyContext, gstRate: number): TaxedLine {
+  if (gstRate <= 0) return { taxType: 'none', gstRate: 0 };
+  if (!supply.expectedTaxType) throw new Error(UNREGISTERED_SELLER_TAX_MESSAGE);
+  return { taxType: supply.expectedTaxType, gstRate };
 }
 
 export function overridesSplit(lines: ReadonlyArray<TaxedLine>, supply: SupplyContext): boolean {
@@ -79,6 +95,7 @@ type DraftLine = TaxedLine & { hsnSac?: string };
 /** Checks every GST rule that depends on more than one line and returns the fields to snapshot. */
 export function gstSnapshotFields(input: { seller: { legalName: string }; supply: SupplyContext; lines: ReadonlyArray<DraftLine>; requireHsn: boolean; overrideReason?: string }): GstSnapshotFields {
   const { supply, lines } = input;
+  if (!supply.sellerRegistered && lines.some((line) => line.taxType !== 'none')) throw new Error(UNREGISTERED_SELLER_TAX_MESSAGE);
   const type = invoiceDocumentType(supply.sellerRegistered, lines);
   const overridden = overridesSplit(lines, supply);
   const reason = input.overrideReason?.trim() ?? '';

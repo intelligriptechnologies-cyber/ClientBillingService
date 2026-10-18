@@ -4,6 +4,8 @@ import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { afterEach, describe, expect, it } from 'vitest';
 import { gstSalesCsv, hsnSummaryCsv } from '../gst-sales-export';
+import { UNREGISTERED_SELLER_TAX_MESSAGE } from '../invoice-gst';
+import { renderInvoiceHtml } from '../invoice-html';
 import type { InvoiceLineInput } from '../invoice-lines';
 import { createTenantStore } from '../tenant-store';
 
@@ -136,11 +138,31 @@ describe('place of supply and tax split', () => {
     expect(issued.snapshot).toMatchObject({ taxSplit: 'intra', taxSplitOverrideReason: 'Supply to an SEZ unit' });
   });
 
-  it('does not ask for a reason when the seller is unregistered', () => {
-    const { customer, line, invoice } = setup();
-    const issued = invoice(customer({ stateCode: '29' }).id, [line({ taxType: 'igst', hsnSac: '' })]);
+  it('preselects nothing and asks for no override reason when the seller is unregistered', () => {
+    const { store, session, customer, line, invoice } = setup();
+    const buyer = customer({ stateCode: '29' });
+    expect(store.getSupplyContext(session, { customerId: buyer.id })).toMatchObject({ sellerRegistered: false, taxSplit: null, expectedTaxType: null });
+    const issued = invoice(buyer.id, [line({ taxType: 'none', gstRate: 0, hsnSac: '' })]);
     expect(issued.snapshot).toMatchObject({ documentType: 'Bill of Supply', sellerStateCode: '', placeOfSupplyStateCode: '29' });
     expect(issued.snapshot.taxSplit).toBeUndefined();
+  });
+
+  it('gives an invoice whose seller state equals the place of supply CGST + SGST lines and never IGST', () => {
+    const { store, session, register, customer, line, invoice } = setup();
+    register();
+    const sameState = [customer({ stateCode: '29' }), customer({ gstin: KARNATAKA }), customer()];
+    for (const buyer of sameState) {
+      const supply = store.getSupplyContext(session, { customerId: buyer.id });
+      expect(supply).toMatchObject({ sellerStateCode: '29', placeOfSupplyStateCode: '29', taxSplit: 'intra', expectedTaxType: 'cgst_sgst' });
+      const issued = invoice(buyer.id, [line({ taxType: supply.expectedTaxType! })]);
+      expect(issued.snapshot).toMatchObject({ taxSplit: 'intra', lines: [{ taxType: 'cgst_sgst' }] });
+      expect(issued.snapshot.taxSplitOverrideReason).toBeUndefined();
+      const html = renderInvoiceHtml(issued);
+      expect(html).toContain('CGST + SGST 18%');
+      expect(html).not.toContain('IGST');
+      const row = store.getGstSalesReport(session, '2026-11').items.find((item) => item.invoiceId === issued.id)!;
+      expect(row).toMatchObject({ igstMinor: 0, cgstMinor: 9_000, sgstMinor: 9_000 });
+    }
   });
 
   it('carries the override reason through an invoice correction', () => {
@@ -166,6 +188,16 @@ describe('document type', () => {
     expect(store.listInvoices(session, {}).items.find((item) => item.snapshot.documentType === undefined)).toBeTruthy();
   });
 
+  it('puts a registered seller\'s no-tax lines on a Bill of Supply and in the nil, exempt and non-GST section', () => {
+    const { store, session, register, customer, line, invoice } = setup();
+    register();
+    const registeredBuyer = customer({ gstin: MAHARASHTRA, name: 'Registered Buyer' });
+    const issued = invoice(registeredBuyer.id, [line({ taxType: 'none', gstRate: 0, hsnSac: '' }), line({ description: 'Exempt service', taxType: 'none', gstRate: 0, hsnSac: '998311' })]);
+    expect(issued).toMatchObject({ gstMinor: 0, snapshot: { documentType: 'Bill of Supply', sellerStateCode: '29' } });
+    expect(renderInvoiceHtml(issued)).toContain('<h1>Bill of Supply</h1>');
+    expect(store.getGstSalesReport(session, '2026-11').items.find((item) => item.invoiceId === issued.id)).toMatchObject({ section: 'NIL_EXEMPT_NON_GST', gstMinor: 0, igstMinor: 0, cgstMinor: 0, sgstMinor: 0 });
+  });
+
   it('allows an invoice to an unregistered client with GST charged and no client GSTIN', () => {
     const { register, customer, line, invoice } = setup();
     register();
@@ -179,6 +211,79 @@ describe('document type', () => {
     const bulk = store.listInvoices(session, { month: '2026-11' }).items;
     expect(bulk.length).toBeGreaterThan(0);
     expect(bulk[0].snapshot).toMatchObject({ documentType: 'Tax Invoice', sellerStateCode: '29' });
+  });
+});
+
+describe('an unregistered seller cannot charge GST', () => {
+  it.each(['igst', 'cgst_sgst'] as const)('rejects a %s line with the message that says how to fix it and issues nothing', (taxType) => {
+    const { store, session, customer, line, invoice } = setup();
+    const buyer = customer({ stateCode: '29' });
+    const before = store.listInvoices(session, {}).total;
+    expect(() => invoice(buyer.id, [line({ taxType, hsnSac: '' })])).toThrow(UNREGISTERED_SELLER_TAX_MESSAGE);
+    expect(() => invoice(buyer.id, [line({ taxType: 'none', gstRate: 0, hsnSac: '' }), line({ taxType })])).toThrow('Add your GSTIN in Settings to charge GST, or set the lines to no tax');
+    expect(store.listInvoices(session, {}).total).toBe(before);
+  });
+
+  it('rejects an amount-only invoice that carries a GST rate', () => {
+    const { store, session, customer } = setup();
+    const buyer = customer({ stateCode: '29' });
+    const amountOnly = { customerId: buyer.id, invoiceDate: '2026-11-02', dueDate: '2026-11-30', taxableMinor: 10_000 };
+    expect(() => store.createIssuedInvoice(session, { ...amountOnly, gstRate: 18 })).toThrow(UNREGISTERED_SELLER_TAX_MESSAGE);
+    expect(store.createIssuedInvoice(session, { ...amountOnly, gstRate: 0 })).toMatchObject({ gstMinor: 0, snapshot: { documentType: 'Bill of Supply' } });
+  });
+
+  it('rejects a correction that adds GST and leaves the original invoice untouched', () => {
+    const { store, session, customer, line, invoice } = setup();
+    const original = invoice(customer({ stateCode: '29' }).id, [line({ taxType: 'none', gstRate: 0, hsnSac: '' })]);
+    const input = { invoiceDate: '2026-11-02', dueDate: '2026-11-30', gstApplicable: true, lines: [line({ taxType: 'igst' })] };
+    const before = store.listInvoices(session, {}).total;
+    expect(() => store.correctInvoice(session, original.id, input, 'Add tax')).toThrow(UNREGISTERED_SELLER_TAX_MESSAGE);
+    expect(store.getInvoice(session, original.id)?.status).toBe('issued');
+    expect(store.listInvoices(session, {}).total).toBe(before);
+    const replacement = store.correctInvoice(session, original.id, { ...input, lines: [line({ taxType: 'none', gstRate: 0, hsnSac: '', rateMinor: 150_000 })] }, 'Price change');
+    expect(replacement).toMatchObject({ gstMinor: 0, totalMinor: 150_000, snapshot: { documentType: 'Bill of Supply' } });
+  });
+
+  it('proposes and issues bulk invoices without GST, as a Bill of Supply filed as nil, exempt and non-GST', () => {
+    const { store, session } = setup();
+    const preview = store.previewBulkInvoices(session, '2026-11');
+    expect(preview.proposed.length).toBeGreaterThan(0);
+    expect(preview.proposed.every((item) => item.gstRate === 0 && item.gstMinor === 0 && item.totalMinor === item.taxableMinor)).toBe(true);
+    store.generateBulkInvoices(session, '2026-11');
+    const issued = store.listInvoices(session, { month: '2026-11' }).items;
+    expect(issued.length).toBe(preview.proposed.length);
+    for (const invoice of issued) {
+      expect(invoice).toMatchObject({ gstMinor: 0, gstRate: 0, snapshot: { documentType: 'Bill of Supply' } });
+      expect(renderInvoiceHtml(invoice)).not.toMatch(/IGST|CGST|SGST/);
+    }
+    const report = store.getGstSalesReport(session, '2026-11');
+    expect(report.items.map((item) => item.section)).toEqual(issued.map(() => 'NIL_EXEMPT_NON_GST'));
+    expect(report.totals).toMatchObject({ gstMinor: 0, igstMinor: 0, cgstMinor: 0, sgstMinor: 0 });
+  });
+
+  it('charges GST again as soon as the seller registers', () => {
+    const { register, customer, line, invoice } = setup();
+    const buyer = customer({ stateCode: '29' });
+    expect(() => invoice(buyer.id, [line()])).toThrow(UNREGISTERED_SELLER_TAX_MESSAGE);
+    register();
+    expect(invoice(buyer.id, [line()])).toMatchObject({ gstMinor: 18_000, snapshot: { documentType: 'Tax Invoice' } });
+  });
+});
+
+describe('bulk invoices follow the place of supply', () => {
+  it('splits a bulk invoice to a client in the seller state into CGST + SGST', () => {
+    const { store, session, register } = setup();
+    register();
+    store.generateBulkInvoices(session, '2026-11');
+    const issued = store.listInvoices(session, { month: '2026-11' }).items;
+    expect(issued.length).toBeGreaterThan(0);
+    for (const invoice of issued) {
+      expect(invoice.snapshot).toMatchObject({ documentType: 'Tax Invoice', sellerStateCode: '29', placeOfSupplyStateCode: '29', taxSplit: 'intra' });
+      const html = renderInvoiceHtml(invoice);
+      expect(html).toContain('CGST');
+      expect(html).not.toContain('IGST');
+    }
+    expect(store.getGstSalesReport(session, '2026-11').totals).toMatchObject({ igstMinor: 0 });
   });
 });
 

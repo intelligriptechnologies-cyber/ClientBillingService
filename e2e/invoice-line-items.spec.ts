@@ -1,10 +1,25 @@
 ﻿import { expect, test } from '@playwright/test';
+import { demoOrigin } from './test-ports';
+
+const SELLER_GSTIN = '29AAGCB7383J1Z4';
+let originalSettings: Record<string, unknown> | undefined;
+
+test.afterEach(async ({ playwright }) => {
+  if (!originalSettings) return;
+  const request = await playwright.request.newContext({ baseURL: demoOrigin, extraHTTPHeaders: { Origin: demoOrigin } });
+  await request.post('/api/auth/demo-login', { data: { userId: 'nexio-admin' } });
+  await request.put('/api/settings', { data: originalSettings });
+  await request.dispose();
+  originalSettings = undefined;
+});
 
 test('invoice dialog adds and removes rows, calculates GST per row, and persists details', async ({ page }) => {
   await page.goto('/');
   await page.getByLabel('Demo identity').selectOption('nexio-admin');
   await page.getByRole('button', { name: 'Enter demo' }).click();
   await expect(page).toHaveURL(/\/dashboard$/);
+  originalSettings = (await (await page.request.get('/api/settings')).json() as { settings: Record<string, unknown> }).settings;
+  expect((await page.request.put('/api/settings', { data: { ...originalSettings, gstin: SELLER_GSTIN } })).ok()).toBeTruthy();
   const customerResponse = await page.request.get('/api/customers?pageSize=100');
   expect(customerResponse.ok(), await customerResponse.text()).toBeTruthy();
   const { items: customers } = await customerResponse.json() as { items: Array<{ id: string; gstin: string }> };
@@ -25,11 +40,13 @@ test('invoice dialog adds and removes rows, calculates GST per row, and persists
   await dialog.getByLabel('Description 1').fill('Hall rental');
   await dialog.getByLabel('Quantity 1').fill('2');
   await dialog.getByLabel('Rate 1').fill('100');
-  await dialog.getByLabel('Tax type 1').selectOption('igst');
+  await expect(dialog.getByLabel('Tax type 1')).toHaveValue('cgst_sgst');
+  await dialog.getByLabel('HSN/SAC 1').fill('998311');
   await dialog.getByLabel('GST percent 1').fill('18');
   await dialog.getByRole('button', { name: 'Add Line' }).click();
   await dialog.getByLabel('Description 2').fill('Security deposit');
   await dialog.getByLabel('Rate 2').fill('50');
+  await dialog.getByLabel('Tax type 2').selectOption('none');
   await dialog.getByRole('button', { name: 'Add Line' }).click();
   await dialog.getByLabel('Description 3').fill('Remove me');
   await dialog.getByLabel('Rate 3').fill('100');
@@ -65,7 +82,8 @@ test('invoice dialog creates a customer from the customer source selector', asyn
   await dialog.getByLabel('Email').fill(`invoice-${Date.now()}@example.test`);
   await expect(dialog.getByLabel('Venue')).toHaveCount(0);
   await dialog.getByLabel('Billing Address').fill('Hall 1, Bengaluru');
-  await dialog.getByLabel('GST Applicable').uncheck();
+  await expect(dialog.getByLabel('GST Applicable')).toBeDisabled();
+  await expect(dialog.getByLabel('GST Applicable')).not.toBeChecked();
   await dialog.getByLabel('Description 1').fill('Deposit');
   await dialog.getByLabel('Rate 1').fill('250');
   await dialog.getByRole('button', { name: 'Create Invoice' }).click();

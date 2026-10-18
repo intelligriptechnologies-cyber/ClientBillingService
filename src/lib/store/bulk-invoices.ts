@@ -1,6 +1,6 @@
 import type { DatabaseSync } from 'node:sqlite';
 import { now, requireTenantMember } from './shared';
-import { gstSnapshotFields, resolveSupply } from '../invoice-gst';
+import { amountOnlyLine, gstSnapshotFields, resolveSupply, sellerRegisteredIn } from '../invoice-gst';
 import { contractFromRow } from './contracts';
 import { settingsFromRow } from './settings';
 import { resolveFormatForInvoice } from './invoice-formats';
@@ -24,6 +24,8 @@ export function createBulkInvoiceMethods(database: DatabaseSync) {
       additionsByContract.set(String(row.contract_id), [...(additionsByContract.get(String(row.contract_id)) ?? []), line]);
     }
     const proposed: BulkInvoiceProposal[] = []; const skipped: BulkInvoiceSkip[] = [];
+    const seller = settingsFromRow(database.prepare('SELECT * FROM tenant_settings WHERE tenant_id = ?').get(session.tenantId) as Record<string, unknown>);
+    const gstRate = sellerRegisteredIn(seller.stateCode) ? 18 : 0;
     for (const row of rows) {
       const contract = contractFromRow(database, row);
       const common = { contractId: contract.id, contractName: contract.name, customerName: contract.customerName };
@@ -34,7 +36,7 @@ export function createBulkInvoiceMethods(database: DatabaseSync) {
       if (prior) { skipped.push({ ...common, reason: 'An invoice already exists for this contract and period.' }); continue; }
       const additionalLines = additionsByContract.get(contract.id) ?? [];
       const taxableMinor = contract.valueMinor + additionalLines.reduce((total, line) => total + line.priceMinor, 0);
-      const gstRate = 18; const gstMinor = Math.round(taxableMinor * gstRate / 100);
+      const gstMinor = Math.round(taxableMinor * gstRate / 100);
       proposed.push({ ...common, customerId: contract.customerId, billingPeriod, invoiceDate: periodStart, dueDate: addCalendarDays(periodStart, contract.paymentTermsDays), taxableMinor, gstRate, gstMinor, totalMinor: taxableMinor + gstMinor, additionalLines });
     }
     return { billingPeriod, proposed, skipped };
@@ -61,7 +63,7 @@ export function createBulkInvoiceMethods(database: DatabaseSync) {
         for (const [index, proposal] of preview.proposed.entries()) {
           const customer = database.prepare('SELECT company_name, email, billing_address, gstin, state_code, invoice_format_id FROM customers WHERE id = ? AND tenant_id = ?').get(proposal.customerId, session.tenantId) as Record<string, unknown>;
           const supply = resolveSupply(settings.stateCode, { gstin: String(customer.gstin), stateCode: String(customer.state_code) });
-          const gstFields = gstSnapshotFields({ seller: settings, supply, lines: [{ taxType: proposal.gstRate > 0 ? supply.expectedTaxType ?? 'igst' : 'none', gstRate: proposal.gstRate }], requireHsn: false });
+          const gstFields = gstSnapshotFields({ seller: settings, supply, lines: [amountOnlyLine(supply, proposal.gstRate)], requireHsn: false });
           const snapshot: InvoiceSnapshot = { companyName: settings.companyName, gstin: settings.gstin, address: settings.address, logoDataUrl: settings.logoDataUrl, stampDataUrl: settings.stampDataUrl, signatureDataUrl: settings.signatureDataUrl, customerName: String(customer.company_name), customerEmail: String(customer.email), customerAddress: String(customer.billing_address), customerGstin: String(customer.gstin), gstRate: proposal.gstRate, footer: settings.footer, invoiceTemplate: settings.invoiceTemplate, format: resolveFormatForInvoice(database, session.tenantId, undefined, customer.invoice_format_id ? String(customer.invoice_format_id) : null), ...gstFields };
           const number = `${settings.invoicePrefix}-${String(sequenceStart + index + 1).padStart(4, '0')}`;
           insertInvoice.run(`${session.tenantId}-invoice-${crypto.randomUUID()}`, session.tenantId, proposal.contractId, proposal.customerId, number, proposal.invoiceDate, proposal.dueDate, proposal.taxableMinor, proposal.gstRate, proposal.gstMinor, proposal.totalMinor, 'issued', JSON.stringify(snapshot), timestamp);

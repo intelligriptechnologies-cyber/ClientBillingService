@@ -13,6 +13,11 @@ afterEach(() => {
   for (const store of stores.splice(0)) store.close();
 });
 
+/** The seeded sellers are unregistered and may not charge GST, so a test that bills GST registers its seller first. */
+function registerSeller(store: ReturnType<typeof createTenantStore>, session: NonNullable<ReturnType<ReturnType<typeof createTenantStore>['authenticate']>>) {
+  store.updateTenantSettings(session, { ...store.getTenantSettings(session), gstin: '29AAGCB7383J1Z4' });
+}
+
 describe('tenant lifecycle', () => {
   it('lets the superadmin create, change, and disable a tenant while retaining lifecycle history', () => {
     const store = storeForTest();
@@ -108,15 +113,16 @@ describe('tenant store', () => {
   it('persists row-wise GST, billing details and corrected line items', () => {
     const store = storeForTest(); const session = store.authenticate('nexio-admin');
     if (!session) throw new Error('Expected tenant session');
+    registerSeller(store, session);
     const customer = store.listCustomers(session).items[0];
     const details = { customerId: customer.id, invoiceDate: '2026-10-07', dueDate: '2026-10-21', venue: 'Bengaluru', billingAddress: 'New billing address', customerPan: 'ABCDE1234F', customerGstin: '29AAGCB7383J1Z4', gstApplicable: true, notes: 'Monthly booking' };
-    const first = store.createIssuedInvoice(session, { ...details, lines: [
-      { description: 'Venue booking', quantity: 2, rateMinor: 12500, taxType: 'igst', gstRate: 18 },
+    const first = store.createIssuedInvoice(session, { ...details, taxSplitOverrideReason: 'Supply to an SEZ unit', lines: [
+      { description: 'Venue booking', quantity: 2, rateMinor: 12500, taxType: 'igst', gstRate: 18, hsnSac: '998311' },
       { description: 'Security deposit', quantity: 1, rateMinor: 5000, taxType: 'none', gstRate: 0 },
     ] });
     expect(first).toMatchObject({ taxableMinor: 30000, gstMinor: 4500, totalMinor: 34500, snapshot: { venue: 'Bengaluru', customerAddress: 'New billing address', notes: 'Monthly booking', lines: [{ amountMinor: 25000, gstMinor: 4500 }, { amountMinor: 5000, gstMinor: 0 }] } });
     expect(store.getGstSalesReport(session, '2026-10').items.find((row) => row.invoiceId === first.id)).toMatchObject({ igstMinor: 4500, cgstMinor: 0, sgstMinor: 0 });
-    const corrected = store.correctInvoice(session, first.id, { ...details, lines: [{ description: 'Revised booking', quantity: 1, rateMinor: 20000, taxType: 'cgst_sgst', gstRate: 12 }] }, 'Reduced booking');
+    const corrected = store.correctInvoice(session, first.id, { ...details, lines: [{ description: 'Revised booking', quantity: 1, rateMinor: 20000, taxType: 'cgst_sgst', gstRate: 12, hsnSac: '998311' }] }, 'Reduced booking');
     expect(corrected).toMatchObject({ taxableMinor: 20000, gstMinor: 2400, totalMinor: 22400, snapshot: { lines: [{ description: 'Revised booking', taxType: 'cgst_sgst' }] } });
     expect(store.getGstSalesReport(session, '2026-10').items.find((row) => row.invoiceId === corrected.id)).toMatchObject({ igstMinor: 0, cgstMinor: 1200, sgstMinor: 1200 });
     expect(store.getInvoice(session, first.id)?.status).toBe('void');
@@ -149,6 +155,7 @@ describe('tenant store', () => {
   it('corrects an unpaid invoice by replacing it and edits payment details without changing allocations', () => {
     const store = storeForTest(); const nexio = store.authenticate('nexio-admin');
     if (!nexio) throw new Error('Expected tenant session');
+    registerSeller(store, nexio);
     const customer = store.listCustomers(nexio).items[0];
     const original = store.createIssuedInvoice(nexio, { customerId: customer.id, invoiceDate: '2026-10-07', dueDate: '2026-10-21', taxableMinor: 10000, gstRate: 18 });
     const corrected = store.correctInvoice(nexio, original.id, { invoiceDate: '2026-10-07', dueDate: '2026-10-24', taxableMinor: 12000, gstRate: 18 }, 'Corrected price');
@@ -184,6 +191,7 @@ describe('tenant store', () => {
     const store = storeForTest();
     const nexio = store.authenticate('nexio-admin');
     if (!nexio) throw new Error('Expected seeded session');
+    registerSeller(store, nexio);
     const customer = store.listCustomers(nexio, {}).items[0];
     const service = store.listServices(nexio)[0];
     if (!customer || !service) throw new Error('Expected seeded customer and service');
@@ -262,6 +270,7 @@ describe('tenant store', () => {
     const nexio = store.authenticate('nexio-admin');
     const evo = store.authenticate('evo-admin');
     if (!nexio || !evo) throw new Error('Expected seeded sessions');
+    registerSeller(store, nexio);
     const customer = store.listCustomers(nexio, {}).items[0];
     const contract = store.createContract(nexio, {
       customerId: customer.id, serviceIds: [store.listServices(nexio)[0].id], name: 'Snapshot contract', startDate: '2026-01-01', endDate: '2026-12-31',
