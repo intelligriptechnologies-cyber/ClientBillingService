@@ -47,6 +47,56 @@ describeStore(['settings', 'customers', 'invoices', 'payments'], 'payments', () 
   });
 });
 
+describeStore(['invoices', 'payments'], 'payments under concurrent requests', () => {
+  const INVOICE = 'nexio-invoice-001';
+  async function racing() {
+    const store = await storeForTest();
+    const nexio = await memberContext(store, 'nexio-admin');
+    // Open two pooled connections first, so the racing requests start together instead of one waiting to connect.
+    await Promise.all([store.listPayments(nexio), store.listPayments(nexio)]);
+    const invoice = (await store.getInvoice(nexio, INVOICE))!;
+    expect(invoice).toMatchObject({ totalMinor: 118000, paidMinor: 0, status: 'issued' });
+    const pay = (amountMinor: number) => store.recordPayment(nexio, { invoiceId: INVOICE, paymentDate: '2026-10-20', amountMinor, tdsMinor: 0, writeOffMinor: 0, method: 'bank_transfer' });
+    const settled = async () => {
+      const applied = (await store.listPayments(nexio, { pageSize: 100 })).items.filter((item) => item.invoiceId === INVOICE).reduce((sum, item) => sum + item.appliedMinor, 0);
+      return { applied, invoice: (await store.getInvoice(nexio, INVOICE))! };
+    };
+    return { store, nexio, pay, settled };
+  }
+
+  it('never overpays an invoice when two payments on it run at once', async () => {
+    const { pay, settled } = await racing();
+
+    const results = await Promise.allSettled([pay(70000), pay(70000)]);
+
+    expect(results.map((result) => result.status).sort()).toEqual(['fulfilled', 'rejected']);
+    const { applied, invoice } = await settled();
+    expect(applied).toBe(70000);
+    expect(invoice).toMatchObject({ paidMinor: 70000, status: 'partial' });
+  });
+
+  it('lets only one of a payment and a void of one invoice through when they run at once', async () => {
+    const { store, nexio, pay, settled } = await racing();
+
+    const results = await Promise.allSettled([pay(50000), store.voidInvoice(nexio, INVOICE, 'Issued in error')]);
+
+    expect(results.map((result) => result.status).sort()).toEqual(['fulfilled', 'rejected']);
+    const { applied, invoice } = await settled();
+    expect(invoice).toMatchObject(results[0].status === 'fulfilled' ? { status: 'partial', paidMinor: 50000 } : { status: 'void', paidMinor: 0 });
+    expect(applied).toBe(invoice.paidMinor);
+  });
+
+  it('never writes off more than is outstanding when a close and a payment run at once', async () => {
+    const { store, nexio, pay, settled } = await racing();
+
+    await Promise.allSettled([store.closeInvoice(nexio, INVOICE, 'Approved closeout'), pay(50000)]);
+
+    const { applied, invoice } = await settled();
+    expect(invoice).toMatchObject({ status: 'paid', paidMinor: 118000 });
+    expect(applied).toBe(118000);
+  });
+});
+
 describeStore(['invoices', 'payments', 'reminders'], 'payment reminders', () => {
   it('lists aging pending invoices and records demo-only reminder history', async () => {
     const store = await storeForTest(); const nexio = await store.authenticate('nexio-admin');
