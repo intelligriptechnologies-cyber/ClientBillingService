@@ -1,5 +1,6 @@
 import { afterEach, describe } from 'vitest';
 import { databaseForTest } from '../db/test-database';
+import { createPgStore } from './pg/create-pg-store';
 import { createTenantStore, type AppSession, type TenantStore } from '../tenant-store';
 import type { PlatformActor, TenantContext } from '../auth/principal';
 import { tenantContextOf } from '../auth/session-context';
@@ -20,9 +21,9 @@ export const testDriver = driverFrom(process.env.TEST_DRIVER);
 
 /** The ADR 0001 unit that ports each store area to Postgres, and whether it has landed. */
 const pgPorts = {
-  tenants: { unit: 'D5', ported: false },
-  users: { unit: 'D5', ported: false },
-  settings: { unit: 'D5', ported: false },
+  tenants: { unit: 'D5', ported: true },
+  users: { unit: 'D5', ported: true },
+  settings: { unit: 'D5', ported: true },
   services: { unit: 'D6', ported: false },
   customers: { unit: 'D6', ported: false },
   quotations: { unit: 'D6', ported: false },
@@ -69,8 +70,10 @@ export async function storeForTest(): Promise<TenantStore> {
     return store;
   }
   const database = await databaseForTest();
-  cleanups.push(() => database.drop());
-  return withoutPort({});
+  let dropped: Promise<void> | undefined;
+  const close = () => (dropped ??= database.drop());
+  cleanups.push(close);
+  return withoutPort({ ...createPgStore(database.db), close });
 }
 
 /** The superadmin, built directly: under Postgres it is an Authelia group with no users row (ADR 0002, decision 3). */

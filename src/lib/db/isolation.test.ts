@@ -193,7 +193,7 @@ describe.skipIf(!process.env.DATABASE_MIGRATE_URL)(`tenant isolation (${DATABASE
               (SELECT md5(string_agg(tablename || policyname || coalesce(qual, '') || coalesce(with_check, ''), ',' ORDER BY tablename, policyname)) FROM pg_policies WHERE schemaname = 'public') AS policies`,
     )).rows[0];
     const before = await fingerprint();
-    expect(before.history).toEqual(['0001_baseline']);
+    expect(before.history).toEqual(['0001_baseline', '0002_tenant_name_unique_ci']);
     await migrate(database.ownerUrl);
     expect(await fingerprint()).toEqual(before);
   });

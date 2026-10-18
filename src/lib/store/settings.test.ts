@@ -1,5 +1,6 @@
 import { expect, it } from 'vitest';
-import { describeStore, storeForTest } from './test-store';
+import { describeStore, memberContext, storeForTest } from './test-store';
+import { settingsInput } from '../test-helpers';
 import { tenantContextOf } from '../auth/session-context';
 
 describeStore(['settings'], 'tenant settings and operational logs', () => {
@@ -28,5 +29,23 @@ describeStore(['settings'], 'tenant settings and operational logs', () => {
 
     await expect(store.getTenantSettings(tenantContextOf(tenantUser))).rejects.toThrow('admin');
     await expect(store.listOperationalLogs(tenantContextOf(tenantUser))).rejects.toThrow('admin');
+  });
+});
+
+describeStore(['settings'], 'tenant settings under concurrent requests', () => {
+  it('keeps the legal name one save sets when another save that leaves it out runs at the same time', async () => {
+    const store = await storeForTest();
+    const nexio = await memberContext(store, 'nexio-admin');
+    const { legalName, ...withoutLegalName } = settingsInput(await store.getTenantSettings(nexio));
+    expect(legalName).toBe('');
+    // Open two pooled connections first, so the racing requests start together instead of one waiting to connect.
+    await Promise.all([store.getTenantSettings(nexio), store.getTenantSettings(nexio)]);
+
+    await Promise.all([
+      store.updateTenantSettings(nexio, { ...withoutLegalName, legalName: 'Nexio Hyper Private Limited' }),
+      store.updateTenantSettings(nexio, { ...withoutLegalName, footer: 'Paid with thanks.' }),
+    ]);
+
+    expect(await store.getTenantSettings(nexio)).toMatchObject({ legalName: 'Nexio Hyper Private Limited' });
   });
 });

@@ -95,3 +95,32 @@ describeStore(['tenants'], 'tenant identities and records', () => {
     await expect(store.createTenantRecord(nexio, evo.tenantId, 'Not allowed')).rejects.toThrow('tenant');
   });
 });
+
+describeStore(['tenants'], 'tenant lifecycle under concurrent requests', () => {
+  it('creates one tenant when two requests race for names that differ only in case', async () => {
+    const store = await storeForTest();
+    const results = await Promise.allSettled([store.createTenant(superadmin, { name: 'Race Works' }), store.createTenant(superadmin, { name: 'RACE WORKS' })]);
+
+    expect(results.map((result) => result.status).sort()).toEqual(['fulfilled', 'rejected']);
+    expect(results.find((result) => result.status === 'rejected')).toMatchObject({ reason: expect.objectContaining({ message: 'A tenant with that name already exists.' }) });
+    expect((await store.listTenants(superadmin, { query: 'race works' })).total).toBe(1);
+  });
+
+  it('gives distinct ids to two tenants whose names map to one id when both are created at once', async () => {
+    const store = await storeForTest();
+    const created = await Promise.all([store.createTenant(superadmin, { name: 'Slug & Co' }), store.createTenant(superadmin, { name: 'Slug Co' })]);
+
+    expect(created.map((tenant) => tenant.id).sort()).toEqual(['slug-co', 'slug-co-2']);
+  });
+
+  it('records one disabled event when two requests disable a tenant at once', async () => {
+    const store = await storeForTest();
+    const created = await store.createTenant(superadmin, { name: 'Twice Disabled' });
+    // Open two pooled connections first, so the racing requests start together instead of one waiting to connect.
+    await Promise.all([store.listTenantHistory(superadmin, created.id), store.listTenantHistory(superadmin, created.id)]);
+
+    await Promise.all([store.updateTenant(superadmin, created.id, { status: 'disabled' }), store.updateTenant(superadmin, created.id, { status: 'disabled' })]);
+
+    expect((await store.listTenantHistory(superadmin, created.id)).map((event) => event.action)).toEqual(['created', 'disabled']);
+  });
+});

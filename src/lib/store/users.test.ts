@@ -1,5 +1,5 @@
 import { expect, it } from 'vitest';
-import { describeStore, storeForTest, superadmin } from './test-store';
+import { describeStore, memberContext, storeForTest, superadmin } from './test-store';
 import { tenantContextOf } from '../auth/session-context';
 
 describeStore(['tenants', 'users'], 'tenant users', () => {
@@ -51,5 +51,22 @@ describeStore(['tenants', 'users'], 'tenant users', () => {
 
     await expect(store.listTenantUsers(tenantContextOf(nexioUser))).rejects.toThrow('admin');
     await expect(store.updateTenantUser(tenantContextOf(nexioAdmin), 'evo-user', { status: 'disabled' })).rejects.toThrow('tenant');
+  });
+});
+
+describeStore(['tenants', 'users'], 'tenant users under concurrent requests', () => {
+  it('keeps one active admin when two admins demote each other at once', async () => {
+    const store = await storeForTest();
+    const first = await memberContext(store, 'nexio-admin');
+    await store.updateTenantUser(first, 'nexio-user', { role: 'admin' });
+    const second = await memberContext(store, 'nexio-user');
+    // Open two pooled connections first, so the racing requests start together instead of one waiting to connect.
+    await Promise.all([store.listTenantUsers(first), store.listTenantUsers(second)]);
+
+    const results = await Promise.allSettled([store.updateTenantUser(first, 'nexio-user', { role: 'user' }), store.updateTenantUser(second, 'nexio-admin', { role: 'user' })]);
+
+    expect(results.map((result) => result.status).sort()).toEqual(['fulfilled', 'rejected']);
+    const roles = [await store.authenticate('nexio-admin'), await store.authenticate('nexio-user')].map((session) => session?.role);
+    expect(roles.filter((role) => role === 'admin')).toHaveLength(1);
   });
 });
