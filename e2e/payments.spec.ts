@@ -17,7 +17,7 @@ test('a tenant records a partial payment and an auditable demo-only reminder', a
   await clickMenuLink(page, 'Reports', 'Pending Payments');
   await expect(page.getByRole('heading', { name: 'Pending payments', level: 1 })).toBeVisible();
   await page.getByRole('button', { name: 'Email reminder' }).first().click();
-  await expect(page.getByText(/no external message was sent/)).toBeVisible();
+  await expect(page.getByText(/Reminder recorded, not sent\. Email is not set up/)).toBeVisible();
   await page.getByRole('button', { name: 'Close invoice' }).first().click();
   await page.getByRole('alertdialog').getByRole('button', { name: 'Close invoice' }).click();
   await expect(page.getByText(/Invoice closed and write-off recorded/)).toBeVisible();

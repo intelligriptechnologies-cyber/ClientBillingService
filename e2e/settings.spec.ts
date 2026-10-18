@@ -21,9 +21,26 @@ test('an admin can preview templates, test SMTP locally, and download tenant log
 
   await page.getByRole('tab', { name: 'Email' }).click();
   await page.getByRole('button', { name: 'Edit settings' }).click();
-  await page.getByRole('button', { name: 'Test SMTP configuration' }).click();
-  await expect(page.getByRole('status')).toContainText('no external email was sent');
-  await page.getByRole('button', { name: 'Cancel' }).click();
+  const dialog = page.getByRole('dialog', { name: 'Edit email settings' });
+  await dialog.getByRole('button', { name: 'Test SMTP configuration' }).click();
+  await expect(dialog.getByRole('alert')).toContainText('Email is not set up');
+  await dialog.getByLabel('SMTP host').fill('smtp.nexio.test');
+  await dialog.getByLabel('From address').fill('billing@nexio.test');
+  await dialog.getByLabel('SMTP password').fill('typed-secret');
+  await dialog.getByRole('button', { name: 'Save settings' }).click();
+  await expect(page.getByRole('status')).toContainText('Settings saved');
+
+  await page.getByRole('button', { name: 'Edit settings' }).click();
+  await expect(dialog.getByLabel('SMTP password')).toHaveValue('');
+  await expect(dialog.getByLabel('SMTP password')).toHaveAttribute('placeholder', /Saved/);
+  await dialog.getByRole('button', { name: 'Test SMTP configuration' }).click();
+  await expect(page.getByRole('status')).toContainText('SMTP test passed. The capture transport is active');
+
+  await dialog.getByLabel('SMTP host').fill('');
+  await dialog.getByLabel('From address').fill('');
+  await dialog.getByLabel('Remove the saved password when I save').check();
+  await dialog.getByRole('button', { name: 'Save settings' }).click();
+  await expect(page.getByRole('status')).toContainText('Settings saved');
 
   await page.getByRole('tab', { name: 'Operational logs' }).click();
   await expect(page.getByRole('heading', { name: 'Feature-flow logs' })).toBeVisible();

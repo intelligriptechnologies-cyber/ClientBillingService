@@ -92,7 +92,7 @@ export function createPaymentMethods(database: DatabaseSync) {
       database.exec('BEGIN');
       try {
         database.prepare('INSERT INTO payment_reminders (id, tenant_id, invoice_id, channel, note, created_at) VALUES (?, ?, ?, ?, ?, ?)').run(id, session.tenantId, invoiceId, input.channel, note, timestamp);
-        database.prepare('INSERT INTO operational_logs (id, tenant_id, kind, message, created_at) VALUES (?, ?, ?, ?, ?)').run(crypto.randomUUID(), session.tenantId, 'feature-flow', `${input.channel === 'email' ? 'Email' : 'WhatsApp'} payment reminder prepared for ${String(invoice.invoice_number)}; no external message was sent.`, timestamp);
+        database.prepare('INSERT INTO operational_logs (id, tenant_id, kind, message, created_at) VALUES (?, ?, ?, ?, ?)').run(crypto.randomUUID(), session.tenantId, 'feature-flow', `${input.channel === 'email' ? 'Email' : 'WhatsApp'} payment reminder recorded for ${String(invoice.invoice_number)}.`, timestamp);
         database.exec('COMMIT');
       } catch (error) { database.exec('ROLLBACK'); throw error; }
       return reminderFromRow(database.prepare('SELECT * FROM payment_reminders WHERE id = ?').get(id) as Record<string, unknown>);

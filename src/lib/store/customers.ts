@@ -29,6 +29,11 @@ export function createCustomerMethods(database: DatabaseSync) {
       const items = database.prepare(`SELECT * FROM customers WHERE ${where} ORDER BY company_name LIMIT ? OFFSET ?`).all(...values, pageSize, (page - 1) * pageSize) as Record<string, unknown>[];
       return { items: items.map(customerFromRow), total };
     },
+    getCustomer(session: AppSession, customerId: string): CustomerRecord | null {
+      if (!session.tenantId) throw new Error('Only tenant users can manage customers.');
+      const row = database.prepare('SELECT * FROM customers WHERE id = ? AND tenant_id = ?').get(customerId, session.tenantId) as Record<string, unknown> | undefined;
+      return row ? customerFromRow(row) : null;
+    },
     createCustomer(session: AppSession, input: CustomerInput) {
       if (!session.tenantId) throw new Error('Only tenant users can manage customers.'); const error = customerError(input); if (error) throw new Error(error);
       const gst = customerGst(input); const formatId = formatDefault(session.tenantId, input) ?? null; const id = `customer-${crypto.randomUUID()}`; const now = new Date().toISOString();

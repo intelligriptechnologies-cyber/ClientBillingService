@@ -13,6 +13,7 @@ import { createBulkInvoiceMethods } from './bulk-invoices';
 import { createInvoiceMethods } from './invoices';
 import { createPaymentMethods } from './payments';
 import { createSettingsMethods } from './settings';
+import { createDeliveryMethods } from './deliveries';
 import { createInvoiceFormatMethods } from './invoice-formats';
 
 export function createTenantStore(filename = process.env.CLIENT_BILLING_DATABASE ?? '.data/client-billing.sqlite') {
@@ -34,6 +35,7 @@ export function createTenantStore(filename = process.env.CLIENT_BILLING_DATABASE
     ...createInvoiceMethods(database),
     ...createPaymentMethods(database),
     ...createSettingsMethods(database),
+    ...createDeliveryMethods(database),
     ...createInvoiceFormatMethods(database),
     close() { database.close(); },
   };

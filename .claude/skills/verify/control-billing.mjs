@@ -471,7 +471,7 @@ async function cmdUp(flags) {
   mkdirSync(join(workspace, 'logs'), { recursive: true });
   const logFile = join(workspace, 'logs', `server-${runId}.log`);
   const out = openSync(logFile, 'a');
-  const env = { ...process.env, NODE_ENV: 'production', NEXT_TELEMETRY_DISABLED: '1', CLIENT_BILLING_DATABASE: dbPath, CLIENT_BILLING_SEED_MODE: 'demo' };
+  const env = { ...process.env, NODE_ENV: 'production', NEXT_TELEMETRY_DISABLED: '1', CLIENT_BILLING_DATABASE: dbPath, CLIENT_BILLING_SEED_MODE: 'demo', CLIENT_BILLING_MAIL_TRANSPORT: 'capture' };
   delete env.PORT; delete env.HOSTNAME;
   const child = spawn(process.execPath, [nextBin(deps), 'start', '-H', '127.0.0.1', '-p', String(port)], { cwd: app, env, detached: true, stdio: ['ignore', out, out], windowsHide: true });
   child.unref(); closeSync(out);

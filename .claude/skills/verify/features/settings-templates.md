@@ -26,7 +26,7 @@ Preconditions:
 - **Open.** Run `control-billing snapshot /settings --out settings/company.aria.txt`. The tablist `Settings sections` holds the six tabs, and the `Company` tab shows `Company settings`, the button `Edit settings`, and the text `Nexio Hyper · No GSTIN`.
 - **Company edit and GST validation.** In a `run` script choose `Edit settings` to open the dialog `Edit company settings`. Fill `GSTIN` `29AAGCB7383J1Z5`. The dialog text contains `check digit does not match`, and `Save settings` shows an alert with `check digit`. Fill `GSTIN` `29AAGCB7383J1Z4` and `Legal name` `Nexio Hyper Private Limited`. The dialog shows `State: Karnataka (29)`. `Save settings` shows the status `Settings saved` and the page text `29AAGCB7383J1Z4 · Karnataka`. Confirm with `control-billing db "SELECT gstin,state_code,legal_name FROM tenant_settings WHERE tenant_id='nexio'" --out settings/row.json`.
 - **Template preview.** Choose the tab `Templates`, `Edit settings`, `Preview template`. The element with role `status` contains `Preview`. Choose `Cancel`.
-- **SMTP test.** Choose the tab `Email`, `Edit settings`, `Test SMTP configuration`. The status contains `no external email was sent`. Choose `Cancel`.
+- **SMTP test.** Choose the tab `Email`, `Edit settings`, `Test SMTP configuration`. A tenant with no SMTP host shows the alert `Email is not set up`. After saving a host and a From address, reopen `Edit settings` and test again: the status contains `SMTP test passed. The capture transport is active`. Choose `Cancel`. See `email.md` for sending.
 - **Logs.** Choose the tab `Operational logs`. The heading `Feature-flow logs` shows. Choose `Download all logs`; the saved file is `operational-logs.txt`. API: `control-billing api GET /api/logs` returns the same tenant's entries, for example `Invoice <number> voided: <reason>` after a void.
 - **Guard, user.** Run `control-billing snapshot /settings --as nexio-user`. The result has `redirected: true`, `finalPath: "/dashboard"`, and the navigation has no `Admin Console`.
 - **Guard, signed out.** Run `control-billing snapshot /settings --anonymous`. The result lands on `/` with the `Choose a demo identity` heading.
@@ -36,6 +36,6 @@ Preconditions:
 
 - Each tab opens its own `Edit settings` dialog. Cancel it before moving to another tab.
 - Saving a seller GSTIN changes what new invoices become (`Tax Invoice` instead of `Bill of Supply`, `HSN/SAC` required on lines). Restart the instance when the recipe needs the unregistered seller back.
-- SMTP test and template preview never send mail. Verify the wording of the status, and that no mail server is contacted, by reading the result text. There is no mail server in the isolated instance.
+- The SMTP test connects with the saved settings and sends nothing. In the isolated instance the transport is the capture transport, so the status says no connection was made. The password field is write-only: it reopens empty with the placeholder `Saved. Leave blank to keep it.`
 - The GSTIN is stored upper-case. A lower-case entry is accepted and normalized.
 - `/users` (User management) and `/logs` are also under Admin Console. They are not mapped yet.
