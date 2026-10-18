@@ -79,7 +79,7 @@ export type TenantPayment = { id: string; invoiceId: string; invoiceNumber: stri
 export type PaymentInput = { invoiceId: string; paymentDate: string; amountMinor: number; tdsMinor: number; writeOffMinor: number; method: PaymentMethod; reference?: string; notes?: string };
 export type PaymentQuery = { customerId?: string; search?: string; month?: string; page?: number; pageSize?: number };
 export type PaymentList = { items: TenantPayment[]; total: number; totalAppliedMinor: number };
-export type PendingPayment = TenantInvoice & { outstandingMinor: number; daysOverdue: number; agingBucket: 'Current' | '1–30' | '31–60' | '61–90' | '90+'; reminders: PaymentReminder[] };
+export type PendingPayment = TenantInvoice & { outstandingMinor: number; daysOverdue: number; agingBucket: 'Current' | '1â€“30' | '31â€“60' | '61â€“90' | '90+'; reminders: PaymentReminder[] };
 export type PaymentReminder = { id: string; invoiceId: string; channel: 'email' | 'whatsapp'; note: string; createdAt: string };
 export type GstSalesRow = { section: Gstr1Section; invoiceId: string; invoiceNumber: string; invoiceDate: string; customerName: string; customerGstin: string; taxableMinor: number; gstMinor: number; totalMinor: number; igstMinor: number; cgstMinor: number; sgstMinor: number; netGstMinor: number };
 export type HsnSummaryRow = { hsn: string; description: string; quantity: number; taxableMinor: number; taxMinor: number };
@@ -127,16 +127,17 @@ export interface TenantStore {
   listAdditionalServices(context: TenantContext, query?: AdditionalServiceQuery): Promise<AdditionalServiceList>;
   createAdditionalService(context: TenantContext, input: AdditionalServiceInput): Promise<AdditionalService>;
   updateAdditionalService(context: TenantContext, additionalServiceId: string, update: AdditionalServiceUpdate): Promise<AdditionalService>;
-  previewBulkInvoices(session: AppSession, billingPeriod: string): Promise<BulkInvoicePreview>;
-  listBulkInvoiceRuns(session: AppSession): Promise<BulkInvoiceRun[]>;
-  generateBulkInvoices(session: AppSession, billingPeriod: string): Promise<BulkInvoiceGeneration>;
-  listInvoices(session: AppSession, query?: InvoiceQuery): Promise<InvoiceList>;
-  getGstSalesReport(session: AppSession, month: string): Promise<GstSalesReport>;
-  getSupplyContext(session: AppSession, query: { customerId?: string; customerGstin?: string; billingStateCode?: string }): Promise<SupplyContext>;
-  getInvoice(session: AppSession, invoiceId: string): Promise<TenantInvoice | null>;
-  voidInvoice(session: AppSession, invoiceId: string, reason: string): Promise<TenantInvoice>;
-  correctInvoice(session: AppSession, invoiceId: string, correction: InvoiceInput, reason: string): Promise<TenantInvoice>;
-  createIssuedInvoice(session: AppSession, input: InvoiceInput): Promise<TenantInvoice>;
+  previewBulkInvoices(context: TenantContext, billingPeriod: string): Promise<BulkInvoicePreview>;
+  listBulkInvoiceRuns(context: TenantContext): Promise<BulkInvoiceRun[]>;
+  generateBulkInvoices(context: TenantContext, billingPeriod: string): Promise<BulkInvoiceGeneration>;
+  listInvoices(context: TenantContext, query?: InvoiceQuery): Promise<InvoiceList>;
+  getGstSalesReport(context: TenantContext, month: string): Promise<GstSalesReport>;
+  getSupplyContext(context: TenantContext, query: { customerId?: string; customerGstin?: string; billingStateCode?: string }): Promise<SupplyContext>;
+  /** Another tenant's invoice answers the same as one that does not exist. */
+  getInvoice(context: TenantContext, invoiceId: string): Promise<TenantInvoice | null>;
+  voidInvoice(context: TenantContext, invoiceId: string, reason: string): Promise<TenantInvoice>;
+  correctInvoice(context: TenantContext, invoiceId: string, correction: InvoiceInput, reason: string): Promise<TenantInvoice>;
+  createIssuedInvoice(context: TenantContext, input: InvoiceInput): Promise<TenantInvoice>;
   listPayments(session: AppSession, query?: PaymentQuery): Promise<PaymentList>;
   recordPayment(session: AppSession, input: PaymentInput): Promise<TenantPayment>;
   getPayment(session: AppSession, paymentId: string): Promise<TenantPayment | null>;
@@ -152,12 +153,12 @@ export interface TenantStore {
   logFeatureFlow(context: TenantContext, message: string): Promise<void>;
   recordOperationalError(context: TenantContext, operation: string, cause: unknown): Promise<void>;
   listOperationalLogs(context: TenantContext): Promise<OperationalLog[]>;
-  recordDelivery(session: AppSession, input: DeliveryInput): Promise<DeliveryRecord>;
-  listDeliveries(session: AppSession, invoiceId: string): Promise<DeliveryRecord[]>;
-  listInvoiceFormats(session: AppSession): Promise<InvoiceFormat[]>;
-  createInvoiceFormat(session: AppSession, input: unknown): Promise<InvoiceFormat>;
-  updateInvoiceFormat(session: AppSession, formatId: string, input: unknown): Promise<InvoiceFormat>;
-  setDefaultInvoiceFormat(session: AppSession, formatId: string): Promise<InvoiceFormat>;
-  deleteInvoiceFormat(session: AppSession, formatId: string): Promise<void>;
+  recordDelivery(context: TenantContext, input: DeliveryInput): Promise<DeliveryRecord>;
+  listDeliveries(context: TenantContext, invoiceId: string): Promise<DeliveryRecord[]>;
+  listInvoiceFormats(context: TenantContext): Promise<InvoiceFormat[]>;
+  createInvoiceFormat(context: TenantContext, input: unknown): Promise<InvoiceFormat>;
+  updateInvoiceFormat(context: TenantContext, formatId: string, input: unknown): Promise<InvoiceFormat>;
+  setDefaultInvoiceFormat(context: TenantContext, formatId: string): Promise<InvoiceFormat>;
+  deleteInvoiceFormat(context: TenantContext, formatId: string): Promise<void>;
   close(): Promise<void>;
 }

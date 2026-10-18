@@ -1,6 +1,6 @@
 import type { DatabaseSync } from 'node:sqlite';
 import { now, requireTenantMember } from './shared';
-import { invoiceFromRow } from './invoices';
+import { parseInvoiceRow } from './rows';
 import type { AppSession, InvoiceStatus, PaymentMethod, TenantPayment, PaymentInput, PaymentQuery, PaymentList, PendingPayment, PaymentReminder } from './types';
 
 function paymentFromRow(row: Record<string, unknown>): TenantPayment {
@@ -9,7 +9,7 @@ function paymentFromRow(row: Record<string, unknown>): TenantPayment {
 }
 function reminderFromRow(row: Record<string, unknown>): PaymentReminder { return { id: String(row.id), invoiceId: String(row.invoice_id), channel: row.channel as PaymentReminder['channel'], note: String(row.note), createdAt: String(row.created_at) }; }
 function daysLate(dueDate: string, today = new Date().toISOString().slice(0, 10)) { const [year, month, day] = dueDate.split('-').map(Number); const [todayYear, todayMonth, todayDay] = today.split('-').map(Number); return Math.max(0, Math.floor((Date.UTC(todayYear, todayMonth - 1, todayDay) - Date.UTC(year, month - 1, day)) / 86_400_000)); }
-function agingFor(days: number): PendingPayment['agingBucket'] { if (days === 0) return 'Current'; if (days <= 30) return '1–30'; if (days <= 60) return '31–60'; if (days <= 90) return '61–90'; return '90+'; }
+function agingFor(days: number): PendingPayment['agingBucket'] { if (days === 0) return 'Current'; if (days <= 30) return '1â€“30'; if (days <= 60) return '31â€“60'; if (days <= 90) return '61â€“90'; return '90+'; }
 
 export function createPaymentMethods(database: DatabaseSync) {
   return {
@@ -80,7 +80,7 @@ export function createPaymentMethods(database: DatabaseSync) {
       requireTenantMember(session);
       const rows = database.prepare('SELECT invoices.*, customers.company_name AS customer_name FROM invoices JOIN customers ON customers.id = invoices.customer_id WHERE invoices.tenant_id = ? AND invoices.status != \'void\' AND invoices.paid_minor < invoices.total_minor ORDER BY invoices.due_date ASC').all(session.tenantId) as Record<string, unknown>[];
       const reminderStatement = database.prepare('SELECT * FROM payment_reminders WHERE invoice_id = ? AND tenant_id = ? ORDER BY created_at DESC');
-      return rows.map((row) => { const invoice = invoiceFromRow(row); const daysOverdue = daysLate(invoice.dueDate); return { ...invoice, outstandingMinor: invoice.totalMinor - invoice.paidMinor, daysOverdue, agingBucket: agingFor(daysOverdue), reminders: (reminderStatement.all(invoice.id, session.tenantId) as Record<string, unknown>[]).map(reminderFromRow) }; });
+      return rows.map((row) => { const invoice = parseInvoiceRow(row); const daysOverdue = daysLate(invoice.dueDate); return { ...invoice, outstandingMinor: invoice.totalMinor - invoice.paidMinor, daysOverdue, agingBucket: agingFor(daysOverdue), reminders: (reminderStatement.all(invoice.id, session.tenantId) as Record<string, unknown>[]).map(reminderFromRow) }; });
     },
     recordPaymentReminder(session: AppSession, invoiceId: string, input: { channel: PaymentReminder['channel']; note?: string }): PaymentReminder {
       requireTenantMember(session);

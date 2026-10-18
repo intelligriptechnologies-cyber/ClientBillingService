@@ -1,7 +1,9 @@
-import type { PlatformActor } from '../auth/principal';
+import type { PlatformActor, TenantContext } from '../auth/principal';
 import type { AppSession } from './types';
 
 export function now() { return new Date().toISOString(); }
+/** Who acted inside the tenant, as stored on rows that record it: a users.id, or an API token id. */
+export function actorId(context: TenantContext) { return context.actor.kind === 'platform' ? context.actor.username : context.actor.id; }
 /** The type already asks for the platform actor; this refuses a caller that slipped past it at runtime. */
 export function requirePlatform(actor: PlatformActor) { if (actor?.kind !== 'platform') throw new Error('Only a superadmin may manage tenants.'); }
 /** `role` is the acting user's role, read from its active users row in the context's tenant, or null. */

@@ -8,25 +8,25 @@ describeStore(['settings', 'customers', 'invoices', 'payments'], 'payments', () 
     if (!nexio) throw new Error('Expected tenant session');
     await registerSeller(store, nexio);
     const customer = (await store.listCustomers(tenantContextOf(nexio))).items[0];
-    const original = await store.createIssuedInvoice(nexio, { customerId: customer.id, invoiceDate: '2026-10-07', dueDate: '2026-10-21', taxableMinor: 10000, gstRate: 18 });
-    const corrected = await store.correctInvoice(nexio, original.id, { invoiceDate: '2026-10-07', dueDate: '2026-10-24', taxableMinor: 12000, gstRate: 18 }, 'Corrected price');
+    const original = await store.createIssuedInvoice(tenantContextOf(nexio), { customerId: customer.id, invoiceDate: '2026-10-07', dueDate: '2026-10-21', taxableMinor: 10000, gstRate: 18 });
+    const corrected = await store.correctInvoice(tenantContextOf(nexio), original.id, { invoiceDate: '2026-10-07', dueDate: '2026-10-24', taxableMinor: 12000, gstRate: 18 }, 'Corrected price');
     expect(corrected.id).not.toBe(original.id);
     expect(corrected.taxableMinor).toBe(12000);
-    expect((await store.getInvoice(nexio, original.id))?.status).toBe('void');
+    expect((await store.getInvoice(tenantContextOf(nexio), original.id))?.status).toBe('void');
     const payment = await store.recordPayment(nexio, { invoiceId: corrected.id, paymentDate: '2026-10-08', amountMinor: 5000, tdsMinor: 0, writeOffMinor: 0, method: 'bank_transfer', reference: 'OLD', notes: '' });
     const edited = await store.updatePaymentDetails(nexio, payment.id, { method: 'cheque', reference: 'NEW', notes: 'Reconciled' });
     expect(edited).toMatchObject({ appliedMinor: 5000, method: 'cheque', reference: 'NEW', notes: 'Reconciled' });
-    expect((await store.getInvoice(nexio, corrected.id))?.paidMinor).toBe(5000);
-    await expect(store.correctInvoice(nexio, corrected.id, { invoiceDate: '2026-10-07', dueDate: '2026-10-24', taxableMinor: 12000, gstRate: 18 }, 'Again')).rejects.toThrow('payments');
+    expect((await store.getInvoice(tenantContextOf(nexio), corrected.id))?.paidMinor).toBe(5000);
+    await expect(store.correctInvoice(tenantContextOf(nexio), corrected.id, { invoiceDate: '2026-10-07', dueDate: '2026-10-24', taxableMinor: 12000, gstRate: 18 }, 'Again')).rejects.toThrow('payments');
   });
 
   it('allocates manual payments with TDS and write-off without exceeding an invoice balance', async () => {
     const store = await storeForTest(); const nexio = await store.authenticate('nexio-admin'); const evo = await store.authenticate('evo-admin');
     if (!nexio || !evo) throw new Error('Expected seeded sessions');
-    const invoice = (await store.listInvoices(nexio, {})).items[0];
+    const invoice = (await store.listInvoices(tenantContextOf(nexio), {})).items[0];
     const payment = await store.recordPayment(nexio, { invoiceId: invoice.id, paymentDate: '2026-10-07', amountMinor: 100000, tdsMinor: 10000, writeOffMinor: 8000, method: 'bank_transfer', reference: 'UTR-2042', notes: 'Reconciled with customer.' });
     expect(payment).toMatchObject({ invoiceId: invoice.id, appliedMinor: 118000, reference: 'UTR-2042' });
-    expect(await store.getInvoice(nexio, invoice.id)).toMatchObject({ paidMinor: 118000, status: 'paid' });
+    expect(await store.getInvoice(tenantContextOf(nexio), invoice.id)).toMatchObject({ paidMinor: 118000, status: 'paid' });
     expect((await store.listPayments(nexio, { month: '2026-10' })).items).toEqual(expect.arrayContaining([expect.objectContaining({ id: payment.id, customerId: invoice.customerId })]));
     await expect(store.recordPayment(nexio, { invoiceId: invoice.id, paymentDate: '2026-10-08', amountMinor: 1, tdsMinor: 0, writeOffMinor: 0, method: 'cash' })).rejects.toThrow('outstanding');
     await expect(store.recordPayment(evo, { invoiceId: invoice.id, paymentDate: '2026-10-08', amountMinor: 1, tdsMinor: 0, writeOffMinor: 0, method: 'cash' })).rejects.toThrow('tenant');
@@ -50,7 +50,7 @@ describeStore(['invoices', 'payments', 'reminders'], 'payment reminders', () => 
   it('lists aging pending invoices and records demo-only reminder history', async () => {
     const store = await storeForTest(); const nexio = await store.authenticate('nexio-admin');
     if (!nexio) throw new Error('Expected seeded session');
-    const invoice = (await store.listInvoices(nexio, {})).items[0];
+    const invoice = (await store.listInvoices(tenantContextOf(nexio), {})).items[0];
     const pending = await store.listPendingPayments(nexio);
     expect(pending).toEqual(expect.arrayContaining([expect.objectContaining({ id: invoice.id, outstandingMinor: invoice.totalMinor, agingBucket: expect.any(String) })]));
     const reminder = await store.recordPaymentReminder(nexio, invoice.id, { channel: 'whatsapp', note: 'Please confirm payment date.' });

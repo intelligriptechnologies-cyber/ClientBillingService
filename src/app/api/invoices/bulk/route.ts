@@ -2,6 +2,7 @@ import { recordOperationException } from '@/lib/operational-error';
 import { NextResponse } from 'next/server';
 import { getCurrentSession } from '@/lib/session';
 import { getTenantStore } from '@/lib/tenant-store';
+import { tenantContextOf } from "@/lib/auth/session-context";
 
 function period(request: Request) { return new URL(request.url).searchParams.get('period') ?? ''; }
 function unauthorized() { return NextResponse.json({ message: 'A tenant session is required.' }, { status: 401 }); }
@@ -9,7 +10,7 @@ function unauthorized() { return NextResponse.json({ message: 'A tenant session 
 export async function GET(request: Request) {
   const session = await getCurrentSession();
   if (!session?.tenantId) return unauthorized();
-  try { return NextResponse.json(await getTenantStore().previewBulkInvoices(session, period(request))); }
+  try { return NextResponse.json(await getTenantStore().previewBulkInvoices(tenantContextOf(session), period(request))); }
   catch (cause) { await recordOperationException(session, '/api/invoices/bulk', cause); return NextResponse.json({ message: cause instanceof Error ? cause.message : 'Unable to preview bulk invoices.' }, { status: 400 }); }
 }
 
@@ -18,6 +19,6 @@ export async function POST(request: Request) {
   if (!session?.tenantId) return unauthorized();
   try {
     const body = await request.json() as { billingPeriod?: string };
-    return NextResponse.json(await getTenantStore().generateBulkInvoices(session, body.billingPeriod ?? ''));
+    return NextResponse.json(await getTenantStore().generateBulkInvoices(tenantContextOf(session), body.billingPeriod ?? ''));
   } catch (cause) { await recordOperationException(session, '/api/invoices/bulk', cause); return NextResponse.json({ message: cause instanceof Error ? cause.message : 'Unable to issue bulk invoices.' }, { status: 400 }); }
 }

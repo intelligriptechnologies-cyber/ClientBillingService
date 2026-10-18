@@ -24,17 +24,17 @@ describeStore(['settings', 'customers', 'services', 'contracts', 'additionalServ
     });
     await store.createAdditionalService(tenantContextOf(nexio), { customerId: customer.id, contractId: eligible.id, serviceDate: '2026-10-15', description: 'On-site workshop', priceMinor: 25000, notes: '' });
 
-    const preview = await store.previewBulkInvoices(nexio, '2026-10');
+    const preview = await store.previewBulkInvoices(tenantContextOf(nexio), '2026-10');
     expect(preview.proposed).toEqual(expect.arrayContaining([expect.objectContaining({ contractId: eligible.id, taxableMinor: 125000, additionalLines: [expect.objectContaining({ description: 'On-site workshop', priceMinor: 25000 })] })]));
     expect(preview.skipped).toEqual(expect.arrayContaining([expect.objectContaining({ reason: 'Billing is not scheduled for October.' })]));
 
-    const first = await store.generateBulkInvoices(nexio, '2026-10');
+    const first = await store.generateBulkInvoices(tenantContextOf(nexio), '2026-10');
     expect(first).toMatchObject({ alreadyGenerated: false, generatedCount: 1 });
-    expect((await store.listInvoices(nexio, { month: '2026-10' })).items).toEqual(expect.arrayContaining([expect.objectContaining({ contractId: eligible.id, taxableMinor: 125000, gstMinor: 22500 })]));
+    expect((await store.listInvoices(tenantContextOf(nexio), { month: '2026-10' })).items).toEqual(expect.arrayContaining([expect.objectContaining({ contractId: eligible.id, taxableMinor: 125000, gstMinor: 22500 })]));
     expect((await store.listAdditionalServices(tenantContextOf(nexio), { billingPeriod: '2026-10' })).items).toEqual([expect.objectContaining({ description: 'On-site workshop', billedAt: expect.any(String) })]);
-    expect(await store.listBulkInvoiceRuns(nexio)).toEqual(expect.arrayContaining([expect.objectContaining({ billingPeriod: '2026-10', generatedCount: 1 })]));
+    expect(await store.listBulkInvoiceRuns(tenantContextOf(nexio))).toEqual(expect.arrayContaining([expect.objectContaining({ billingPeriod: '2026-10', generatedCount: 1 })]));
 
-    expect(await store.generateBulkInvoices(nexio, '2026-10')).toMatchObject({ alreadyGenerated: true, generatedCount: 1 });
-    expect((await store.listInvoices(nexio, { month: '2026-10' })).items.filter((invoice) => invoice.contractId === eligible.id)).toHaveLength(1);
+    expect(await store.generateBulkInvoices(tenantContextOf(nexio), '2026-10')).toMatchObject({ alreadyGenerated: true, generatedCount: 1 });
+    expect((await store.listInvoices(tenantContextOf(nexio), { month: '2026-10' })).items.filter((invoice) => invoice.contractId === eligible.id)).toHaveLength(1);
   });
 });

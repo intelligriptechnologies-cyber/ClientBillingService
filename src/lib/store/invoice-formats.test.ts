@@ -5,28 +5,30 @@ import { DatabaseSync } from 'node:sqlite';
 import { afterEach, describe, expect, it } from 'vitest';
 import { BUILTIN_DEFINITION } from '../invoice-format';
 import { renderInvoiceHtml } from '../invoice-html';
-import { createTenantStore, type AppSession } from '../tenant-store';
+import { createTenantStore, type TenantStore } from '../tenant-store';
+import type { TenantContext } from '../auth/principal';
 import { tenantContextOf } from '../auth/session-context';
+import { describeStore, memberContext, storeForTest, type StoreArea } from './test-store';
 
 const SELLER_GSTIN = '29AAGCB7383J1Z4';
-const stores: Array<ReturnType<typeof createTenantStore>> = [];
+const AREAS: StoreArea[] = ['settings', 'customers', 'contracts', 'invoices', 'bulkInvoices'];
+const stores: TenantStore[] = [];
 const folders: string[] = [];
 afterEach(async () => { for (const store of stores.splice(0)) await store.close(); for (const folder of folders.splice(0)) rmSync(folder, { recursive: true, force: true }); });
 
 async function setup() {
-  const store = createTenantStore(':memory:');
-  stores.push(store);
-  const admin = (await store.authenticate('nexio-admin'))!;
-  const member = (await store.authenticate('nexio-user'))!;
-  const other = (await store.authenticate('evo-admin'))!;
-  await store.updateTenantSettings(tenantContextOf(admin), { ...await store.getTenantSettings(tenantContextOf(admin)), gstin: SELLER_GSTIN, legalName: 'Nexio Private Limited' });
-  const customerId = (await store.listCustomers(tenantContextOf(admin))).items[0].id;
+  const store = await storeForTest();
+  const admin = await memberContext(store, 'nexio-admin');
+  const member = await memberContext(store, 'nexio-user');
+  const other = await memberContext(store, 'evo-admin');
+  await store.updateTenantSettings(admin, { ...await store.getTenantSettings(admin), gstin: SELLER_GSTIN, legalName: 'Nexio Private Limited' });
+  const customerId = (await store.listCustomers(admin)).items[0].id;
   const definition = (patch: Record<string, unknown> = {}) => ({ ...BUILTIN_DEFINITION, ...patch });
   const issue = (formatId?: string, session = admin) => store.createIssuedInvoice(session, { customerId, formatId, invoiceDate: '2026-11-02', dueDate: '2026-11-16', lines: [{ description: 'Consulting', quantity: 1, rateMinor: 100_000, taxType: 'cgst_sgst', gstRate: 18, hsnSac: '998311' }] });
   return { store, admin, member, other, customerId, definition, issue };
 }
 
-describe('tenant invoice formats', () => {
+describeStore(AREAS, 'tenant invoice formats', () => {
   it('gives every tenant a Standard default that matches what invoices printed before formats', async () => {
     const { store, admin, other } = await setup();
     const formats = await store.listInvoiceFormats(admin);
@@ -89,7 +91,7 @@ describe('tenant invoice formats', () => {
   });
 });
 
-describe('issuing with a format', () => {
+describeStore(AREAS, 'issuing with a format', () => {
   it('snapshots the tenant default when no format is chosen', async () => {
     const { store, admin, issue } = await setup();
     const standard = (await store.listInvoiceFormats(admin))[0];
@@ -158,39 +160,39 @@ describe('issuing with a format', () => {
   });
 });
 
-async function buyerWith(store: ReturnType<typeof createTenantStore>, session: AppSession, invoiceFormatId: string) {
-  return store.createCustomer(tenantContextOf(session), { companyName: `Buyer ${crypto.randomUUID()}`, contactName: 'Buyer', email: 'buyer@example.com', phone: '9000000000', gstin: '', billingAddress: 'Bengaluru', invoiceDelivery: 'manual', invoiceFormatId });
+async function buyerWith(store: TenantStore, session: TenantContext, invoiceFormatId: string) {
+  return store.createCustomer(session, { companyName: `Buyer ${crypto.randomUUID()}`, contactName: 'Buyer', email: 'buyer@example.com', phone: '9000000000', gstin: '', billingAddress: 'Bengaluru', invoiceDelivery: 'manual', invoiceFormatId });
 }
 
-describe('default format per customer', () => {
+describeStore(AREAS, 'default format per customer', () => {
   it('prefers the customer default over the tenant default, and a format chosen for the invoice over both', async () => {
     const { store, admin, definition, issue } = await setup();
     const lean = await store.createInvoiceFormat(admin, { name: 'Lean', definition: definition({ layout: 'compact' }) });
     const retainer = await store.createInvoiceFormat(admin, { name: 'Retainer', definition: definition({ accent: '#1f3a5f' }) });
-    const client = { ...(await store.listCustomers(tenantContextOf(admin))).items[0] };
+    const client = { ...(await store.listCustomers(admin)).items[0] };
     expect(client.invoiceFormatId).toBeNull();
-    await store.updateCustomer(tenantContextOf(admin), client.id, { ...client, invoiceFormatId: lean.id });
+    await store.updateCustomer(admin, client.id, { ...client, invoiceFormatId: lean.id });
     expect((await issue()).snapshot.format?.name).toBe('Lean');
     expect((await issue(retainer.id)).snapshot.format?.name).toBe('Retainer');
-    await store.updateCustomer(tenantContextOf(admin), client.id, { ...client, invoiceFormatId: null });
+    await store.updateCustomer(admin, client.id, { ...client, invoiceFormatId: null });
     expect((await issue()).snapshot.format?.name).toBe('Standard');
   });
 
   it('keeps the default when a customer is edited without mentioning it', async () => {
     const { store, admin, definition } = await setup();
     const lean = await store.createInvoiceFormat(admin, { name: 'Lean', definition: definition() });
-    const client = (await store.listCustomers(tenantContextOf(admin))).items[0];
-    await store.updateCustomer(tenantContextOf(admin), client.id, { ...client, invoiceFormatId: lean.id });
+    const client = (await store.listCustomers(admin)).items[0];
+    await store.updateCustomer(admin, client.id, { ...client, invoiceFormatId: lean.id });
     const withoutFormat: Partial<typeof client> = { ...client };
     delete withoutFormat.invoiceFormatId;
-    expect((await store.updateCustomer(tenantContextOf(admin), client.id, { ...(withoutFormat as typeof client), phone: '9111111111' })).invoiceFormatId).toBe(lean.id);
+    expect((await store.updateCustomer(admin, client.id, { ...(withoutFormat as typeof client), phone: '9111111111' })).invoiceFormatId).toBe(lean.id);
   });
 
   it('refuses a default that is not one of the tenant formats', async () => {
     const { store, admin, other, definition } = await setup();
     const foreign = await store.createInvoiceFormat(other, { name: 'Evo secret', definition: definition() });
-    const client = (await store.listCustomers(tenantContextOf(admin))).items[0];
-    await expect(store.updateCustomer(tenantContextOf(admin), client.id, { ...client, invoiceFormatId: foreign.id })).rejects.toThrow('The selected invoice format was not found.');
+    const client = (await store.listCustomers(admin)).items[0];
+    await expect(store.updateCustomer(admin, client.id, { ...client, invoiceFormatId: foreign.id })).rejects.toThrow('The selected invoice format was not found.');
     await expect(buyerWith(store, admin, foreign.id)).rejects.toThrow('The selected invoice format was not found.');
   });
 
@@ -200,15 +202,15 @@ describe('default format per customer', () => {
     const created = await buyerWith(store, admin, lean.id);
     expect(created.invoiceFormatId).toBe(lean.id);
     await store.deleteInvoiceFormat(admin, lean.id);
-    expect((await store.listCustomers(tenantContextOf(admin), { search: created.companyName })).items[0].invoiceFormatId).toBeNull();
+    expect((await store.listCustomers(admin, { search: created.companyName })).items[0].invoiceFormatId).toBeNull();
     expect((await issue()).snapshot.format?.name).toBe('Standard');
   });
 
   it('uses the customer default for bulk-generated invoices', async () => {
     const { store, admin, definition } = await setup();
     const lean = await store.createInvoiceFormat(admin, { name: 'Lean', definition: definition({ layout: 'compact' }) });
-    const client = (await store.listCustomers(tenantContextOf(admin))).items[0];
-    await store.updateCustomer(tenantContextOf(admin), client.id, { ...client, invoiceFormatId: lean.id });
+    const client = (await store.listCustomers(admin)).items[0];
+    await store.updateCustomer(admin, client.id, { ...client, invoiceFormatId: lean.id });
     await store.generateBulkInvoices(admin, '2026-11');
     const generated = (await store.listInvoices(admin, { pageSize: 100 })).items.filter((invoice) => invoice.invoiceDate === '2026-11-01' && invoice.customerId === client.id);
     expect(generated.length).toBeGreaterThan(0);
@@ -222,8 +224,8 @@ describe('migration', () => {
     folders.push(folder);
     const filename = join(folder, 'old.sqlite');
     const first = createTenantStore(filename);
-    const admin = (await first.authenticate('nexio-admin'))!;
-    const legacy = await first.createIssuedInvoice(admin, { customerId: (await first.listCustomers(tenantContextOf(admin))).items[0].id, invoiceDate: '2026-11-02', dueDate: '2026-11-16', taxableMinor: 100_000, gstRate: 0 });
+    const admin = tenantContextOf((await first.authenticate('nexio-admin'))!);
+    const legacy = await first.createIssuedInvoice(admin, { customerId: (await first.listCustomers(admin)).items[0].id, invoiceDate: '2026-11-02', dueDate: '2026-11-16', taxableMinor: 100_000, gstRate: 0 });
     await first.close();
     const raw = new DatabaseSync(filename);
     raw.exec("DROP TABLE invoice_formats; ALTER TABLE customers DROP COLUMN invoice_format_id; UPDATE invoices SET snapshot = json_remove(snapshot, '$.format')");
@@ -233,6 +235,6 @@ describe('migration', () => {
     stores.push(reopened);
     expect((await reopened.listInvoiceFormats(admin))[0].name).toBe('Standard');
     expect((await reopened.getInvoice(admin, legacy.id))!.snapshot.format).toBeUndefined();
-    expect((await reopened.listCustomers(tenantContextOf(admin))).items[0].invoiceFormatId).toBeNull();
+    expect((await reopened.listCustomers(admin)).items[0].invoiceFormatId).toBeNull();
   });
 });
