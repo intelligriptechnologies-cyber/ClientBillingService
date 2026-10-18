@@ -57,6 +57,22 @@ describeStore(['tenants'], 'tenant lifecycle', () => {
     expect((await store.listTenants(superadmin, { query: '_' })).total).toBe(0);
   });
 
+  it('filters tenants by status and by the UTC month they were created in, and pages them by name', async () => {
+    const store = await storeForTest();
+    const created = await store.createTenant(superadmin, { name: 'Month Filter Co' });
+    await store.updateTenant(superadmin, created.id, { status: 'disabled' });
+    const ids = async (filters: Parameters<typeof store.listTenants>[1]) => (await store.listTenants(superadmin, { pageSize: 50, ...filters })).items.map((tenant) => tenant.id);
+
+    expect(await ids({ month: created.createdAt.slice(0, 7) })).toContain(created.id);
+    expect(await ids({ month: '1999-01' })).toEqual([]);
+    expect(await ids({ month: '2026-13' })).toEqual([]);
+    expect(await ids({ status: 'disabled' })).toEqual([created.id]);
+    const page = await store.listTenants(superadmin, { status: 'active', pageSize: 5, page: 1 });
+    expect(page).toMatchObject({ total: 5, items: expect.any(Array) });
+    expect(page.items.map((tenant) => tenant.name)).toEqual(['Evo Fitness', 'Gripdata Analytics', 'MAASP Associates', 'Nexio Hyper', 'OD Badminton']);
+    expect(page.items.map((tenant) => tenant.userCount)).toEqual([2, 2, 2, 2, 2]);
+  });
+
   it('suspends and reactivates a tenant, blocking its sign-in meanwhile, and records each step', async () => {
     const store = await storeForTest();
     const created = await store.createTenant(superadmin, { name: 'Pause Me' });
