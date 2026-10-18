@@ -2,9 +2,11 @@
 
 `initial-data.sqlite` is a SQLite backup of the current `.data/client-billing.sqlite`, captured on 2026-10-08. It includes every table and record, including users and their credentials.
 
-When the app creates a new persistent database, it copies this file once. Later app opens use the existing database, so edits made in the app remain in place. The snapshot is fixed; later edits do not change it automatically.
+The app runs on Postgres and never reads this file. It reaches Postgres only through the import below, run once on purpose. ADR 0001 unit D12 deletes the file after the owner confirms the production import.
 
-The end-to-end test server sets `CLIENT_BILLING_SEED_MODE=demo` to use the separate demo fixtures.
+Until then, the legacy SQLite store (`CLIENT_BILLING_STORE=sqlite`) still copies this file when it creates a new database file, unless `CLIENT_BILLING_SEED_MODE=demo`.
+
+Demo data for Postgres comes from `db/seed/demo.ts` (`npm run db:seed`). The Vitest template and the end-to-end database `cbs_e2e` are built from it.
 
 ## Importing it into Postgres
 
