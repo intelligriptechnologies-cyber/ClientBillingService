@@ -1,5 +1,5 @@
 import { expect, it } from 'vitest';
-import { describeStore, storeForTest } from './test-store';
+import { describeStore, memberContext, storeForTest } from './test-store';
 import { tenantContextOf } from '../auth/session-context';
 
 describeStore(['customers', 'services', 'contracts', 'additionalServices'], 'additional services', () => {
@@ -23,5 +23,20 @@ describeStore(['customers', 'services', 'contracts', 'additionalServices'], 'add
     expect((await store.listAdditionalServices(tenantContextOf(nexio), { billingPeriod: '2026-11' })).items).not.toEqual(expect.arrayContaining([expect.objectContaining({ id: additional.id })]));
     expect((await store.listAdditionalServices(tenantContextOf(evo), {})).items).toEqual([]);
     await expect(store.createAdditionalService(tenantContextOf(evo), { customerId: customer.id, contractId: contract.id, serviceDate: '2026-10-15', description: 'Cross tenant', priceMinor: 100, notes: '' })).rejects.toThrow('tenant');
+  });
+});
+
+describeStore(['customers', 'services', 'contracts', 'additionalServices'], 'additional services under concurrent requests', () => {
+  it('keeps both changes when a description change and a price change of one additional service run at once', async () => {
+    const store = await storeForTest();
+    const nexio = await memberContext(store, 'nexio-admin');
+    // Open two pooled connections first, so the racing requests start together instead of one waiting to connect.
+    await Promise.all([store.listAdditionalServices(nexio), store.listAdditionalServices(nexio)]);
+    const contract = (await store.listContracts(nexio)).items[0];
+    const additional = await store.createAdditionalService(nexio, { customerId: contract.customerId, contractId: contract.id, serviceDate: '2026-10-15', description: 'Workshop', priceMinor: 1000 });
+
+    await Promise.all([store.updateAdditionalService(nexio, additional.id, { description: 'Extended workshop' }), store.updateAdditionalService(nexio, additional.id, { priceMinor: 5000 })]);
+
+    expect((await store.listAdditionalServices(nexio)).items.find((item) => item.id === additional.id)).toMatchObject({ description: 'Extended workshop', priceMinor: 5000 });
   });
 });

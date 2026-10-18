@@ -1,5 +1,5 @@
 import { expect, it } from 'vitest';
-import { describeStore, storeForTest } from './test-store';
+import { describeStore, memberContext, storeForTest } from './test-store';
 import { tenantContextOf } from '../auth/session-context';
 
 describeStore(['customers', 'services', 'contracts', 'deposits'], 'contracts and security deposits', () => {
@@ -62,5 +62,50 @@ describeStore(['customers', 'services', 'contracts', 'deposits'], 'contracts and
     const input = { customerId: customer.id, serviceIds: [service.id], name: 'Invalid schedule', startDate: '2026-04-01', endDate: '2027-03-31', valueMinor: 100000, paymentTermsDays: 14, billingFrequency: 'quarterly' as const, invoiceMonths: [4, 7], cycleDay: 1, escalationPercent: 0, escalationReviewDate: '', renewalNoticeDays: 30, securityDepositMinor: 0 };
     await expect(store.createContract(tenantContextOf(nexio), input)).rejects.toThrow('3 invoice months');
     await expect(store.createContract(tenantContextOf(evo), { ...input, invoiceMonths: [4, 7, 10] })).rejects.toThrow('customer');
+  });
+});
+
+describeStore(['customers', 'services', 'contracts', 'deposits'], 'contracts and security deposits under concurrent requests', () => {
+  async function withContract(securityDepositMinor = 0) {
+    const store = await storeForTest();
+    const nexio = await memberContext(store, 'nexio-admin');
+    // Open two pooled connections first, so the racing requests start together instead of one waiting to connect.
+    await Promise.all([store.listContracts(nexio), store.listContracts(nexio)]);
+    const customer = (await store.listCustomers(nexio)).items[0];
+    const service = (await store.listServices(nexio))[0];
+    const contract = await store.createContract(nexio, {
+      customerId: customer.id, serviceIds: [service.id], name: 'Raced contract', startDate: '2026-01-01', endDate: '2026-12-31', valueMinor: 100000, paymentTermsDays: 14,
+      billingFrequency: 'monthly', invoiceMonths: [], cycleDay: 1, escalationPercent: 0, escalationReviewDate: '', renewalNoticeDays: 30, securityDepositMinor,
+    });
+    return { store, nexio, contract };
+  }
+
+  it('never settles more than a deposit holds when two settlements run at once', async () => {
+    const { store, nexio, contract } = await withContract(100000);
+    const deposit = (await store.listSecurityDeposits(nexio)).find((item) => item.contractId === contract.id)!;
+
+    const results = await Promise.allSettled([60000, 60000].map((amountMinor) => store.settleSecurityDeposit(nexio, deposit.id, { amountMinor, note: 'Refund' })));
+
+    expect(results.map((result) => result.status).sort()).toEqual(['fulfilled', 'rejected']);
+    expect((await store.listSecurityDeposits(nexio)).find((item) => item.id === deposit.id)).toMatchObject({ settledMinor: 60000, balanceMinor: 40000, status: 'held' });
+    expect((await store.listContractAudit(nexio, contract.id)).filter((event) => event.action === 'deposit-settled')).toHaveLength(1);
+  });
+
+  it('keeps both changes when a rename and a value change of one contract run at once', async () => {
+    const { store, nexio, contract } = await withContract();
+
+    await Promise.all([store.updateContract(nexio, contract.id, { name: 'Renamed contract' }), store.updateContract(nexio, contract.id, { valueMinor: 250000 })]);
+
+    expect((await store.listContracts(nexio)).items.find((item) => item.id === contract.id)).toMatchObject({ name: 'Renamed contract', valueMinor: 250000, serviceIds: contract.serviceIds });
+  });
+
+  it('never moves the end date back when two renewals run at once', async () => {
+    const { store, nexio, contract } = await withContract();
+
+    // Which request writes last varies from run to run, so five rounds make a lost renewal show up in nearly every run.
+    for (let year = 2028; year < 2038; year += 2) {
+      await Promise.allSettled([store.renewContract(nexio, contract.id, { endDate: `${year + 1}-12-31`, note: 'Later' }), store.renewContract(nexio, contract.id, { endDate: `${year}-12-31`, note: 'Earlier' })]);
+      expect((await store.listContracts(nexio)).items.find((item) => item.id === contract.id)?.endDate).toBe(`${year + 1}-12-31`);
+    }
   });
 });
