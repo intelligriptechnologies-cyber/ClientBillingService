@@ -46,6 +46,8 @@ describeStore(['services', 'quotations'], 'services and quotations', () => {
     const service = await store.createService(tenantContextOf(nexio), { name: 'Reporting', prices: { monthly: 1000, quarterly: 0, halfYearly: 0, annual: 0 } });
 
     await expect(store.createService(tenantContextOf(nexio), { name: 'Broken', prices: { monthly: -1, quarterly: 0, halfYearly: 0, annual: 0 } })).rejects.toThrow('non-negative');
+    await expect(store.createService(tenantContextOf(nexio), { name: 'Unsafe', prices: { monthly: 2 ** 53, quarterly: 0, halfYearly: 0, annual: 0 } })).rejects.toThrow('non-negative');
+    await expect(store.createQuotation(tenantContextOf(nexio), { customerName: 'Huge order', lines: [{ serviceId: service.id, frequency: 'monthly', quantity: 2 ** 31 }] })).rejects.toThrow('positive whole numbers');
     await expect(store.createQuotation(tenantContextOf(evo), { customerName: 'Other customer', lines: [{ serviceId: service.id, frequency: 'monthly', quantity: 1 }] })).rejects.toThrow('tenant');
   });
 });
