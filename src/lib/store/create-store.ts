@@ -52,9 +52,3 @@ export function createTenantStore(filename = process.env.CLIENT_BILLING_DATABASE
   seed(database);
   return asyncFacade(createSqliteMethods(database));
 }
-
-let sharedStore: TenantStore | undefined;
-export function getTenantStore() {
-  sharedStore ??= createTenantStore();
-  return sharedStore;
-}

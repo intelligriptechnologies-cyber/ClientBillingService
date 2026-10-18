@@ -1,4 +1,5 @@
 import { cookies } from 'next/headers';
+import { demoSession } from './auth/demo-identities';
 import { isDemoMode } from './auth/demo-mode';
 import { getTenantStore, type AppSession } from './tenant-store';
 
@@ -9,5 +10,5 @@ export const sessionCookie = 'client-billing-demo-session';
 export async function getCurrentSession(): Promise<AppSession | null> {
   if (!isDemoMode()) return null;
   const userId = (await cookies()).get(sessionCookie)?.value;
-  return userId ? await getTenantStore().authenticate(userId) : null;
+  return userId ? await demoSession(getTenantStore(), userId) : null;
 }

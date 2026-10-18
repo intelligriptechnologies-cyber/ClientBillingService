@@ -1,2 +1,3 @@
 export * from './store/types';
-export { createTenantStore, getTenantStore } from './store/create-store';
+export { createTenantStore } from './store/create-store';
+export { getTenantStore } from './store/app-store';

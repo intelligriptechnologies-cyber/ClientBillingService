@@ -3,7 +3,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { settingsInput } from '@/lib/test-helpers';
-import { createTenantStore, type AppSession } from '@/lib/tenant-store';
+import { storeForTest, testDriver } from '@/lib/store/test-store';
+import type { AppSession, TenantStore } from '@/lib/tenant-store';
 
 import * as additionalServices from '../app/api/additional-services/route';
 import * as additionalService from '../app/api/additional-services/[additionalServiceId]/route';
@@ -50,7 +51,7 @@ import * as users from '../app/api/users/route';
 import * as user from '../app/api/users/[userId]/route';
 import { tenantContextOf } from './auth/session-context';
 
-type Store = ReturnType<typeof createTenantStore>;
+type Store = TenantStore;
 
 const formatDefinition = { layout: 'compact', blocks: { hsnSac: false, bankDetails: true, upiQr: false, signature: true, stamp: true, terms: true, amountInWords: true }, accent: '#1f3a5f', logo: 'show', bankDetails: '', terms: '' };
 
@@ -136,7 +137,7 @@ async function call(handler: Handler, as: AppSession, init: { url?: string; meth
 let captureDirectory: string; let captureFile: string;
 
 beforeEach(async () => {
-  store = createTenantStore(':memory:');
+  store = await storeForTest();
   world.store = store;
   tenantA = must(await store.authenticate('nexio-admin'));
   tenantB = must(await store.authenticate('evo-admin'));
@@ -144,7 +145,7 @@ beforeEach(async () => {
   vi.stubEnv('CLIENT_BILLING_MAIL_TRANSPORT', 'capture'); vi.stubEnv('CLIENT_BILLING_MAIL_CAPTURE_FILE', captureFile);
 });
 
-afterEach(async () => { await store.close(); vi.unstubAllEnvs(); rmSync(captureDirectory, { recursive: true, force: true }); });
+afterEach(() => { vi.unstubAllEnvs(); rmSync(captureDirectory, { recursive: true, force: true }); });
 
 const customerBody = { companyName: 'Hijacked Co', contactName: 'Mallory', email: 'm@evil.example', phone: '1', gstin: '', billingAddress: 'Evil street', invoiceDelivery: 'manual' };
 const contractBody = (f: Fixtures) => ({ name: 'Cross-tenant contract', customerId: f.customerId, serviceIds: [f.serviceId], startDate: '2026-01-01', endDate: '2026-12-31', valueMinor: 1000, paymentTermsDays: 14, billingFrequency: 'monthly', invoiceMonths: [], cycleDay: 1, escalationPercent: 0, escalationReviewDate: '', renewalNoticeDays: 30, securityDepositMinor: 0 });
@@ -346,15 +347,19 @@ describe('the delivery log and mail settings', () => {
   });
 });
 
+// The SQLite schema keeps users.email globally UNIQUE. Postgres makes it unique per tenant (ADR 0002, owner decision
+// 2), so there both leaks are closed and the tests run as plain tests.
+const emailLeak = testDriver === 'pg' ? it : it.fails;
+
 describe('global uniqueness constraints do not disclose another tenant', () => {
-  it.fails('LEAK users.email is globally UNIQUE: POST /api/users with another tenant email is refused, revealing it exists (tenant-store.ts:96,388)', async () => {
+  emailLeak('LEAK users.email is globally UNIQUE: POST /api/users with another tenant email is refused, revealing it exists (tenant-store.ts:96,388)', async () => {
     const f = await seedTenantA(tenantA);
     const taken = must((await store.listTenantUsers(tenantContextOf(tenantA))).find((item) => item.id === f.userId)).email;
     const reply = await call(users.POST, tenantB, { method: 'POST', body: { name: 'Same person, other tenant', email: taken, role: 'user' } });
     expect(reply.status).toBe(201);
   });
 
-  it.fails('LEAK users.email is globally UNIQUE: PATCH /api/users/[id] to another tenant email is refused, revealing it exists (tenant-store.ts:96,406)', async () => {
+  emailLeak('LEAK users.email is globally UNIQUE: PATCH /api/users/[id] to another tenant email is refused, revealing it exists (tenant-store.ts:96,406)', async () => {
     const f = await seedTenantA(tenantA);
     const taken = must((await store.listTenantUsers(tenantContextOf(tenantA))).find((item) => item.id === f.userId)).email;
     const own = must((await store.listTenantUsers(tenantContextOf(tenantB))).find((item) => item.role === 'user'));
