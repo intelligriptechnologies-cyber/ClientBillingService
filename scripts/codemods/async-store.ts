@@ -323,6 +323,8 @@ function isRejectsAssertion(node: Node) {
 
 
 function unconsumedStoreCalls() {
+  if (!project.getSourceFileOrThrow(typesPath).getInterface('TenantStore')) throw new Error('src/lib/store/types.ts has no interface TenantStore, so no store call can be found');
+  if (!sourceFiles().some((file) => file.getDescendantsOfKind(SyntaxKind.CallExpression).some(isStoreCall))) throw new Error('No store calls found in src/; the check would pass vacuously');
   const findings: string[] = [];
   for (const file of sourceFiles()) {
     for (const call of file.getDescendantsOfKind(SyntaxKind.CallExpression)) {
