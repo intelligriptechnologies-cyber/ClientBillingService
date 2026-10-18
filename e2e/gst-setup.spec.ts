@@ -42,12 +42,22 @@ test('an unregistered seller issues a Bill of Supply without GST columns', async
   const dialog = await openInvoiceDialog(page, customerId);
   await expect(dialog.getByText('Your company has no GSTIN yet')).toBeVisible();
   await expect(dialog).toContainText('Bill of Supply');
+  await expect(dialog.getByText('Add your GSTIN in Settings to charge GST')).toBeVisible();
+  await expect(dialog.getByLabel('GST Applicable')).toBeDisabled();
+  await expect(dialog.getByLabel('GST Applicable')).not.toBeChecked();
+  await expect(dialog.getByLabel('Tax type 1')).toBeDisabled();
+  await expect(dialog.getByLabel('Tax type 1')).toHaveValue('none');
+  await expect(dialog.getByLabel('GST percent 1')).toBeDisabled();
   await dialog.getByLabel('Description 1').fill('Court booking');
   await dialog.getByLabel('Rate 1').fill('500');
   await dialog.getByRole('button', { name: 'Create Invoice' }).click();
   await expect(dialog).toBeHidden();
 
   const invoice = await issuedInvoice(page, name);
+  expect(invoice).toMatchObject({ gstMinor: 0, snapshot: { gstApplicable: false } });
+  const taxed = await page.request.post('/api/invoices', { data: { customerId, invoiceDate: '2026-11-02', dueDate: '2026-11-16', gstApplicable: true, lines: [{ description: 'Court booking', quantity: 1, rateMinor: 50_000, taxType: 'igst', gstRate: 18 }] } });
+  expect(taxed.status()).toBe(400);
+  expect((await taxed.json() as { message: string }).message).toContain('Add your GSTIN in Settings to charge GST, or set the lines to no tax');
   expect(invoice.snapshot).toMatchObject({ documentType: 'Bill of Supply', sellerStateCode: '', placeOfSupplyStateCode: '29' });
   await page.goto(`/invoices/${invoice.id}`);
   await expect(page.getByRole('heading', { name: /^Bill of Supply / })).toBeVisible();
@@ -143,6 +153,22 @@ test('overriding the preselected tax split needs a reason that is kept on the in
   await dialog.getByRole('button', { name: 'Create Invoice' }).click();
   await expect(dialog).toBeHidden();
   expect(await issuedInvoice(page, name)).toMatchObject({ snapshot: { taxSplit: 'intra', taxSplitOverrideReason: 'Place of supply is an SEZ unit', lines: [{ taxType: 'igst' }] } });
+});
+
+test('correcting an invoice issued without line items keeps the split it was issued with', async ({ page }) => {
+  await enterOd(page);
+  const name = `Correction buyer ${run}`;
+  const customerId = await createCustomer(page, name, { stateCode: '29' });
+  const issued = await page.request.post('/api/invoices', { data: { customerId, invoiceDate: '2026-11-02', dueDate: '2026-11-16', taxableMinor: 100_000, gstRate: 18 } });
+  expect(issued.ok(), await issued.text()).toBeTruthy();
+  const invoice = (await issued.json() as { invoice: { invoiceNumber: string } }).invoice;
+  await page.goto('/invoices');
+  await page.getByLabel('Search invoices').fill(name);
+  await page.getByRole('row', { name: new RegExp(invoice.invoiceNumber) }).getByRole('button', { name: 'Correct' }).click();
+  const dialog = page.getByRole('dialog', { name: 'Correct invoice' });
+  await expect(dialog.getByLabel('Tax type 1')).toHaveValue('cgst_sgst');
+  await expect(dialog.getByLabel('GST percent 1')).toHaveValue('18');
+  await expect(dialog.getByLabel('Tax split override reason')).toHaveCount(0);
 });
 
 test('the GSTR-1 export classifies the new invoices and summarises their HSN/SAC codes', async ({ page }) => {

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { gstinMessage, gstSnapshotFields, invoiceDocumentType, lineTaxability, overridesSplit, resolveSupply, UNREGISTERED_SELLER_TAX_MESSAGE } from './invoice-gst';
+import { amountOnlyLine, gstinMessage, legacyTaxType, gstSnapshotFields, invoiceDocumentType, lineTaxability, overridesSplit, resolveSupply, UNREGISTERED_SELLER_TAX_MESSAGE } from './invoice-gst';
 
 const KARNATAKA_GSTIN = '29AAGCB7383J1Z4';
 const MAHARASHTRA_GSTIN = '27AAPFU0939F1ZV';
@@ -60,6 +60,19 @@ describe('document and line classification', () => {
       expect(() => issue([{ taxType: 'none', gstRate: 0 }, { taxType, gstRate: 0 }])).toThrow(UNREGISTERED_SELLER_TAX_MESSAGE);
     }
     expect(UNREGISTERED_SELLER_TAX_MESSAGE).toBe('Add your GSTIN in Settings to charge GST, or set the lines to no tax.');
+  });
+
+  it('taxes an amount-only invoice by the expected split and refuses a rate without one', () => {
+    expect(amountOnlyLine(resolveSupply('29', { gstin: '', stateCode: '29' }), 18)).toEqual({ taxType: 'cgst_sgst', gstRate: 18 });
+    expect(amountOnlyLine(resolveSupply('29', { gstin: MAHARASHTRA_GSTIN, stateCode: '27' }), 18)).toEqual({ taxType: 'igst', gstRate: 18 });
+    expect(amountOnlyLine(resolveSupply('', { gstin: '', stateCode: '29' }), 0)).toEqual({ taxType: 'none', gstRate: 0 });
+    expect(() => amountOnlyLine(resolveSupply('', { gstin: '', stateCode: '29' }), 18)).toThrow(UNREGISTERED_SELLER_TAX_MESSAGE);
+  });
+
+  it('starts correcting an invoice without line items on the split it was issued with, never a hard-coded one', () => {
+    expect(legacyTaxType({ taxSplit: 'intra' })).toBe('cgst_sgst');
+    expect(legacyTaxType({ taxSplit: 'inter' })).toBe('igst');
+    expect(legacyTaxType({})).toBe('cgst_sgst');
   });
 
   it('lets a registered seller issue taxed and no-tax lines', () => {
