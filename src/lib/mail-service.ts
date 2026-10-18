@@ -105,7 +105,7 @@ export type ReminderResult = { reminder: PaymentReminder; status: DeliveryStatus
 
 /** Records the reminder, then emails it when the channel is email and SMTP works. The message always says whether anything left the building. */
 export async function sendPaymentReminder(store: Store, session: AppSession, invoiceId: string, input: { channel: PaymentReminder['channel']; note?: string }, deps: MailDeps = defaultMailDeps): Promise<ReminderResult> {
-  const reminder = await store.recordPaymentReminder(session, invoiceId, input);
+  const reminder = await store.recordPaymentReminder(tenantContextOf(session), invoiceId, input);
   if (input.channel !== 'email') return { reminder, status: 'recorded', message: 'WhatsApp reminder recorded, not sent. Sending over WhatsApp is not available yet.' };
   const invoice = await loadInvoice(store, session, invoiceId);
   const to = [await billingEmail(store, session, invoice)]; const smtp = await store.getSmtpSettings(tenantContextOf(session));

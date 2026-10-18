@@ -13,7 +13,7 @@ describeStore(['customers', 'contracts', 'deposits', 'invoices', 'payments'], 'd
       const customer = (await store.listCustomers(tenantContextOf(session), {})).items[0];
       const contract = (await store.listContracts(tenantContextOf(session), {})).items[0];
       const invoices = (await store.listInvoices(tenantContextOf(session), {})).items;
-      const payments = (await store.listPayments(session, {})).items;
+      const payments = (await store.listPayments(tenantContextOf(session), {})).items;
       const deposits = await store.listSecurityDeposits(tenantContextOf(session));
 
       expect(customer).toBeDefined();

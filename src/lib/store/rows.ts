@@ -1,9 +1,10 @@
 import { parseFormatDefinition, type InvoiceFormat } from '../invoice-format';
 import type { SmtpSettings } from '../mailer';
 import type {
-  AdditionalService, BulkInvoiceRun, Contract, ContractAuditEvent, CustomerRecord, DeliveryRecord, DemoIdentity, InvoiceSnapshot, OperationalLog, Quotation, QuotationLine, SecurityDeposit, TaskNote,
-  Tenant, TenantHistoryEvent, TenantInvoice, TenantRecord, TenantService, TenantSettings, TenantUser,
+  AdditionalService, BulkInvoiceRun, Contract, ContractAuditEvent, CustomerRecord, DeliveryRecord, DemoIdentity, InvoiceSnapshot, OperationalLog, PaymentReminder, Quotation, QuotationLine,
+  SecurityDeposit, TaskNote, Tenant, TenantHistoryEvent, TenantInvoice, TenantPayment, TenantRecord, TenantService, TenantSettings, TenantUser,
 } from './types';
+import { paymentMethods } from './rules';
 
 // One parser per table, at the store boundary (ADR 0001, the graft from candidate C). SQLite and Postgres rows
 // with the same columns parse the same way. A column with the wrong type throws here instead of leaking a bad value.
@@ -192,6 +193,20 @@ export function parseDeliveryRow(row: Row): DeliveryRecord {
     status: oneOf(row, 'status', ['sent', 'failed', 'not-configured']), error: text(row, 'error'), attemptedAt: text(row, 'attempted_at'), attemptedBy: text(row, 'attempted_by'),
     attemptedByName: nullableText(row, 'attempted_by_name') ?? '',
   };
+}
+
+/** A payments row joined with its invoice's number and customer. What it applies to the invoice is the payment, TDS and write-off together. */
+export function parsePaymentRow(row: Row): TenantPayment {
+  const amountMinor = integer(row, 'amount_minor'); const tdsMinor = integer(row, 'tds_minor'); const writeOffMinor = integer(row, 'write_off_minor');
+  return {
+    id: text(row, 'id'), invoiceId: text(row, 'invoice_id'), invoiceNumber: text(row, 'invoice_number'), customerId: text(row, 'customer_id'), customerName: text(row, 'customer_name'), paymentDate: text(row, 'payment_date'),
+    amountMinor, tdsMinor, writeOffMinor, appliedMinor: amountMinor + tdsMinor + writeOffMinor, method: oneOf(row, 'method', paymentMethods), reference: text(row, 'reference'), notes: text(row, 'notes'),
+    recordedAt: text(row, 'recorded_at'),
+  };
+}
+
+export function parseReminderRow(row: Row): PaymentReminder {
+  return { id: text(row, 'id'), invoiceId: text(row, 'invoice_id'), channel: oneOf(row, 'channel', ['email', 'whatsapp']), note: text(row, 'note'), createdAt: text(row, 'created_at') };
 }
 
 export function parseInvoiceFormatRow(row: Row): InvoiceFormat {

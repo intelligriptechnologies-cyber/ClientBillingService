@@ -4,9 +4,9 @@ import { amountOnlyLine, gstSnapshotFields, parseBillingState, parseGstin, parse
 import { calculateInvoiceLines } from '../invoice-lines';
 import type {
   AdditionalService, AdditionalServiceInput, AdditionalServiceUpdate, BillingFrequency, BulkInvoiceAdditionalLine, BulkInvoicePreview, BulkInvoiceProposal, BulkInvoiceSkip, Contract, ContractInput,
-  ContractUpdate, CustomerInput, CustomerRecord, DeliveryStatus, DepositSettlementInput, GstSalesReport, GstSalesRow, HsnSummaryRow, InvoiceInput, InvoiceSnapshot, QuotationInput, QuotationLine,
-  RenewalList, RenewalQuery, RenewalRecord, RenewalStatus, SecurityDeposit, ServiceInput, ServiceUpdate, TaskNoteInput, TenantInvoice, TenantService, TenantSettings, TenantSettingsInput, TenantUser,
-  TenantUserInput, TenantUserUpdate,
+  ContractUpdate, CustomerInput, CustomerRecord, DeliveryStatus, DepositSettlementInput, GstSalesReport, GstSalesRow, HsnSummaryRow, InvoiceInput, InvoiceSnapshot, InvoiceStatus, PaymentInput,
+  PaymentMethod, PaymentReminder, PendingPayment, QuotationInput, QuotationLine, RenewalList, RenewalQuery, RenewalRecord, RenewalStatus, SecurityDeposit, ServiceInput, ServiceUpdate, TaskNoteInput,
+  TenantInvoice, TenantPayment, TenantService, TenantSettings, TenantSettingsInput, TenantUser, TenantUserInput, TenantUserUpdate,
 } from './types';
 
 // Input rules for the ported store areas. Both drivers apply them before any SQL runs.
@@ -470,6 +470,66 @@ const deliveryStatuses: readonly DeliveryStatus[] = ['sent', 'failed', 'not-conf
 export function checkDeliveryStatus(status: DeliveryStatus) {
   if (!deliveryStatuses.includes(status)) throw new Error('Unknown delivery status.');
 }
+
+export const paymentMethods = ['bank_transfer', 'cash', 'card', 'cheque', 'other'] as const satisfies readonly PaymentMethod[];
+export const FOREIGN_PAYMENT_INVOICE_MESSAGE = 'This invoice does not belong to your tenant.';
+
+/** What a payment applies to its invoice: the payment, TDS and write-off together, each a safe whole minor amount. */
+export function paymentApplied(input: PaymentInput) {
+  if (!isCalendarDate(input.paymentDate)) throw new Error('Enter a valid payment date.');
+  for (const value of [input.amountMinor, input.tdsMinor, input.writeOffMinor]) if (!Number.isSafeInteger(value) || value < 0) throw new Error('Payment, TDS, and write-off values must be non-negative whole minor amounts.');
+  const appliedMinor = input.amountMinor + input.tdsMinor + input.writeOffMinor;
+  if (appliedMinor <= 0) throw new Error('Enter a payment, TDS, or write-off amount.');
+  if (!(paymentMethods as readonly string[]).includes(input.method)) throw new Error('Choose a valid payment method.');
+  return appliedMinor;
+}
+
+type Balance = Pick<TenantInvoice, 'status' | 'totalMinor' | 'paidMinor'>;
+
+/** The invoice's paid amount and status once `appliedMinor` lands on it, or the reason it cannot. */
+export function allocation(invoice: Balance | null, appliedMinor: number): { paidMinor: number; status: InvoiceStatus } {
+  if (!invoice) throw new Error(FOREIGN_PAYMENT_INVOICE_MESSAGE);
+  if (invoice.status === 'void' || invoice.status === 'paid') throw new Error('Payments can only be allocated to an outstanding invoice.');
+  if (appliedMinor > invoice.totalMinor - invoice.paidMinor) throw new Error('Allocation cannot exceed the outstanding invoice balance.');
+  const paidMinor = invoice.paidMinor + appliedMinor;
+  return { paidMinor, status: paidMinor === invoice.totalMinor ? 'paid' : 'partial' };
+}
+
+/** The write-off that closes an outstanding invoice from pending payments. */
+export function closeout(invoice: Balance | null, note: string, today = new Date().toISOString().slice(0, 10)): Omit<PaymentInput, 'invoiceId'> {
+  if (!invoice) throw new Error(FOREIGN_PAYMENT_INVOICE_MESSAGE);
+  const outstanding = invoice.totalMinor - invoice.paidMinor;
+  if (outstanding <= 0 || invoice.status === 'void') throw new Error('Only an outstanding invoice can be closed.');
+  return { paymentDate: today, amountMinor: 0, tdsMinor: 0, writeOffMinor: outstanding, method: 'other', reference: 'CLOSEOUT', notes: note.trim() || 'Closed from pending payments.' };
+}
+
+export function paymentDetails(update: Pick<TenantPayment, 'method' | 'reference' | 'notes'>) {
+  if (!(paymentMethods as readonly string[]).includes(update.method)) throw new Error('Choose a valid payment method.');
+  if (typeof update.reference !== 'string' || typeof update.notes !== 'string') throw new Error('Reference and notes must be text.');
+  return { method: update.method, reference: update.reference.trim(), notes: update.notes.trim() };
+}
+
+function daysLate(dueDate: string, today: string) {
+  const [year, month, day] = dueDate.split('-').map(Number); const [todayYear, todayMonth, todayDay] = today.split('-').map(Number);
+  return Math.max(0, Math.floor((Date.UTC(todayYear, todayMonth - 1, todayDay) - Date.UTC(year, month - 1, day)) / 86_400_000));
+}
+
+function agingFor(days: number): PendingPayment['agingBucket'] { if (days === 0) return 'Current'; if (days <= 30) return '1–30'; if (days <= 60) return '31–60'; if (days <= 90) return '61–90'; return '90+'; }
+
+export function pendingPayment(invoice: TenantInvoice, reminders: PaymentReminder[], today = new Date().toISOString().slice(0, 10)): PendingPayment {
+  const daysOverdue = daysLate(invoice.dueDate, today);
+  return { ...invoice, outstandingMinor: invoice.totalMinor - invoice.paidMinor, daysOverdue, agingBucket: agingFor(daysOverdue), reminders };
+}
+
+/** The reminder's note, once the channel is known and the invoice still has something to pay. */
+export function reminderNote(invoice: Pick<TenantInvoice, 'totalMinor' | 'paidMinor'> | null, input: { channel: PaymentReminder['channel']; note?: string }) {
+  if (input.channel !== 'email' && input.channel !== 'whatsapp') throw new Error('Choose email or WhatsApp for the reminder.');
+  if (!invoice) throw new Error(FOREIGN_PAYMENT_INVOICE_MESSAGE);
+  if (invoice.paidMinor >= invoice.totalMinor) throw new Error('Paid invoices do not need payment reminders.');
+  return input.note?.trim() ?? '';
+}
+
+export const reminderMessage = (channel: PaymentReminder['channel'], invoiceNumber: string) => `${channel === 'email' ? 'Email' : 'WhatsApp'} payment reminder recorded for ${invoiceNumber}.`;
 
 export const FORMAT_NOT_FOUND = 'Invoice format not found.';
 export const DUPLICATE_FORMAT_MESSAGE = 'A format with that name already exists.';

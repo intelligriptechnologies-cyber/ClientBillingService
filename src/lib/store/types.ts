@@ -138,13 +138,14 @@ export interface TenantStore {
   voidInvoice(context: TenantContext, invoiceId: string, reason: string): Promise<TenantInvoice>;
   correctInvoice(context: TenantContext, invoiceId: string, correction: InvoiceInput, reason: string): Promise<TenantInvoice>;
   createIssuedInvoice(context: TenantContext, input: InvoiceInput): Promise<TenantInvoice>;
-  listPayments(session: AppSession, query?: PaymentQuery): Promise<PaymentList>;
-  recordPayment(session: AppSession, input: PaymentInput): Promise<TenantPayment>;
-  getPayment(session: AppSession, paymentId: string): Promise<TenantPayment | null>;
-  updatePaymentDetails(session: AppSession, paymentId: string, update: Pick<TenantPayment, 'method' | 'reference' | 'notes'>): Promise<TenantPayment>;
-  closeInvoice(session: AppSession, invoiceId: string, note?: string): Promise<TenantPayment>;
-  listPendingPayments(session: AppSession): Promise<PendingPayment[]>;
-  recordPaymentReminder(session: AppSession, invoiceId: string, input: { channel: PaymentReminder['channel']; note?: string }): Promise<PaymentReminder>;
+  listPayments(context: TenantContext, query?: PaymentQuery): Promise<PaymentList>;
+  recordPayment(context: TenantContext, input: PaymentInput): Promise<TenantPayment>;
+  getPayment(context: TenantContext, paymentId: string): Promise<TenantPayment | null>;
+  updatePaymentDetails(context: TenantContext, paymentId: string, update: Pick<TenantPayment, 'method' | 'reference' | 'notes'>): Promise<TenantPayment>;
+  /** Writes off the outstanding balance as a closeout payment. */
+  closeInvoice(context: TenantContext, invoiceId: string, note?: string): Promise<TenantPayment>;
+  listPendingPayments(context: TenantContext): Promise<PendingPayment[]>;
+  recordPaymentReminder(context: TenantContext, invoiceId: string, input: { channel: PaymentReminder['channel']; note?: string }): Promise<PaymentReminder>;
   getTenantSettings(context: TenantContext): Promise<TenantSettings>;
   updateTenantSettings(context: TenantContext, input: TenantSettingsInput): Promise<TenantSettings>;
   previewTenantTemplate(context: TenantContext): Promise<string>;

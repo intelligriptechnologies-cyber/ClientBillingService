@@ -169,7 +169,7 @@ describe('payment reminders', () => {
     expect(sent[0]).toMatchObject({ to: ['billing@nexio.example'] }); expect(sent[0].subject).toMatch(/reminder/i); expect(sent[0].text).toContain('Please pay by Friday.');
     expect(sent[0].attachments ?? []).toEqual([]);
     expect(await store.listDeliveries(tenantContextOf(admin), INVOICE)).toMatchObject([{ status: 'sent', subject: sent[0].subject }]);
-    expect((await store.listPendingPayments(admin)).find((item) => item.id === INVOICE)?.reminders).toHaveLength(1);
+    expect((await store.listPendingPayments(tenantContextOf(admin))).find((item) => item.id === INVOICE)?.reminders).toHaveLength(1);
   });
 
   it('records the reminder but says it was not sent when email is not set up or the send fails', async () => {
@@ -178,7 +178,7 @@ describe('payment reminders', () => {
     await configure(admin); transportBehaviour = { sendMail: async () => { throw Object.assign(new Error('boom'), { code: 'ECONNECTION' }); } };
     const failed = await sendPaymentReminder(store, admin, INVOICE, { channel: 'email' }, deps);
     expect(failed).toMatchObject({ status: 'failed', message: expect.stringMatching(/recorded, not sent/i) });
-    expect((await store.listPendingPayments(admin)).find((item) => item.id === INVOICE)?.reminders).toHaveLength(2);
+    expect((await store.listPendingPayments(tenantContextOf(admin))).find((item) => item.id === INVOICE)?.reminders).toHaveLength(2);
     expect((await store.listDeliveries(tenantContextOf(admin), INVOICE)).map((row) => row.status).sort()).toEqual(['failed', 'not-configured']);
   });
 

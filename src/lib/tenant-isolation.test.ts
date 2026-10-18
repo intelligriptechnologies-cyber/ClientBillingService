@@ -83,7 +83,7 @@ async function seedTenantA(session: AppSession) {
   const customerId = must((await store.listCustomers(tenantContextOf(session))).items[0]).id;
   const contractId = must((await store.listContracts(tenantContextOf(session))).items[0]).id;
   const serviceId = must((await store.listServices(tenantContextOf(session))).find((item) => item.status === 'active')).id;
-  const pending = must((await store.listPendingPayments(session))[0]);
+  const pending = must((await store.listPendingPayments(tenantContextOf(session)))[0]);
   const additionalServiceId = (await store.createAdditionalService(tenantContextOf(session), { customerId, contractId, serviceDate: '2026-10-05', description: 'Nexio-secret extra work', priceMinor: 5000 })).id;
   const noteId = (await store.createTaskNote(tenantContextOf(session), { customerId, date: '2026-10-05', note: 'Nexio-secret note' })).id;
   const quotationId = (await store.createQuotation(tenantContextOf(session), { customerName: 'Nexio-secret prospect', lines: [{ serviceId, frequency: 'monthly', quantity: 1 }] })).id;
@@ -95,7 +95,7 @@ async function seedTenantA(session: AppSession) {
     customerId, contractId, serviceId, additionalServiceId, noteId, quotationId, userId, formatId, deliveryId,
     invoiceId: pending.id,
     invoiceNumber: pending.invoiceNumber,
-    paymentId: must((await store.listPayments(session)).items[0]).id,
+    paymentId: must((await store.listPayments(tenantContextOf(session))).items[0]).id,
     depositId: must((await store.listSecurityDeposits(tenantContextOf(session)))[0]).id,
   };
 }
@@ -105,7 +105,7 @@ async function snapshot(session: AppSession) {
   const contractItems = (await store.listContracts(tenantContextOf(session), query)).items;
   return {
     customers: await store.listCustomers(tenantContextOf(session), query), contracts: contractItems, invoices: await store.listInvoices(tenantContextOf(session), query),
-    payments: await store.listPayments(session, query), pending: await store.listPendingPayments(session), deposits: await store.listSecurityDeposits(tenantContextOf(session)),
+    payments: await store.listPayments(tenantContextOf(session), query), pending: await store.listPendingPayments(tenantContextOf(session)), deposits: await store.listSecurityDeposits(tenantContextOf(session)),
     renewals: await store.listRenewals(tenantContextOf(session), query), services: await store.listServices(tenantContextOf(session)), additional: await store.listAdditionalServices(tenantContextOf(session), query),
     quotations: await store.listQuotations(tenantContextOf(session)), notes: await store.listTaskNotes(tenantContextOf(session)), users: await store.listTenantUsers(tenantContextOf(session)),
     logs: await store.listOperationalLogs(tenantContextOf(session)), settings: await store.getTenantSettings(tenantContextOf(session)), bulkRuns: await store.listBulkInvoiceRuns(tenantContextOf(session)), formats: await store.listInvoiceFormats(tenantContextOf(session)),
@@ -268,7 +268,7 @@ describe('store functions reached by id without a route', () => {
       ['getService', async () => await store.getService(tenantContextOf(tenantB), f.serviceId)],
       ['getQuotation', async () => await store.getQuotation(tenantContextOf(tenantB), f.quotationId)],
       ['getInvoice', async () => await store.getInvoice(tenantContextOf(tenantB), f.invoiceId)],
-      ['getPayment', async () => await store.getPayment(tenantB, f.paymentId)],
+      ['getPayment', async () => await store.getPayment(tenantContextOf(tenantB), f.paymentId)],
       ['listDeliveries', async () => await store.listDeliveries(tenantContextOf(tenantB), f.invoiceId)],
       ['recordDelivery', async () => await store.recordDelivery(tenantContextOf(tenantB), { invoiceId: f.invoiceId, to: ['x@y.example'], cc: [], subject: 'planted', status: 'sent', error: '' })],
       ['getCustomer', async () => await store.getCustomer(tenantContextOf(tenantB), f.customerId)],
