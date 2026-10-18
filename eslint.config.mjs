@@ -11,5 +11,10 @@ export default defineConfig([
       'no-restricted-globals': ['error', { name: 'fetch', message: 'Call apiFetch from @/lib/api-client so an expired session reloads the page (ADR 0002, decision 15).' }],
     },
   },
+  {
+    files: ['src/**/*.{ts,tsx}'],
+    languageOptions: { parserOptions: { projectService: true, tsconfigRootDir: import.meta.dirname } },
+    rules: { '@typescript-eslint/no-floating-promises': 'error' },
+  },
   globalIgnores(['.next/**', '.next-*/**', 'node_modules/**', 'coverage/**', '.claude/**', '.worktrees/**']),
 ]);

@@ -8,6 +8,7 @@
     "start": "next start",
     "lint": "eslint .",
     "typecheck": "next typegen && tsc --noEmit",
+    "check:async-store": "node scripts/codemods/async-store.ts --check",
     "test": "vitest run",
     "test:e2e": "playwright test"
   },
@@ -30,6 +31,7 @@
     "eslint-config-next": "^16.3.0",
     "pdfjs-dist": "^6.4.299",
     "smtp-server": "3.19.14",
+    "ts-morph": "28.0.0",
     "typescript": "^5.8.3",
     "vitest": "^3.1.2"
   }
