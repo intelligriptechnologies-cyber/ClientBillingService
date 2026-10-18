@@ -83,6 +83,7 @@ export function createInvoiceFormatMethods(database: DatabaseSync) {
       requireTenantAdmin(session, 'invoice formats');
       inTransaction(() => {
         if (find(session.tenantId, formatId).isDefault) throw new Error('The default invoice format cannot be deleted. Make another format the default first.');
+        database.prepare('UPDATE customers SET invoice_format_id = NULL WHERE invoice_format_id = ? AND tenant_id = ?').run(formatId, session.tenantId);
         database.prepare('DELETE FROM invoice_formats WHERE id = ? AND tenant_id = ?').run(formatId, session.tenantId);
       });
     },

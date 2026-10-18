@@ -155,6 +155,7 @@ const cases: Case[] = [
   { kind: 'invoice formats', name: 'PUT /api/invoice-formats/[id] updates', run: (as, f) => call(invoiceFormat.PUT, as, { method: 'PUT', body: { name: 'Hijacked', definition: formatDefinition }, params: { formatId: f.formatId } }) },
   { kind: 'invoice formats', name: 'DELETE /api/invoice-formats/[id] deletes', run: (as, f) => call(invoiceFormat.DELETE, as, { method: 'DELETE', params: { formatId: f.formatId } }) },
   { kind: 'invoice formats', name: 'POST /api/invoice-formats/[id]/default makes default', run: (as, f) => call(invoiceFormatDefault.POST, as, { method: 'POST', params: { formatId: f.formatId } }) },
+  { kind: 'invoice formats', name: 'PATCH /api/customers/[id] with foreign formatId', run: (as, f) => call(customer.PATCH, as, { method: 'PATCH', body: { ...customerBody, invoiceFormatId: f.formatId }, params: { customerId: must(store.listCustomers(as).items[0]).id } }) },
   { kind: 'invoice formats', name: 'POST /api/invoices with foreign formatId', run: (as, f) => call(invoices.POST, as, { method: 'POST', body: { customerId: must(store.listCustomers(as).items[0]).id, formatId: f.formatId, invoiceDate: '2026-10-07', dueDate: '2026-10-21', taxableMinor: 100 } }) },
   { kind: 'invoices', name: 'GET /api/pending-payments lists', owns: id('invoiceId'), run: (as) => call(pendingPayments.GET, as) },
   { kind: 'invoices', name: 'POST /api/pending-payments/[id]/close', run: (as, f) => call(pendingClose.POST, as, { method: 'POST', body: { note: 'hijack' }, params: { invoiceId: f.invoiceId } }) },

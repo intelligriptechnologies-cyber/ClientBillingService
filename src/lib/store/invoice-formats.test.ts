@@ -157,6 +157,64 @@ describe('issuing with a format', () => {
   });
 });
 
+function buyerWith(store: ReturnType<typeof createTenantStore>, session: Parameters<ReturnType<typeof createTenantStore>['listCustomers']>[0], invoiceFormatId: string) {
+  return store.createCustomer(session, { companyName: `Buyer ${crypto.randomUUID()}`, contactName: 'Buyer', email: 'buyer@example.com', phone: '9000000000', gstin: '', billingAddress: 'Bengaluru', invoiceDelivery: 'manual', invoiceFormatId });
+}
+
+describe('default format per customer', () => {
+  it('prefers the customer default over the tenant default, and a format chosen for the invoice over both', () => {
+    const { store, admin, definition, issue } = setup();
+    const lean = store.createInvoiceFormat(admin, { name: 'Lean', definition: definition({ layout: 'compact' }) });
+    const retainer = store.createInvoiceFormat(admin, { name: 'Retainer', definition: definition({ accent: '#1f3a5f' }) });
+    const client = { ...store.listCustomers(admin).items[0] };
+    expect(client.invoiceFormatId).toBeNull();
+    store.updateCustomer(admin, client.id, { ...client, invoiceFormatId: lean.id });
+    expect(issue().snapshot.format?.name).toBe('Lean');
+    expect(issue(retainer.id).snapshot.format?.name).toBe('Retainer');
+    store.updateCustomer(admin, client.id, { ...client, invoiceFormatId: null });
+    expect(issue().snapshot.format?.name).toBe('Standard');
+  });
+
+  it('keeps the default when a customer is edited without mentioning it', () => {
+    const { store, admin, definition } = setup();
+    const lean = store.createInvoiceFormat(admin, { name: 'Lean', definition: definition() });
+    const client = store.listCustomers(admin).items[0];
+    store.updateCustomer(admin, client.id, { ...client, invoiceFormatId: lean.id });
+    const withoutFormat: Partial<typeof client> = { ...client };
+    delete withoutFormat.invoiceFormatId;
+    expect(store.updateCustomer(admin, client.id, { ...(withoutFormat as typeof client), phone: '9111111111' }).invoiceFormatId).toBe(lean.id);
+  });
+
+  it('refuses a default that is not one of the tenant formats', () => {
+    const { store, admin, other, definition } = setup();
+    const foreign = store.createInvoiceFormat(other, { name: 'Evo secret', definition: definition() });
+    const client = store.listCustomers(admin).items[0];
+    expect(() => store.updateCustomer(admin, client.id, { ...client, invoiceFormatId: foreign.id })).toThrow('The selected invoice format was not found.');
+    expect(() => buyerWith(store, admin, foreign.id)).toThrow('The selected invoice format was not found.');
+  });
+
+  it('clears the default of every customer when its format is deleted', () => {
+    const { store, admin, definition, issue } = setup();
+    const lean = store.createInvoiceFormat(admin, { name: 'Lean', definition: definition() });
+    const created = buyerWith(store, admin, lean.id);
+    expect(created.invoiceFormatId).toBe(lean.id);
+    store.deleteInvoiceFormat(admin, lean.id);
+    expect(store.listCustomers(admin, { search: created.companyName }).items[0].invoiceFormatId).toBeNull();
+    expect(issue().snapshot.format?.name).toBe('Standard');
+  });
+
+  it('uses the customer default for bulk-generated invoices', () => {
+    const { store, admin, definition } = setup();
+    const lean = store.createInvoiceFormat(admin, { name: 'Lean', definition: definition({ layout: 'compact' }) });
+    const client = store.listCustomers(admin).items[0];
+    store.updateCustomer(admin, client.id, { ...client, invoiceFormatId: lean.id });
+    store.generateBulkInvoices(admin, '2026-11');
+    const generated = store.listInvoices(admin, { pageSize: 100 }).items.filter((invoice) => invoice.invoiceDate === '2026-11-01' && invoice.customerId === client.id);
+    expect(generated.length).toBeGreaterThan(0);
+    for (const invoice of generated) expect(invoice.snapshot.format?.name).toBe('Lean');
+  });
+});
+
 describe('migration', () => {
   it('adds the formats table to a database that predates it and leaves existing invoices without a format', () => {
     const folder = mkdtempSync(join(tmpdir(), 'formats-'));
@@ -167,12 +225,13 @@ describe('migration', () => {
     const legacy = first.createIssuedInvoice(admin, { customerId: first.listCustomers(admin).items[0].id, invoiceDate: '2026-11-02', dueDate: '2026-11-16', taxableMinor: 100_000, gstRate: 0 });
     first.close();
     const raw = new DatabaseSync(filename);
-    raw.exec("DROP TABLE invoice_formats; UPDATE invoices SET snapshot = json_remove(snapshot, '$.format')");
+    raw.exec("DROP TABLE invoice_formats; ALTER TABLE customers DROP COLUMN invoice_format_id; UPDATE invoices SET snapshot = json_remove(snapshot, '$.format')");
     raw.close();
 
     const reopened = createTenantStore(filename);
     stores.push(reopened);
     expect(reopened.listInvoiceFormats(admin)[0].name).toBe('Standard');
     expect(reopened.getInvoice(admin, legacy.id)!.snapshot.format).toBeUndefined();
+    expect(reopened.listCustomers(admin).items[0].invoiceFormatId).toBeNull();
   });
 });

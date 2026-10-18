@@ -189,6 +189,49 @@ test.describe.serial('named invoice formats', () => {
     expect((await page.request.post('/api/invoices', { data: { customerId, formatId: leanFormat.id, invoiceDate: '2026-01-05', dueDate: '2026-01-19', taxableMinor: 100 } })).status()).toBe(400);
   });
 
+  test('a customer default format is preselected in the editor and can be overridden for one invoice', async ({ page }) => {
+    const blocks = { hsnSac: true, bankDetails: true, upiQr: false, signature: true, stamp: true, terms: true, amountInWords: true };
+    const created = await page.request.post('/api/invoice-formats', { data: { name: 'Client navy', definition: { layout: 'compact', blocks, accent: NAVY, logo: 'show', bankDetails: '', terms: '' } } });
+    const navy = (await created.json() as { format: Format }).format;
+    const standard = (await formatsOf(page.request)).find((format) => format.name === 'Standard')!;
+    const name = `Format client ${Date.now()}`;
+    const customer = await page.request.post('/api/customers', { data: { companyName: name, contactName: 'Buyer', email: 'buyer@example.com', phone: '9000000000', gstin: SELLER_GSTIN, billingAddress: 'Bengaluru', invoiceDelivery: 'manual' } });
+    const customerRecord = await customer.json() as { id: string; invoiceFormatId: string | null };
+    expect(customerRecord.invoiceFormatId).toBeNull();
+
+    await page.goto('/customers');
+    await page.getByLabel('Search customers').fill(name);
+    await page.getByRole('row', { name: new RegExp(name) }).getByRole('button', { name: 'Edit' }).click();
+    await page.getByLabel('Default invoice format').selectOption({ label: 'Client navy' });
+    await page.getByRole('button', { name: 'Save changes' }).click();
+    await expect(page.getByRole('dialog')).toBeHidden();
+    const saved = await (await page.request.get(`/api/customers?search=${encodeURIComponent(name)}`)).json() as { items: Array<{ invoiceFormatId: string | null }> };
+    expect(saved.items[0].invoiceFormatId).toBe(navy.id);
+
+    await page.goto('/invoices');
+    await page.getByRole('button', { name: 'Add invoice' }).click();
+    const dialog = page.getByRole('dialog', { name: 'Create invoice' });
+    const select = dialog.getByLabel('Invoice format');
+    await expect(select).toHaveValue(standard.id);
+    await dialog.getByRole('combobox', { name: /^Customer \*/ }).selectOption(customerRecord.id);
+    await expect(select).toHaveValue(navy.id);
+    await expect(select.locator('option:checked')).toHaveText('Client navy (customer default)');
+    await select.selectOption({ label: 'Standard (default)' });
+    await dialog.getByLabel('Invoice Date').fill('2026-01-05');
+    await dialog.getByLabel('Due Date').fill('2026-01-19');
+    await dialog.getByLabel('Description 1').fill('Hall rental');
+    await dialog.getByLabel('HSN/SAC 1').fill('998311');
+    await dialog.getByLabel('Rate 1').fill('1500');
+    await dialog.getByLabel('Notes').fill('override standard');
+    await dialog.getByRole('button', { name: 'Create Invoice' }).click();
+    await expect(dialog).toBeHidden();
+
+    const list = await (await page.request.get('/api/invoices?pageSize=100')).json() as { items: Array<{ snapshot: { notes?: string; format?: { name: string } } }> };
+    expect(list.items.find((item) => item.snapshot.notes === 'override standard')?.snapshot.format?.name).toBe('Standard');
+    const byDefault = await issue(page.request, customerRecord.id, 'client default applies');
+    expect(await htmlOf(page.request, byDefault)).toContain(`border-bottom: 2px solid ${NAVY}`);
+  });
+
   test('a user without admin rights can pick a format but cannot change them', async ({ page }) => {
     expect((await page.request.post('/api/auth/login', { data: { userId: 'nexio-user' } })).ok()).toBeTruthy();
     expect((await page.request.get('/api/invoice-formats')).ok()).toBeTruthy();
