@@ -26,7 +26,7 @@ const fixtures: Array<[table: string, build: (tenant: string) => Row]> = [
   ['payment_reminders', (t) => ({ id: `${t}-reminder`, tenant_id: t, invoice_id: `${t}-invoice-001`, channel: 'email', created_at: AT })],
   ['additional_services', (t) => ({ id: `${t}-additional`, tenant_id: t, customer_id: `${t}-customer`, contract_id: `${t}-seed-contract`, service_date: '2026-10-02', description: 'Fixture', price_minor: 5000, status: 'active', created_at: AT, updated_at: AT })],
   ['task_notes', (t) => ({ id: `${t}-note`, tenant_id: t, customer_id: `${t}-customer`, note_date: '2026-10-02', note: 'Fixture.', created_at: AT, updated_at: AT })],
-  ['invoice_formats', (t) => ({ id: `${t}-format`, tenant_id: t, name: `${t} format`, definition: { fixture: true }, is_default: false, created_at: AT, updated_at: AT })],
+  ['invoice_formats', (t) => ({ id: `${t}-format`, tenant_id: t, name: `${t} format`, definition: { fixture: true }, is_default: 0, created_at: AT, updated_at: AT })],
   ['delivery_log', (t) => ({ id: `${t}-delivery`, tenant_id: t, invoice_id: `${t}-invoice-001`, channel: 'email', to_address: 'billing@example.test', subject: 'Fixture', status: 'sent', attempted_at: AT, attempted_by: `${t}-admin` })],
   ['bulk_invoice_runs', (t) => ({ id: `${t}-bulk-run`, tenant_id: t, billing_period: '2026-09', generated_count: 0, skipped_count: 0, details: [], created_at: AT })],
 ];

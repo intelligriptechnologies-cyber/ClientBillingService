@@ -126,13 +126,13 @@ CREATE TABLE invoice_formats (
   tenant_id text NOT NULL REFERENCES tenants (id),
   name text NOT NULL,
   definition jsonb NOT NULL,
-  is_default boolean NOT NULL DEFAULT false,
+  is_default smallint NOT NULL DEFAULT 0 CHECK (is_default IN (0, 1)),
   created_at timestamptz NOT NULL,
   updated_at timestamptz NOT NULL,
   UNIQUE (tenant_id, id)
 );
 CREATE UNIQUE INDEX invoice_formats_tenant_name ON invoice_formats (tenant_id, lower(name));
-CREATE UNIQUE INDEX invoice_formats_one_default ON invoice_formats (tenant_id) WHERE is_default;
+CREATE UNIQUE INDEX invoice_formats_one_default ON invoice_formats (tenant_id) WHERE is_default = 1;
 
 CREATE TABLE customers (
   id text PRIMARY KEY,
