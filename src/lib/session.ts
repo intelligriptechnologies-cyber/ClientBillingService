@@ -9,5 +9,5 @@ export const sessionCookie = 'client-billing-demo-session';
 export async function getCurrentSession(): Promise<AppSession | null> {
   if (!isDemoMode()) return null;
   const userId = (await cookies()).get(sessionCookie)?.value;
-  return userId ? getTenantStore().authenticate(userId) : null;
+  return userId ? await getTenantStore().authenticate(userId) : null;
 }

@@ -9,11 +9,11 @@ export async function GET(_: Request, context: { params: Promise<{ invoiceId: st
   if (!session?.tenantId) return NextResponse.json({ message: 'A tenant session is required.' }, { status: 401 });
   try {
     const store = getTenantStore(); const { invoiceId } = await context.params;
-    const defaults = getInvoiceEmailDefaults(store, session, invoiceId);
-    return NextResponse.json({ deliveries: store.listDeliveries(session, invoiceId), defaults });
+    const defaults = await getInvoiceEmailDefaults(store, session, invoiceId);
+    return NextResponse.json({ deliveries: await store.listDeliveries(session, invoiceId), defaults });
   } catch (cause) {
     if (cause instanceof MailServiceError) return NextResponse.json({ message: cause.message }, { status: cause.status });
-    recordOperationException(session, '/api/invoices/[invoiceId]/deliveries', cause);
+    await recordOperationException(session, '/api/invoices/[invoiceId]/deliveries', cause);
     return NextResponse.json({ message: 'Unable to load deliveries.' }, { status: 400 });
   }
 }

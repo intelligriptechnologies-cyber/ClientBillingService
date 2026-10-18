@@ -9,9 +9,9 @@ export async function PATCH(request: Request, context: { params: Promise<{ userI
   const { userId } = await context.params;
   try {
     const update = await request.json() as TenantUserUpdate;
-    const user = getTenantStore().updateTenantUser(session, userId, update);
+    const user = await getTenantStore().updateTenantUser(session, userId, update);
     return NextResponse.json({ user });
-  } catch (error) { recordOperationException(session, '/api/users/[userId]', error);
+  } catch (error) { await recordOperationException(session, '/api/users/[userId]', error);
     const message = error instanceof Error ? error.message : 'Unable to update this user.';
     return NextResponse.json({ message }, { status: message.includes('at least one active admin') ? 409 : message.includes('admin') || message.includes('tenant') ? 403 : 400 });
   }

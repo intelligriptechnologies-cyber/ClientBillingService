@@ -13,7 +13,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ inv
     const result = await sendPaymentReminder(getTenantStore(), session, invoiceId, { channel: body.channel, note: String(body.note ?? '') });
     return NextResponse.json({ ...result.reminder, delivery: result.status, message: result.message });
   } catch (cause) {
-    recordOperationException(session, '/api/pending-payments/[invoiceId]/reminders', cause);
+    await recordOperationException(session, '/api/pending-payments/[invoiceId]/reminders', cause);
     return NextResponse.json({ message: cause instanceof Error ? cause.message : 'Unable to prepare reminder.' }, { status: 400 });
   }
 }

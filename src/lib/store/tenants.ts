@@ -1,11 +1,7 @@
 import type { DatabaseSync } from 'node:sqlite';
 import { now, requireSuperadmin, requireTenantAdmin } from './shared';
 import { seedSettings } from './schema';
-import type { AppRole, DemoIdentity, AppSession, TenantRecord, TenantStatus, Tenant, TenantHistoryEvent, TenantList, TenantUser, TenantUserInput, TenantUserUpdate } from './types';
-
-type TenantFilters = { query?: string; month?: string; status?: TenantStatus | 'all'; page?: number; pageSize?: number };
-type TenantInput = { name: string };
-type TenantUpdate = { name?: string; status?: TenantStatus };
+import type { AppRole, DemoIdentity, AppSession, TenantRecord, TenantStatus, Tenant, TenantHistoryEvent, TenantList, TenantUser, TenantUserInput, TenantUserUpdate, TenantFilters, TenantInput, TenantUpdate } from './types';
 
 function identityFromRow(row: Record<string, unknown> | undefined): DemoIdentity | null {
   if (!row) return null;

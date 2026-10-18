@@ -9,380 +9,380 @@ function storeForTest() {
   return store;
 }
 
-afterEach(() => {
-  for (const store of stores.splice(0)) store.close();
+afterEach(async () => {
+  for (const store of stores.splice(0)) await store.close();
 });
 
 /** The seeded sellers are unregistered and may not charge GST, so a test that bills GST registers its seller first. */
-function registerSeller(store: ReturnType<typeof createTenantStore>, session: NonNullable<ReturnType<ReturnType<typeof createTenantStore>['authenticate']>>) {
-  store.updateTenantSettings(session, { ...store.getTenantSettings(session), gstin: '29AAGCB7383J1Z4' });
+async function registerSeller(store: ReturnType<typeof createTenantStore>, session: NonNullable<Awaited<ReturnType<ReturnType<typeof createTenantStore>['authenticate']>>>) {
+  await store.updateTenantSettings(session, { ...await store.getTenantSettings(session), gstin: '29AAGCB7383J1Z4' });
 }
 
 describe('tenant lifecycle', () => {
-  it('lets the superadmin create, change, and disable a tenant while retaining lifecycle history', () => {
+  it('lets the superadmin create, change, and disable a tenant while retaining lifecycle history', async () => {
     const store = storeForTest();
-    const superadmin = store.authenticate('superadmin');
+    const superadmin = await store.authenticate('superadmin');
     if (!superadmin) throw new Error('Expected superadmin session');
 
-    const created = store.createTenant(superadmin, { name: 'Northstar Studio' });
+    const created = await store.createTenant(superadmin, { name: 'Northstar Studio' });
 
     expect(created).toMatchObject({ name: 'Northstar Studio', status: 'active' });
-    expect(store.listIdentities().filter((identity) => identity.tenantId === created.id)).toEqual(expect.arrayContaining([
+    expect((await store.listIdentities()).filter((identity) => identity.tenantId === created.id)).toEqual(expect.arrayContaining([
       expect.objectContaining({ role: 'admin', tenantName: 'Northstar Studio' }),
       expect.objectContaining({ role: 'user', tenantName: 'Northstar Studio' }),
     ]));
 
-    const updated = store.updateTenant(superadmin, created.id, { name: 'Northstar Creative', status: 'disabled' });
+    const updated = await store.updateTenant(superadmin, created.id, { name: 'Northstar Creative', status: 'disabled' });
     expect(updated).toMatchObject({ id: created.id, name: 'Northstar Creative', status: 'disabled' });
-    expect(store.authenticate(`${created.id}-admin`)).toBeNull();
-    expect(store.listTenantHistory(superadmin, created.id).map((event) => event.action)).toEqual(['created', 'updated', 'disabled']);
+    expect(await store.authenticate(`${created.id}-admin`)).toBeNull();
+    expect((await store.listTenantHistory(superadmin, created.id)).map((event) => event.action)).toEqual(['created', 'updated', 'disabled']);
   });
 
-  it('does not expose tenant lifecycle operations to a tenant session', () => {
+  it('does not expose tenant lifecycle operations to a tenant session', async () => {
     const store = storeForTest();
-    const tenantAdmin = store.authenticate('nexio-admin');
+    const tenantAdmin = await store.authenticate('nexio-admin');
     if (!tenantAdmin) throw new Error('Expected tenant admin session');
 
-    expect(() => store.listTenants(tenantAdmin, {})).toThrow('superadmin');
-    expect(() => store.createTenant(tenantAdmin, { name: 'Not allowed' })).toThrow('superadmin');
+    await expect(store.listTenants(tenantAdmin, {})).rejects.toThrow('superadmin');
+    await expect(store.createTenant(tenantAdmin, { name: 'Not allowed' })).rejects.toThrow('superadmin');
   });
 
-  it('lets the superadmin change only the capitalisation of a tenant name', () => {
+  it('lets the superadmin change only the capitalisation of a tenant name', async () => {
     const store = storeForTest();
-    const superadmin = store.authenticate('superadmin')!;
-    const created = store.createTenant(superadmin, { name: 'Harbour Works' });
+    const superadmin = (await store.authenticate('superadmin'))!;
+    const created = await store.createTenant(superadmin, { name: 'Harbour Works' });
 
-    expect(store.updateTenant(superadmin, created.id, { name: 'HARBOUR WORKS' }).name).toBe('HARBOUR WORKS');
-    const other = store.createTenant(superadmin, { name: 'Other Works' });
-    expect(() => store.updateTenant(superadmin, other.id, { name: 'harbour works' })).toThrow('already exists');
+    expect((await store.updateTenant(superadmin, created.id, { name: 'HARBOUR WORKS' })).name).toBe('HARBOUR WORKS');
+    const other = await store.createTenant(superadmin, { name: 'Other Works' });
+    await expect(store.updateTenant(superadmin, other.id, { name: 'harbour works' })).rejects.toThrow('already exists');
   });
 
-  it('rejects empty, blank, duplicate and non-text tenant names with a readable message', () => {
+  it('rejects empty, blank, duplicate and non-text tenant names with a readable message', async () => {
     const store = storeForTest();
-    const superadmin = store.authenticate('superadmin')!;
-    store.createTenant(superadmin, { name: 'Unique Co' });
+    const superadmin = (await store.authenticate('superadmin'))!;
+    await store.createTenant(superadmin, { name: 'Unique Co' });
 
-    expect(() => store.createTenant(superadmin, { name: '' })).toThrow('between 2 and 100');
-    expect(() => store.createTenant(superadmin, { name: '   ' })).toThrow('between 2 and 100');
-    expect(() => store.createTenant(superadmin, { name: ' unique   CO ' })).toThrow('already exists');
-    expect(() => store.createTenant(superadmin, { name: 42 as unknown as string })).toThrow('Tenant name is required');
-    expect(() => store.updateTenant(superadmin, 'missing-tenant', { name: 'Whatever' })).toThrow('not found');
+    await expect(store.createTenant(superadmin, { name: '' })).rejects.toThrow('between 2 and 100');
+    await expect(store.createTenant(superadmin, { name: '   ' })).rejects.toThrow('between 2 and 100');
+    await expect(store.createTenant(superadmin, { name: ' unique   CO ' })).rejects.toThrow('already exists');
+    await expect(store.createTenant(superadmin, { name: 42 as unknown as string })).rejects.toThrow('Tenant name is required');
+    await expect(store.updateTenant(superadmin, 'missing-tenant', { name: 'Whatever' })).rejects.toThrow('not found');
   });
 
-  it('treats the tenant search text literally rather than as a LIKE pattern', () => {
+  it('treats the tenant search text literally rather than as a LIKE pattern', async () => {
     const store = storeForTest();
-    const superadmin = store.authenticate('superadmin')!;
-    expect(store.listTenants(superadmin, { query: '%' }).total).toBe(0);
-    expect(store.listTenants(superadmin, { query: '_' }).total).toBe(0);
+    const superadmin = (await store.authenticate('superadmin'))!;
+    expect((await store.listTenants(superadmin, { query: '%' })).total).toBe(0);
+    expect((await store.listTenants(superadmin, { query: '_' })).total).toBe(0);
   });
 
-  it('suspends and reactivates a tenant, blocking its sign-in meanwhile, and records each step', () => {
+  it('suspends and reactivates a tenant, blocking its sign-in meanwhile, and records each step', async () => {
     const store = storeForTest();
-    const superadmin = store.authenticate('superadmin')!;
-    const created = store.createTenant(superadmin, { name: 'Pause Me' });
+    const superadmin = (await store.authenticate('superadmin'))!;
+    const created = await store.createTenant(superadmin, { name: 'Pause Me' });
     const adminId = `${created.id}-admin`;
 
-    store.updateTenant(superadmin, created.id, { status: 'disabled' });
-    expect(store.authenticate(adminId)).toBeNull();
-    store.updateTenant(superadmin, created.id, { status: 'disabled' });
-    store.updateTenant(superadmin, created.id, { status: 'active' });
-    expect(store.authenticate(adminId)).toMatchObject({ tenantId: created.id, role: 'admin' });
-    expect(() => store.updateTenant(superadmin, created.id, { status: 'archived' as never })).toThrow('status is invalid');
-    expect(store.listTenantHistory(superadmin, created.id).map((event) => event.action)).toEqual(['created', 'disabled', 'enabled']);
+    await store.updateTenant(superadmin, created.id, { status: 'disabled' });
+    expect(await store.authenticate(adminId)).toBeNull();
+    await store.updateTenant(superadmin, created.id, { status: 'disabled' });
+    await store.updateTenant(superadmin, created.id, { status: 'active' });
+    expect(await store.authenticate(adminId)).toMatchObject({ tenantId: created.id, role: 'admin' });
+    await expect(store.updateTenant(superadmin, created.id, { status: 'archived' as never })).rejects.toThrow('status is invalid');
+    expect((await store.listTenantHistory(superadmin, created.id)).map((event) => event.action)).toEqual(['created', 'disabled', 'enabled']);
   });
 
-  it('refuses to leave a tenant without an active admin', () => {
+  it('refuses to leave a tenant without an active admin', async () => {
     const store = storeForTest();
-    const superadmin = store.authenticate('superadmin')!;
-    const created = store.createTenant(superadmin, { name: 'Solo Admin' });
-    const admin = store.authenticate(`${created.id}-admin`)!;
+    const superadmin = (await store.authenticate('superadmin'))!;
+    const created = await store.createTenant(superadmin, { name: 'Solo Admin' });
+    const admin = (await store.authenticate(`${created.id}-admin`))!;
 
-    expect(() => store.updateTenantUser(admin, admin.id, { status: 'disabled' })).toThrow('active admin');
-    expect(() => store.updateTenantUser(admin, admin.id, { role: 'user' })).toThrow('active admin');
-    expect(store.authenticate(admin.id)).toMatchObject({ role: 'admin' });
+    await expect(store.updateTenantUser(admin, admin.id, { status: 'disabled' })).rejects.toThrow('active admin');
+    await expect(store.updateTenantUser(admin, admin.id, { role: 'user' })).rejects.toThrow('active admin');
+    expect(await store.authenticate(admin.id)).toMatchObject({ role: 'admin' });
 
-    const second = store.createTenantUser(admin, { name: 'Second Admin', email: 'second@solo.demo', role: 'admin' });
-    expect(store.updateTenantUser(admin, second.id, { status: 'disabled' }).status).toBe('disabled');
-    expect(() => store.updateTenantUser(admin, admin.id, { status: 'disabled' })).toThrow('active admin');
-    store.updateTenantUser(admin, second.id, { status: 'active' });
-    expect(store.updateTenantUser(admin, admin.id, { role: 'user' }).role).toBe('user');
+    const second = await store.createTenantUser(admin, { name: 'Second Admin', email: 'second@solo.demo', role: 'admin' });
+    expect((await store.updateTenantUser(admin, second.id, { status: 'disabled' })).status).toBe('disabled');
+    await expect(store.updateTenantUser(admin, admin.id, { status: 'disabled' })).rejects.toThrow('active admin');
+    await store.updateTenantUser(admin, second.id, { status: 'active' });
+    expect((await store.updateTenantUser(admin, admin.id, { role: 'user' })).role).toBe('user');
   });
 });
 
 describe('tenant store', () => {
-  it('persists row-wise GST, billing details and corrected line items', () => {
-    const store = storeForTest(); const session = store.authenticate('nexio-admin');
+  it('persists row-wise GST, billing details and corrected line items', async () => {
+    const store = storeForTest(); const session = await store.authenticate('nexio-admin');
     if (!session) throw new Error('Expected tenant session');
-    registerSeller(store, session);
-    const customer = store.listCustomers(session).items[0];
+    await registerSeller(store, session);
+    const customer = (await store.listCustomers(session)).items[0];
     const details = { customerId: customer.id, invoiceDate: '2026-10-07', dueDate: '2026-10-21', venue: 'Bengaluru', billingAddress: 'New billing address', customerPan: 'ABCDE1234F', customerGstin: '29AAGCB7383J1Z4', gstApplicable: true, notes: 'Monthly booking' };
-    const first = store.createIssuedInvoice(session, { ...details, taxSplitOverrideReason: 'Supply to an SEZ unit', lines: [
+    const first = await store.createIssuedInvoice(session, { ...details, taxSplitOverrideReason: 'Supply to an SEZ unit', lines: [
       { description: 'Venue booking', quantity: 2, rateMinor: 12500, taxType: 'igst', gstRate: 18, hsnSac: '998311' },
       { description: 'Security deposit', quantity: 1, rateMinor: 5000, taxType: 'none', gstRate: 0 },
     ] });
     expect(first).toMatchObject({ taxableMinor: 30000, gstMinor: 4500, totalMinor: 34500, snapshot: { venue: 'Bengaluru', customerAddress: 'New billing address', notes: 'Monthly booking', lines: [{ amountMinor: 25000, gstMinor: 4500 }, { amountMinor: 5000, gstMinor: 0 }] } });
-    expect(store.getGstSalesReport(session, '2026-10').items.find((row) => row.invoiceId === first.id)).toMatchObject({ igstMinor: 4500, cgstMinor: 0, sgstMinor: 0 });
-    const corrected = store.correctInvoice(session, first.id, { ...details, lines: [{ description: 'Revised booking', quantity: 1, rateMinor: 20000, taxType: 'cgst_sgst', gstRate: 12, hsnSac: '998311' }] }, 'Reduced booking');
+    expect((await store.getGstSalesReport(session, '2026-10')).items.find((row) => row.invoiceId === first.id)).toMatchObject({ igstMinor: 4500, cgstMinor: 0, sgstMinor: 0 });
+    const corrected = await store.correctInvoice(session, first.id, { ...details, lines: [{ description: 'Revised booking', quantity: 1, rateMinor: 20000, taxType: 'cgst_sgst', gstRate: 12, hsnSac: '998311' }] }, 'Reduced booking');
     expect(corrected).toMatchObject({ taxableMinor: 20000, gstMinor: 2400, totalMinor: 22400, snapshot: { lines: [{ description: 'Revised booking', taxType: 'cgst_sgst' }] } });
-    expect(store.getGstSalesReport(session, '2026-10').items.find((row) => row.invoiceId === corrected.id)).toMatchObject({ igstMinor: 0, cgstMinor: 1200, sgstMinor: 1200 });
-    expect(store.getInvoice(session, first.id)?.status).toBe('void');
-    expect(() => store.createIssuedInvoice(session, { ...details, lines: [{ description: 'Invalid', quantity: 1, rateMinor: 100, taxType: 'none', gstRate: 18 }] })).toThrow('valid GST');
+    expect((await store.getGstSalesReport(session, '2026-10')).items.find((row) => row.invoiceId === corrected.id)).toMatchObject({ igstMinor: 0, cgstMinor: 1200, sgstMinor: 1200 });
+    expect((await store.getInvoice(session, first.id))?.status).toBe('void');
+    await expect(store.createIssuedInvoice(session, { ...details, lines: [{ description: 'Invalid', quantity: 1, rateMinor: 100, taxType: 'none', gstRate: 18 }] })).rejects.toThrow('valid GST');
   });
-  it('edits and archives a draft quotation without changing another tenant', () => {
-    const store = storeForTest(); const nexio = store.authenticate('nexio-admin'); const evo = store.authenticate('evo-admin');
+  it('edits and archives a draft quotation without changing another tenant', async () => {
+    const store = storeForTest(); const nexio = await store.authenticate('nexio-admin'); const evo = await store.authenticate('evo-admin');
     if (!nexio || !evo) throw new Error('Expected tenant sessions');
-    const service = store.listServices(nexio).find((item) => item.status === 'active');
+    const service = (await store.listServices(nexio)).find((item) => item.status === 'active');
     if (!service) throw new Error('Expected active service');
-    const quote = store.createQuotation(nexio, { customerName: 'First customer', lines: [{ serviceId: service.id, frequency: 'monthly', quantity: 1 }] });
-    expect(store.updateQuotation(nexio, quote.id, { customerName: 'Updated customer', lines: [{ serviceId: service.id, frequency: 'monthly', quantity: 2 }] }).totalMinor).toBe(service.prices.monthly * 2);
-    expect(store.updateQuotation(nexio, quote.id, { status: 'archived' }).status).toBe('archived');
-    expect(store.listQuotations(nexio).find((item) => item.id === quote.id)?.status).toBe('archived');
-    expect(() => store.updateQuotation(evo, quote.id, { status: 'draft' })).toThrow('does not belong');
+    const quote = await store.createQuotation(nexio, { customerName: 'First customer', lines: [{ serviceId: service.id, frequency: 'monthly', quantity: 1 }] });
+    expect((await store.updateQuotation(nexio, quote.id, { customerName: 'Updated customer', lines: [{ serviceId: service.id, frequency: 'monthly', quantity: 2 }] })).totalMinor).toBe(service.prices.monthly * 2);
+    expect((await store.updateQuotation(nexio, quote.id, { status: 'archived' })).status).toBe('archived');
+    expect((await store.listQuotations(nexio)).find((item) => item.id === quote.id)?.status).toBe('archived');
+    await expect(store.updateQuotation(evo, quote.id, { status: 'draft' })).rejects.toThrow('does not belong');
   });
 
-  it('voids an unpaid invoice with a reason and records operation errors for tenant admins', () => {
-    const store = storeForTest(); const nexio = store.authenticate('nexio-admin');
+  it('voids an unpaid invoice with a reason and records operation errors for tenant admins', async () => {
+    const store = storeForTest(); const nexio = await store.authenticate('nexio-admin');
     if (!nexio) throw new Error('Expected tenant session');
-    const customer = store.listCustomers(nexio).items[0];
-    const invoice = store.createIssuedInvoice(nexio, { customerId: customer.id, invoiceDate: '2026-10-07', dueDate: '2026-10-21', taxableMinor: 10000 });
-    expect(() => store.voidInvoice(nexio, invoice.id, '')).toThrow('reason');
-    expect(store.voidInvoice(nexio, invoice.id, 'Issued in error').status).toBe('void');
-    expect(() => store.voidInvoice(nexio, invoice.id, 'Again')).toThrow('already void');
-    store.recordOperationalError(nexio, 'Test operation', new Error('Test failure'));
-    expect(store.listOperationalLogs(nexio)).toEqual(expect.arrayContaining([expect.objectContaining({ kind: 'error', message: expect.stringContaining('Test failure') })]));
+    const customer = (await store.listCustomers(nexio)).items[0];
+    const invoice = await store.createIssuedInvoice(nexio, { customerId: customer.id, invoiceDate: '2026-10-07', dueDate: '2026-10-21', taxableMinor: 10000 });
+    await expect(store.voidInvoice(nexio, invoice.id, '')).rejects.toThrow('reason');
+    expect((await store.voidInvoice(nexio, invoice.id, 'Issued in error')).status).toBe('void');
+    await expect(store.voidInvoice(nexio, invoice.id, 'Again')).rejects.toThrow('already void');
+    await store.recordOperationalError(nexio, 'Test operation', new Error('Test failure'));
+    expect(await store.listOperationalLogs(nexio)).toEqual(expect.arrayContaining([expect.objectContaining({ kind: 'error', message: expect.stringContaining('Test failure') })]));
   });
 
-  it('corrects an unpaid invoice by replacing it and edits payment details without changing allocations', () => {
-    const store = storeForTest(); const nexio = store.authenticate('nexio-admin');
+  it('corrects an unpaid invoice by replacing it and edits payment details without changing allocations', async () => {
+    const store = storeForTest(); const nexio = await store.authenticate('nexio-admin');
     if (!nexio) throw new Error('Expected tenant session');
-    registerSeller(store, nexio);
-    const customer = store.listCustomers(nexio).items[0];
-    const original = store.createIssuedInvoice(nexio, { customerId: customer.id, invoiceDate: '2026-10-07', dueDate: '2026-10-21', taxableMinor: 10000, gstRate: 18 });
-    const corrected = store.correctInvoice(nexio, original.id, { invoiceDate: '2026-10-07', dueDate: '2026-10-24', taxableMinor: 12000, gstRate: 18 }, 'Corrected price');
+    await registerSeller(store, nexio);
+    const customer = (await store.listCustomers(nexio)).items[0];
+    const original = await store.createIssuedInvoice(nexio, { customerId: customer.id, invoiceDate: '2026-10-07', dueDate: '2026-10-21', taxableMinor: 10000, gstRate: 18 });
+    const corrected = await store.correctInvoice(nexio, original.id, { invoiceDate: '2026-10-07', dueDate: '2026-10-24', taxableMinor: 12000, gstRate: 18 }, 'Corrected price');
     expect(corrected.id).not.toBe(original.id);
     expect(corrected.taxableMinor).toBe(12000);
-    expect(store.getInvoice(nexio, original.id)?.status).toBe('void');
-    const payment = store.recordPayment(nexio, { invoiceId: corrected.id, paymentDate: '2026-10-08', amountMinor: 5000, tdsMinor: 0, writeOffMinor: 0, method: 'bank_transfer', reference: 'OLD', notes: '' });
-    const edited = store.updatePaymentDetails(nexio, payment.id, { method: 'cheque', reference: 'NEW', notes: 'Reconciled' });
+    expect((await store.getInvoice(nexio, original.id))?.status).toBe('void');
+    const payment = await store.recordPayment(nexio, { invoiceId: corrected.id, paymentDate: '2026-10-08', amountMinor: 5000, tdsMinor: 0, writeOffMinor: 0, method: 'bank_transfer', reference: 'OLD', notes: '' });
+    const edited = await store.updatePaymentDetails(nexio, payment.id, { method: 'cheque', reference: 'NEW', notes: 'Reconciled' });
     expect(edited).toMatchObject({ appliedMinor: 5000, method: 'cheque', reference: 'NEW', notes: 'Reconciled' });
-    expect(store.getInvoice(nexio, corrected.id)?.paidMinor).toBe(5000);
-    expect(() => store.correctInvoice(nexio, corrected.id, { invoiceDate: '2026-10-07', dueDate: '2026-10-24', taxableMinor: 12000, gstRate: 18 }, 'Again')).toThrow('payments');
+    expect((await store.getInvoice(nexio, corrected.id))?.paidMinor).toBe(5000);
+    await expect(store.correctInvoice(nexio, corrected.id, { invoiceDate: '2026-10-07', dueDate: '2026-10-24', taxableMinor: 12000, gstRate: 18 }, 'Again')).rejects.toThrow('payments');
   });
-  it('creates, filters, edits, and deletes task notes within the tenant', () => {
+  it('creates, filters, edits, and deletes task notes within the tenant', async () => {
     const store = storeForTest();
-    const nexio = store.authenticate('nexio-admin'); const evo = store.authenticate('evo-admin');
+    const nexio = await store.authenticate('nexio-admin'); const evo = await store.authenticate('evo-admin');
     if (!nexio || !evo) throw new Error('Expected tenant sessions');
-    const nexioCustomer = store.listCustomers(nexio).items[0]; const evoCustomer = store.listCustomers(evo).items[0];
+    const nexioCustomer = (await store.listCustomers(nexio)).items[0]; const evoCustomer = (await store.listCustomers(evo)).items[0];
     const input = { customerId: nexioCustomer.id, date: '2026-10-07', note: 'Call customer about renewal' };
-    expect(() => store.createTaskNote(nexio, { ...input, customerId: evoCustomer.id })).toThrow('does not belong');
-    expect(() => store.createTaskNote(nexio, { ...input, date: '2026-02-30' })).toThrow('valid date');
-    const created = store.createTaskNote(nexio, input);
-    expect(store.listTaskNotes(nexio, { date: input.date, customerId: nexioCustomer.id })).toMatchObject([created]);
-    expect(store.listTaskNotes(nexio, { date: '2026-10-08' })).toEqual([]);
-    expect(store.listTaskNotes(evo)).toEqual([]);
-    expect(() => store.updateTaskNote(evo, created.id, { ...input, customerId: evoCustomer.id, note: 'Changed' })).toThrow('not found');
-    expect(() => store.updateTaskNote(nexio, created.id, { ...input, customerId: evoCustomer.id })).toThrow('does not belong');
-    expect(store.updateTaskNote(nexio, created.id, { ...input, note: 'Followed up' }).note).toBe('Followed up');
-    expect(() => store.deleteTaskNote(evo, created.id)).toThrow('not found');
-    store.deleteTaskNote(nexio, created.id);
-    expect(store.listTaskNotes(nexio)).toEqual([]);
+    await expect(store.createTaskNote(nexio, { ...input, customerId: evoCustomer.id })).rejects.toThrow('does not belong');
+    await expect(store.createTaskNote(nexio, { ...input, date: '2026-02-30' })).rejects.toThrow('valid date');
+    const created = await store.createTaskNote(nexio, input);
+    expect(await store.listTaskNotes(nexio, { date: input.date, customerId: nexioCustomer.id })).toMatchObject([created]);
+    expect(await store.listTaskNotes(nexio, { date: '2026-10-08' })).toEqual([]);
+    expect(await store.listTaskNotes(evo)).toEqual([]);
+    await expect(store.updateTaskNote(evo, created.id, { ...input, customerId: evoCustomer.id, note: 'Changed' })).rejects.toThrow('not found');
+    await expect(store.updateTaskNote(nexio, created.id, { ...input, customerId: evoCustomer.id })).rejects.toThrow('does not belong');
+    expect((await store.updateTaskNote(nexio, created.id, { ...input, note: 'Followed up' })).note).toBe('Followed up');
+    await expect(store.deleteTaskNote(evo, created.id)).rejects.toThrow('not found');
+    await store.deleteTaskNote(nexio, created.id);
+    expect(await store.listTaskNotes(nexio)).toEqual([]);
   });
-  it('previews a period billing run with additional services, explains skips, and issues it only once', () => {
+  it('previews a period billing run with additional services, explains skips, and issues it only once', async () => {
     const store = storeForTest();
-    const nexio = store.authenticate('nexio-admin');
+    const nexio = await store.authenticate('nexio-admin');
     if (!nexio) throw new Error('Expected seeded session');
-    registerSeller(store, nexio);
-    const customer = store.listCustomers(nexio, {}).items[0];
-    const service = store.listServices(nexio)[0];
+    await registerSeller(store, nexio);
+    const customer = (await store.listCustomers(nexio, {})).items[0];
+    const service = (await store.listServices(nexio))[0];
     if (!customer || !service) throw new Error('Expected seeded customer and service');
 
-    const eligible = store.createContract(nexio, {
+    const eligible = await store.createContract(nexio, {
       customerId: customer.id, serviceIds: [service.id], name: 'October managed billing', startDate: '2026-01-01', endDate: '2026-12-31',
       valueMinor: 100000, paymentTermsDays: 14, billingFrequency: 'monthly', invoiceMonths: [], cycleDay: 1,
       escalationPercent: 0, escalationReviewDate: '', renewalNoticeDays: 30, securityDepositMinor: 0,
     });
-    store.createContract(nexio, {
+    await store.createContract(nexio, {
       customerId: customer.id, serviceIds: [service.id], name: 'January-only annual billing', startDate: '2026-01-01', endDate: '2026-12-31',
       valueMinor: 100000, paymentTermsDays: 14, billingFrequency: 'annual', invoiceMonths: [1], cycleDay: 1,
       escalationPercent: 0, escalationReviewDate: '', renewalNoticeDays: 30, securityDepositMinor: 0,
     });
-    store.createAdditionalService(nexio, { customerId: customer.id, contractId: eligible.id, serviceDate: '2026-10-15', description: 'On-site workshop', priceMinor: 25000, notes: '' });
+    await store.createAdditionalService(nexio, { customerId: customer.id, contractId: eligible.id, serviceDate: '2026-10-15', description: 'On-site workshop', priceMinor: 25000, notes: '' });
 
-    const preview = store.previewBulkInvoices(nexio, '2026-10');
+    const preview = await store.previewBulkInvoices(nexio, '2026-10');
     expect(preview.proposed).toEqual(expect.arrayContaining([expect.objectContaining({ contractId: eligible.id, taxableMinor: 125000, additionalLines: [expect.objectContaining({ description: 'On-site workshop', priceMinor: 25000 })] })]));
     expect(preview.skipped).toEqual(expect.arrayContaining([expect.objectContaining({ reason: 'Billing is not scheduled for October.' })]));
 
-    const first = store.generateBulkInvoices(nexio, '2026-10');
+    const first = await store.generateBulkInvoices(nexio, '2026-10');
     expect(first).toMatchObject({ alreadyGenerated: false, generatedCount: 1 });
-    expect(store.listInvoices(nexio, { month: '2026-10' }).items).toEqual(expect.arrayContaining([expect.objectContaining({ contractId: eligible.id, taxableMinor: 125000, gstMinor: 22500 })]));
-    expect(store.listAdditionalServices(nexio, { billingPeriod: '2026-10' }).items).toEqual([expect.objectContaining({ description: 'On-site workshop', billedAt: expect.any(String) })]);
-    expect(store.listBulkInvoiceRuns(nexio)).toEqual(expect.arrayContaining([expect.objectContaining({ billingPeriod: '2026-10', generatedCount: 1 })]));
+    expect((await store.listInvoices(nexio, { month: '2026-10' })).items).toEqual(expect.arrayContaining([expect.objectContaining({ contractId: eligible.id, taxableMinor: 125000, gstMinor: 22500 })]));
+    expect((await store.listAdditionalServices(nexio, { billingPeriod: '2026-10' })).items).toEqual([expect.objectContaining({ description: 'On-site workshop', billedAt: expect.any(String) })]);
+    expect(await store.listBulkInvoiceRuns(nexio)).toEqual(expect.arrayContaining([expect.objectContaining({ billingPeriod: '2026-10', generatedCount: 1 })]));
 
-    expect(store.generateBulkInvoices(nexio, '2026-10')).toMatchObject({ alreadyGenerated: true, generatedCount: 1 });
-    expect(store.listInvoices(nexio, { month: '2026-10' }).items.filter((invoice) => invoice.contractId === eligible.id)).toHaveLength(1);
+    expect(await store.generateBulkInvoices(nexio, '2026-10')).toMatchObject({ alreadyGenerated: true, generatedCount: 1 });
+    expect((await store.listInvoices(nexio, { month: '2026-10' })).items.filter((invoice) => invoice.contractId === eligible.id)).toHaveLength(1);
   });
 
-  it('allocates manual payments with TDS and write-off without exceeding an invoice balance', () => {
-    const store = storeForTest(); const nexio = store.authenticate('nexio-admin'); const evo = store.authenticate('evo-admin');
+  it('allocates manual payments with TDS and write-off without exceeding an invoice balance', async () => {
+    const store = storeForTest(); const nexio = await store.authenticate('nexio-admin'); const evo = await store.authenticate('evo-admin');
     if (!nexio || !evo) throw new Error('Expected seeded sessions');
-    const invoice = store.listInvoices(nexio, {}).items[0];
-    const payment = store.recordPayment(nexio, { invoiceId: invoice.id, paymentDate: '2026-10-07', amountMinor: 100000, tdsMinor: 10000, writeOffMinor: 8000, method: 'bank_transfer', reference: 'UTR-2042', notes: 'Reconciled with customer.' });
+    const invoice = (await store.listInvoices(nexio, {})).items[0];
+    const payment = await store.recordPayment(nexio, { invoiceId: invoice.id, paymentDate: '2026-10-07', amountMinor: 100000, tdsMinor: 10000, writeOffMinor: 8000, method: 'bank_transfer', reference: 'UTR-2042', notes: 'Reconciled with customer.' });
     expect(payment).toMatchObject({ invoiceId: invoice.id, appliedMinor: 118000, reference: 'UTR-2042' });
-    expect(store.getInvoice(nexio, invoice.id)).toMatchObject({ paidMinor: 118000, status: 'paid' });
-    expect(store.listPayments(nexio, { month: '2026-10' }).items).toEqual(expect.arrayContaining([expect.objectContaining({ id: payment.id, customerId: invoice.customerId })]));
-    expect(() => store.recordPayment(nexio, { invoiceId: invoice.id, paymentDate: '2026-10-08', amountMinor: 1, tdsMinor: 0, writeOffMinor: 0, method: 'cash' })).toThrow('outstanding');
-    expect(() => store.recordPayment(evo, { invoiceId: invoice.id, paymentDate: '2026-10-08', amountMinor: 1, tdsMinor: 0, writeOffMinor: 0, method: 'cash' })).toThrow('tenant');
+    expect(await store.getInvoice(nexio, invoice.id)).toMatchObject({ paidMinor: 118000, status: 'paid' });
+    expect((await store.listPayments(nexio, { month: '2026-10' })).items).toEqual(expect.arrayContaining([expect.objectContaining({ id: payment.id, customerId: invoice.customerId })]));
+    await expect(store.recordPayment(nexio, { invoiceId: invoice.id, paymentDate: '2026-10-08', amountMinor: 1, tdsMinor: 0, writeOffMinor: 0, method: 'cash' })).rejects.toThrow('outstanding');
+    await expect(store.recordPayment(evo, { invoiceId: invoice.id, paymentDate: '2026-10-08', amountMinor: 1, tdsMinor: 0, writeOffMinor: 0, method: 'cash' })).rejects.toThrow('tenant');
   });
 
-  it('lists aging pending invoices and records demo-only reminder history', () => {
-    const store = storeForTest(); const nexio = store.authenticate('nexio-admin');
+  it('lists aging pending invoices and records demo-only reminder history', async () => {
+    const store = storeForTest(); const nexio = await store.authenticate('nexio-admin');
     if (!nexio) throw new Error('Expected seeded session');
-    const invoice = store.listInvoices(nexio, {}).items[0];
-    const pending = store.listPendingPayments(nexio);
+    const invoice = (await store.listInvoices(nexio, {})).items[0];
+    const pending = await store.listPendingPayments(nexio);
     expect(pending).toEqual(expect.arrayContaining([expect.objectContaining({ id: invoice.id, outstandingMinor: invoice.totalMinor, agingBucket: expect.any(String) })]));
-    const reminder = store.recordPaymentReminder(nexio, invoice.id, { channel: 'whatsapp', note: 'Please confirm payment date.' });
+    const reminder = await store.recordPaymentReminder(nexio, invoice.id, { channel: 'whatsapp', note: 'Please confirm payment date.' });
     expect(reminder).toMatchObject({ invoiceId: invoice.id, channel: 'whatsapp' });
-    expect(store.listPendingPayments(nexio).find((item) => item.id === invoice.id)?.reminders).toEqual(expect.arrayContaining([expect.objectContaining({ id: reminder.id, channel: 'whatsapp' })]));
+    expect((await store.listPendingPayments(nexio)).find((item) => item.id === invoice.id)?.reminders).toEqual(expect.arrayContaining([expect.objectContaining({ id: reminder.id, channel: 'whatsapp' })]));
   });
-  it('returns a tenant-scoped GST sales report with interstate and intrastate tax splits', () => {
+  it('returns a tenant-scoped GST sales report with interstate and intrastate tax splits', async () => {
     const store = storeForTest();
-    const nexio = store.authenticate('nexio-admin');
-    const evo = store.authenticate('evo-admin');
+    const nexio = await store.authenticate('nexio-admin');
+    const evo = await store.authenticate('evo-admin');
     if (!nexio || !evo) throw new Error('Expected seeded sessions');
 
-    store.updateTenantSettings(nexio, { ...store.getTenantSettings(nexio), gstin: '29AAGCB7383J1Z4' });
-    const customer = store.listCustomers(nexio, {}).items[0];
-    const interstate = store.createCustomer(nexio, { companyName: 'Interstate Buyer', contactName: 'Ravi', email: 'ravi@example.com', phone: '9000000000', gstin: '27AAPFU0939F1ZV', billingAddress: 'Mumbai', invoiceDelivery: 'email' });
-    store.createIssuedInvoice(nexio, { customerId: customer.id, invoiceDate: '2026-11-02', dueDate: '2026-11-16', taxableMinor: 10_000, gstRate: 18 });
-    store.createIssuedInvoice(nexio, { customerId: interstate.id, invoiceDate: '2026-11-03', dueDate: '2026-11-17', taxableMinor: 20_000, gstRate: 18 });
+    await store.updateTenantSettings(nexio, { ...await store.getTenantSettings(nexio), gstin: '29AAGCB7383J1Z4' });
+    const customer = (await store.listCustomers(nexio, {})).items[0];
+    const interstate = await store.createCustomer(nexio, { companyName: 'Interstate Buyer', contactName: 'Ravi', email: 'ravi@example.com', phone: '9000000000', gstin: '27AAPFU0939F1ZV', billingAddress: 'Mumbai', invoiceDelivery: 'email' });
+    await store.createIssuedInvoice(nexio, { customerId: customer.id, invoiceDate: '2026-11-02', dueDate: '2026-11-16', taxableMinor: 10_000, gstRate: 18 });
+    await store.createIssuedInvoice(nexio, { customerId: interstate.id, invoiceDate: '2026-11-03', dueDate: '2026-11-17', taxableMinor: 20_000, gstRate: 18 });
 
-    const report = store.getGstSalesReport(nexio, '2026-11');
+    const report = await store.getGstSalesReport(nexio, '2026-11');
 
     expect(report).toMatchObject({ month: '2026-11', companyName: 'Nexio Hyper', gstin: '29AAGCB7383J1Z4', totals: { taxableMinor: 30_000, gstMinor: 5_400, totalMinor: 35_400, igstMinor: 3_600, cgstMinor: 900, sgstMinor: 900, netGstMinor: 5_400 } });
     expect(report.items).toEqual(expect.arrayContaining([
       expect.objectContaining({ customerName: customer.companyName, cgstMinor: 900, sgstMinor: 900, igstMinor: 0 }),
       expect.objectContaining({ customerName: 'Interstate Buyer', igstMinor: 3_600, cgstMinor: 0, sgstMinor: 0 }),
     ]));
-    expect(store.getGstSalesReport(evo, '2026-11').items).toEqual([]);
+    expect((await store.getGstSalesReport(evo, '2026-11')).items).toEqual([]);
   });
-  it('keeps issued invoice snapshots stable, supports filters, and isolates invoices by tenant', () => {
+  it('keeps issued invoice snapshots stable, supports filters, and isolates invoices by tenant', async () => {
     const store = storeForTest();
-    const nexio = store.authenticate('nexio-admin');
-    const evo = store.authenticate('evo-admin');
+    const nexio = await store.authenticate('nexio-admin');
+    const evo = await store.authenticate('evo-admin');
     if (!nexio || !evo) throw new Error('Expected seeded sessions');
-    registerSeller(store, nexio);
-    const customer = store.listCustomers(nexio, {}).items[0];
-    const contract = store.createContract(nexio, {
-      customerId: customer.id, serviceIds: [store.listServices(nexio)[0].id], name: 'Snapshot contract', startDate: '2026-01-01', endDate: '2026-12-31',
+    await registerSeller(store, nexio);
+    const customer = (await store.listCustomers(nexio, {})).items[0];
+    const contract = await store.createContract(nexio, {
+      customerId: customer.id, serviceIds: [(await store.listServices(nexio))[0].id], name: 'Snapshot contract', startDate: '2026-01-01', endDate: '2026-12-31',
       valueMinor: 250000, paymentTermsDays: 14, billingFrequency: 'monthly', invoiceMonths: [], cycleDay: 1,
       escalationPercent: 0, escalationReviewDate: '', renewalNoticeDays: 30, securityDepositMinor: 0,
     });
-    const issued = store.createIssuedInvoice(nexio, { contractId: contract.id, invoiceDate: '2026-10-01', dueDate: '2026-10-15', taxableMinor: 250000, gstRate: 18 });
-    expect(store.listInvoices(nexio, { month: '2026-10', search: customer.companyName }).items).toEqual(expect.arrayContaining([expect.objectContaining({ id: issued.id, customerName: customer.companyName, status: 'issued' })]));
-    expect(store.listInvoices(evo, {}).items).not.toEqual(expect.arrayContaining([expect.objectContaining({ id: issued.id })]));
-    store.updateTenantSettings(nexio, { ...store.getTenantSettings(nexio), companyName: 'Changed company', invoicePrefix: 'NEW' });
-    expect(store.getInvoice(nexio, issued.id)).toMatchObject({ invoiceNumber: expect.stringContaining('NEX'), snapshot: expect.objectContaining({ companyName: 'Nexio Hyper', customerName: customer.companyName, gstRate: 18 }) });
-    expect(() => store.getInvoice(evo, issued.id)).toThrow('tenant');
+    const issued = await store.createIssuedInvoice(nexio, { contractId: contract.id, invoiceDate: '2026-10-01', dueDate: '2026-10-15', taxableMinor: 250000, gstRate: 18 });
+    expect((await store.listInvoices(nexio, { month: '2026-10', search: customer.companyName })).items).toEqual(expect.arrayContaining([expect.objectContaining({ id: issued.id, customerName: customer.companyName, status: 'issued' })]));
+    expect((await store.listInvoices(evo, {})).items).not.toEqual(expect.arrayContaining([expect.objectContaining({ id: issued.id })]));
+    await store.updateTenantSettings(nexio, { ...await store.getTenantSettings(nexio), companyName: 'Changed company', invoicePrefix: 'NEW' });
+    expect(await store.getInvoice(nexio, issued.id)).toMatchObject({ invoiceNumber: expect.stringContaining('NEX'), snapshot: expect.objectContaining({ companyName: 'Nexio Hyper', customerName: customer.companyName, gstRate: 18 }) });
+    await expect(store.getInvoice(evo, issued.id)).rejects.toThrow('tenant');
   });
 
-  it('records a dated additional service only against its customer contract and exposes it for that billing period', () => {
+  it('records a dated additional service only against its customer contract and exposes it for that billing period', async () => {
     const store = storeForTest();
-    const nexio = store.authenticate('nexio-admin');
-    const evo = store.authenticate('evo-admin');
+    const nexio = await store.authenticate('nexio-admin');
+    const evo = await store.authenticate('evo-admin');
     if (!nexio || !evo) throw new Error('Expected seeded sessions');
-    const customer = store.listCustomers(nexio, {}).items[0];
-    const service = store.listServices(nexio)[0];
+    const customer = (await store.listCustomers(nexio, {})).items[0];
+    const service = (await store.listServices(nexio))[0];
     if (!customer || !service) throw new Error('Expected seeded billing data');
-    const contract = store.createContract(nexio, {
+    const contract = await store.createContract(nexio, {
       customerId: customer.id, serviceIds: [service.id], name: 'Managed reporting', startDate: '2026-01-01', endDate: '2026-12-31',
       valueMinor: 120000, paymentTermsDays: 14, billingFrequency: 'monthly', invoiceMonths: [], cycleDay: 1,
       escalationPercent: 0, escalationReviewDate: '', renewalNoticeDays: 30, securityDepositMinor: 0,
     });
 
-    const additional = store.createAdditionalService(nexio, { customerId: customer.id, contractId: contract.id, serviceDate: '2026-10-15', description: 'On-site reporting workshop', priceMinor: 250000, notes: 'Approved by finance.' });
+    const additional = await store.createAdditionalService(nexio, { customerId: customer.id, contractId: contract.id, serviceDate: '2026-10-15', description: 'On-site reporting workshop', priceMinor: 250000, notes: 'Approved by finance.' });
 
-    expect(store.listAdditionalServices(nexio, { billingPeriod: '2026-10' }).items).toEqual(expect.arrayContaining([expect.objectContaining({ id: additional.id, contractId: contract.id, priceMinor: 250000 })]));
-    expect(store.listAdditionalServices(nexio, { billingPeriod: '2026-11' }).items).not.toEqual(expect.arrayContaining([expect.objectContaining({ id: additional.id })]));
-    expect(store.listAdditionalServices(evo, {}).items).toEqual([]);
-    expect(() => store.createAdditionalService(evo, { customerId: customer.id, contractId: contract.id, serviceDate: '2026-10-15', description: 'Cross tenant', priceMinor: 100, notes: '' })).toThrow('tenant');
+    expect((await store.listAdditionalServices(nexio, { billingPeriod: '2026-10' })).items).toEqual(expect.arrayContaining([expect.objectContaining({ id: additional.id, contractId: contract.id, priceMinor: 250000 })]));
+    expect((await store.listAdditionalServices(nexio, { billingPeriod: '2026-11' })).items).not.toEqual(expect.arrayContaining([expect.objectContaining({ id: additional.id })]));
+    expect((await store.listAdditionalServices(evo, {})).items).toEqual([]);
+    await expect(store.createAdditionalService(evo, { customerId: customer.id, contractId: contract.id, serviceDate: '2026-10-15', description: 'Cross tenant', priceMinor: 100, notes: '' })).rejects.toThrow('tenant');
   });
-  it('creates a tenant-scoped quarterly contract with its opening security deposit', () => {
+  it('creates a tenant-scoped quarterly contract with its opening security deposit', async () => {
     const store = storeForTest();
-    const nexio = store.authenticate('nexio-admin');
-    const evo = store.authenticate('evo-admin');
+    const nexio = await store.authenticate('nexio-admin');
+    const evo = await store.authenticate('evo-admin');
     if (!nexio || !evo) throw new Error('Expected seeded sessions');
-    const customer = store.listCustomers(nexio, {}).items[0];
-    const service = store.createService(nexio, { name: 'Analytics support', prices: { monthly: 100000, quarterly: 280000, halfYearly: 540000, annual: 1000000 } });
+    const customer = (await store.listCustomers(nexio, {})).items[0];
+    const service = await store.createService(nexio, { name: 'Analytics support', prices: { monthly: 100000, quarterly: 280000, halfYearly: 540000, annual: 1000000 } });
     if (!customer) throw new Error('Expected seeded customer');
 
-    const contract = store.createContract(nexio, {
+    const contract = await store.createContract(nexio, {
       customerId: customer.id, serviceIds: [service.id], name: 'FY26 analytics support', startDate: '2026-04-01', endDate: '2027-03-31',
       valueMinor: 1200000, paymentTermsDays: 14, billingFrequency: 'quarterly', invoiceMonths: [4, 7, 10], cycleDay: 5,
       escalationPercent: 8, escalationReviewDate: '2027-04-01', renewalNoticeDays: 45, securityDepositMinor: 250000,
     });
 
     expect(contract).toMatchObject({ customerId: customer.id, billingFrequency: 'quarterly', invoiceMonths: [4, 7, 10], status: 'active' });
-    expect(store.listSecurityDeposits(nexio)).toEqual(expect.arrayContaining([expect.objectContaining({ contractId: contract.id, amountMinor: 250000, status: 'held' })]));
-    expect(store.listContracts(evo, {}).items).not.toEqual(expect.arrayContaining([expect.objectContaining({ id: contract.id })]));
+    expect(await store.listSecurityDeposits(nexio)).toEqual(expect.arrayContaining([expect.objectContaining({ contractId: contract.id, amountMinor: 250000, status: 'held' })]));
+    expect((await store.listContracts(evo, {})).items).not.toEqual(expect.arrayContaining([expect.objectContaining({ id: contract.id })]));
   });
 
-  it('tracks renewals and settles a held deposit once without crossing tenant boundaries', () => {
+  it('tracks renewals and settles a held deposit once without crossing tenant boundaries', async () => {
     const store = storeForTest();
-    const nexio = store.authenticate('nexio-admin');
-    const evo = store.authenticate('evo-admin');
+    const nexio = await store.authenticate('nexio-admin');
+    const evo = await store.authenticate('evo-admin');
     if (!nexio || !evo) throw new Error('Expected seeded sessions');
-    const customer = store.listCustomers(nexio, {}).items[0];
-    const service = store.listServices(nexio)[0];
+    const customer = (await store.listCustomers(nexio, {})).items[0];
+    const service = (await store.listServices(nexio))[0];
     if (!customer || !service) throw new Error('Expected seeded customer and service');
-    const contract = store.createContract(nexio, {
+    const contract = await store.createContract(nexio, {
       customerId: customer.id, serviceIds: [service.id], name: 'Renewal and deposit contract', startDate: '2025-01-01', endDate: '2026-10-01',
       valueMinor: 1200000, paymentTermsDays: 14, billingFrequency: 'monthly', invoiceMonths: [], cycleDay: 5,
       escalationPercent: 0, escalationReviewDate: '', renewalNoticeDays: 45, securityDepositMinor: 250000,
     });
 
-    expect(store.listRenewals(nexio, { status: 'expired' }).items).toEqual(expect.arrayContaining([
+    expect((await store.listRenewals(nexio, { status: 'expired' })).items).toEqual(expect.arrayContaining([
       expect.objectContaining({ contractId: contract.id, renewalStatus: 'expired' }),
     ]));
-    const renewed = store.renewContract(nexio, contract.id, { endDate: '2027-10-01', note: 'Customer confirmed another year.' });
+    const renewed = await store.renewContract(nexio, contract.id, { endDate: '2027-10-01', note: 'Customer confirmed another year.' });
     expect(renewed.endDate).toBe('2027-10-01');
-    expect(store.listContractAudit(nexio, contract.id).map((event) => event.action)).toContain('renewed');
+    expect((await store.listContractAudit(nexio, contract.id)).map((event) => event.action)).toContain('renewed');
 
-    const deposit = store.listSecurityDeposits(nexio).find((item) => item.contractId === contract.id);
+    const deposit = (await store.listSecurityDeposits(nexio)).find((item) => item.contractId === contract.id);
     if (!deposit) throw new Error('Expected opening deposit');
-    expect(store.settleSecurityDeposit(nexio, deposit.id, { amountMinor: 250000, note: 'Customer closeout refund.' })).toMatchObject({ status: 'settled', settledMinor: 250000 });
-    expect(() => store.settleSecurityDeposit(nexio, deposit.id, { amountMinor: 1, note: 'Duplicate' })).toThrow('already been settled');
-    expect(() => store.settleSecurityDeposit(evo, deposit.id, { amountMinor: 250000, note: 'Cross-tenant' })).toThrow('tenant');
+    expect(await store.settleSecurityDeposit(nexio, deposit.id, { amountMinor: 250000, note: 'Customer closeout refund.' })).toMatchObject({ status: 'settled', settledMinor: 250000 });
+    await expect(store.settleSecurityDeposit(nexio, deposit.id, { amountMinor: 1, note: 'Duplicate' })).rejects.toThrow('already been settled');
+    await expect(store.settleSecurityDeposit(evo, deposit.id, { amountMinor: 250000, note: 'Cross-tenant' })).rejects.toThrow('tenant');
   });
 
-  it('rejects an invalid invoice-month schedule and cross-tenant contract references', () => {
+  it('rejects an invalid invoice-month schedule and cross-tenant contract references', async () => {
     const store = storeForTest();
-    const nexio = store.authenticate('nexio-admin');
-    const evo = store.authenticate('evo-admin');
+    const nexio = await store.authenticate('nexio-admin');
+    const evo = await store.authenticate('evo-admin');
     if (!nexio || !evo) throw new Error('Expected seeded sessions');
-    const customer = store.listCustomers(nexio, {}).items[0];
-    const service = store.createService(nexio, { name: 'Analytics support', prices: { monthly: 100000, quarterly: 280000, halfYearly: 540000, annual: 1000000 } });
+    const customer = (await store.listCustomers(nexio, {})).items[0];
+    const service = await store.createService(nexio, { name: 'Analytics support', prices: { monthly: 100000, quarterly: 280000, halfYearly: 540000, annual: 1000000 } });
     if (!customer) throw new Error('Expected seeded customer');
     const input = { customerId: customer.id, serviceIds: [service.id], name: 'Invalid schedule', startDate: '2026-04-01', endDate: '2027-03-31', valueMinor: 100000, paymentTermsDays: 14, billingFrequency: 'quarterly' as const, invoiceMonths: [4, 7], cycleDay: 1, escalationPercent: 0, escalationReviewDate: '', renewalNoticeDays: 30, securityDepositMinor: 0 };
-    expect(() => store.createContract(nexio, input)).toThrow('3 invoice months');
-    expect(() => store.createContract(evo, { ...input, invoiceMonths: [4, 7, 10] })).toThrow('customer');
+    await expect(store.createContract(nexio, input)).rejects.toThrow('3 invoice months');
+    await expect(store.createContract(evo, { ...input, invoiceMonths: [4, 7, 10] })).rejects.toThrow('customer');
   });
-  it('closes an outstanding tenant invoice with an auditable write-off allocation', () => {
+  it('closes an outstanding tenant invoice with an auditable write-off allocation', async () => {
     const store = storeForTest();
-    const nexio = store.authenticate('nexio-admin'); const evo = store.authenticate('evo-admin');
+    const nexio = await store.authenticate('nexio-admin'); const evo = await store.authenticate('evo-admin');
     if (!nexio || !evo) throw new Error('Expected seeded sessions');
-    const invoice = store.listPendingPayments(nexio)[0];
+    const invoice = (await store.listPendingPayments(nexio))[0];
     if (!invoice) throw new Error('Expected an outstanding invoice');
-    const payment = store.closeInvoice(nexio, invoice.id, 'Approved closeout');
+    const payment = await store.closeInvoice(nexio, invoice.id, 'Approved closeout');
     expect(payment).toMatchObject({ invoiceId: invoice.id, amountMinor: 0, writeOffMinor: invoice.outstandingMinor, reference: 'CLOSEOUT' });
-    expect(store.listPendingPayments(nexio).map((item) => item.id)).not.toContain(invoice.id);
-    expect(store.listOperationalLogs(nexio).some((log) => log.message.includes(`Invoice ${invoice.invoiceNumber} was closed`))).toBe(true);
-    expect(() => store.closeInvoice(evo, invoice.id)).toThrow('tenant');
+    expect((await store.listPendingPayments(nexio)).map((item) => item.id)).not.toContain(invoice.id);
+    expect((await store.listOperationalLogs(nexio)).some((log) => log.message.includes(`Invoice ${invoice.invoiceNumber} was closed`))).toBe(true);
+    await expect(store.closeInvoice(evo, invoice.id)).rejects.toThrow('tenant');
   });
 
-  it('seeds five tenants and two tenant-local users for each tenant', () => {
+  it('seeds five tenants and two tenant-local users for each tenant', async () => {
     const store = storeForTest();
 
-    const identities = store.listIdentities();
+    const identities = await store.listIdentities();
 
     expect(identities.filter((identity) => identity.role !== 'superadmin')).toHaveLength(10);
     expect(new Set(identities.filter((identity) => identity.tenantId).map((identity) => identity.tenantId))).toHaveLength(5);
@@ -392,18 +392,18 @@ describe('tenant store', () => {
     ]));
   });
 
-  it('seeds a complete billing scenario for every tenant', () => {
+  it('seeds a complete billing scenario for every tenant', async () => {
     const store = storeForTest();
 
     for (const tenantId of ['nexio', 'maasp', 'evo', 'gripdata', 'od']) {
-      const session = store.authenticate(`${tenantId}-admin`);
+      const session = await store.authenticate(`${tenantId}-admin`);
       if (!session) throw new Error(`Expected ${tenantId} admin session`);
 
-      const customer = store.listCustomers(session, {}).items[0];
-      const contract = store.listContracts(session, {}).items[0];
-      const invoices = store.listInvoices(session, {}).items;
-      const payments = store.listPayments(session, {}).items;
-      const deposits = store.listSecurityDeposits(session);
+      const customer = (await store.listCustomers(session, {})).items[0];
+      const contract = (await store.listContracts(session, {})).items[0];
+      const invoices = (await store.listInvoices(session, {})).items;
+      const payments = (await store.listPayments(session, {})).items;
+      const deposits = await store.listSecurityDeposits(session);
 
       expect(customer).toBeDefined();
       expect(contract).toMatchObject({ customerId: customer?.id, status: 'active' });
@@ -419,104 +419,104 @@ describe('tenant store', () => {
     }
   });
 
-  it('does not permit a tenant session to read or write another tenant’s records', () => {
+  it('does not permit a tenant session to read or write another tenant’s records', async () => {
     const store = storeForTest();
-    const nexio = store.authenticate('nexio-admin');
-    const evo = store.authenticate('evo-admin');
+    const nexio = await store.authenticate('nexio-admin');
+    const evo = await store.authenticate('evo-admin');
     if (!nexio || !evo) throw new Error('Expected seeded sessions');
 
-    expect(store.listTenantRecords(nexio).map((record) => record.tenantId)).toEqual([nexio.tenantId]);
-    expect(() => store.createTenantRecord(nexio, evo.tenantId!, 'Not allowed')).toThrow('tenant');
+    expect((await store.listTenantRecords(nexio)).map((record) => record.tenantId)).toEqual([nexio.tenantId]);
+    await expect(store.createTenantRecord(nexio, evo.tenantId!, 'Not allowed')).rejects.toThrow('tenant');
   });
 
-  it('lets a tenant admin manage only its own users', () => {
+  it('lets a tenant admin manage only its own users', async () => {
     const store = storeForTest();
-    const nexio = store.authenticate('nexio-admin');
-    const evo = store.authenticate('evo-admin');
+    const nexio = await store.authenticate('nexio-admin');
+    const evo = await store.authenticate('evo-admin');
     if (!nexio || !evo) throw new Error('Expected seeded sessions');
 
-    const created = store.createTenantUser(nexio, { name: 'Nexio Accounts', email: 'accounts@nexio.com', role: 'user' });
+    const created = await store.createTenantUser(nexio, { name: 'Nexio Accounts', email: 'accounts@nexio.com', role: 'user' });
 
-    expect(store.listTenantUsers(nexio)).toEqual(expect.arrayContaining([expect.objectContaining({ id: created.id, role: 'user', status: 'active' })]));
-    expect(store.listTenantUsers(evo).map((user) => user.email)).not.toContain('accounts@nexio.com');
-    expect(store.authenticate(created.id)).toEqual(expect.objectContaining({ role: 'user', tenantId: 'nexio' }));
+    expect(await store.listTenantUsers(nexio)).toEqual(expect.arrayContaining([expect.objectContaining({ id: created.id, role: 'user', status: 'active' })]));
+    expect((await store.listTenantUsers(evo)).map((user) => user.email)).not.toContain('accounts@nexio.com');
+    expect(await store.authenticate(created.id)).toEqual(expect.objectContaining({ role: 'user', tenantId: 'nexio' }));
   });
 
-  it('persists an admin role and disabled status for the next soft-login session', () => {
+  it('persists an admin role and disabled status for the next soft-login session', async () => {
     const store = storeForTest();
-    const nexio = store.authenticate('nexio-admin');
+    const nexio = await store.authenticate('nexio-admin');
     if (!nexio) throw new Error('Expected seeded session');
 
-    store.updateTenantUser(nexio, 'nexio-user', { role: 'admin', status: 'disabled' });
+    await store.updateTenantUser(nexio, 'nexio-user', { role: 'admin', status: 'disabled' });
 
-    expect(store.listTenantUsers(nexio)).toEqual(expect.arrayContaining([expect.objectContaining({ id: 'nexio-user', role: 'admin', status: 'disabled' })]));
-    expect(store.authenticate('nexio-user')).toBeNull();
+    expect(await store.listTenantUsers(nexio)).toEqual(expect.arrayContaining([expect.objectContaining({ id: 'nexio-user', role: 'admin', status: 'disabled' })]));
+    expect(await store.authenticate('nexio-user')).toBeNull();
   });
 
-  it('rejects user-manager actions from tenant users and cross-tenant targets', () => {
+  it('rejects user-manager actions from tenant users and cross-tenant targets', async () => {
     const store = storeForTest();
-    const nexioAdmin = store.authenticate('nexio-admin');
-    const nexioUser = store.authenticate('nexio-user');
+    const nexioAdmin = await store.authenticate('nexio-admin');
+    const nexioUser = await store.authenticate('nexio-user');
     if (!nexioAdmin || !nexioUser) throw new Error('Expected seeded sessions');
 
-    expect(() => store.listTenantUsers(nexioUser)).toThrow('admin');
-    expect(() => store.updateTenantUser(nexioAdmin, 'evo-user', { status: 'disabled' })).toThrow('tenant');
+    await expect(store.listTenantUsers(nexioUser)).rejects.toThrow('admin');
+    await expect(store.updateTenantUser(nexioAdmin, 'evo-user', { status: 'disabled' })).rejects.toThrow('tenant');
   });
 
-  it('persists frequency-aware services and tenant-scoped quotations', () => {
+  it('persists frequency-aware services and tenant-scoped quotations', async () => {
     const store = storeForTest();
-    const nexio = store.authenticate('nexio-admin');
-    const evo = store.authenticate('evo-admin');
+    const nexio = await store.authenticate('nexio-admin');
+    const evo = await store.authenticate('evo-admin');
     if (!nexio || !evo) throw new Error('Expected seeded sessions');
 
-    const service = store.createService(nexio, {
+    const service = await store.createService(nexio, {
       name: 'Managed analytics',
       description: 'Monthly reporting and advisory',
       prices: { monthly: 150000, quarterly: 420000, halfYearly: 780000, annual: 1440000 },
     });
-    const quotation = store.createQuotation(nexio, {
+    const quotation = await store.createQuotation(nexio, {
       customerName: 'Acme Trading',
       customerEmail: 'accounts@acme.example',
       lines: [{ serviceId: service.id, frequency: 'monthly', quantity: 2 }],
     });
 
-    expect(store.listServices(nexio)).toEqual(expect.arrayContaining([expect.objectContaining({ id: service.id, prices: { monthly: 150000, quarterly: 420000, halfYearly: 780000, annual: 1440000 } })]));
+    expect(await store.listServices(nexio)).toEqual(expect.arrayContaining([expect.objectContaining({ id: service.id, prices: { monthly: 150000, quarterly: 420000, halfYearly: 780000, annual: 1440000 } })]));
     expect(quotation).toMatchObject({ customerName: 'Acme Trading', totalMinor: 300000, lines: [expect.objectContaining({ serviceName: 'Managed analytics', unitPriceMinor: 150000 })] });
-    expect(store.listQuotations(evo)).toEqual([]);
-    expect(() => store.getQuotation(evo, quotation.id)).toThrow('tenant');
+    expect(await store.listQuotations(evo)).toEqual([]);
+    await expect(store.getQuotation(evo, quotation.id)).rejects.toThrow('tenant');
   });
 
-  it('rejects invalid service prices and quotation lines from another tenant', () => {
+  it('rejects invalid service prices and quotation lines from another tenant', async () => {
     const store = storeForTest();
-    const nexio = store.authenticate('nexio-admin');
-    const evo = store.authenticate('evo-admin');
+    const nexio = await store.authenticate('nexio-admin');
+    const evo = await store.authenticate('evo-admin');
     if (!nexio || !evo) throw new Error('Expected seeded sessions');
-    const service = store.createService(nexio, { name: 'Reporting', prices: { monthly: 1000, quarterly: 0, halfYearly: 0, annual: 0 } });
+    const service = await store.createService(nexio, { name: 'Reporting', prices: { monthly: 1000, quarterly: 0, halfYearly: 0, annual: 0 } });
 
-    expect(() => store.createService(nexio, { name: 'Broken', prices: { monthly: -1, quarterly: 0, halfYearly: 0, annual: 0 } })).toThrow('non-negative');
-    expect(() => store.createQuotation(evo, { customerName: 'Other customer', lines: [{ serviceId: service.id, frequency: 'monthly', quantity: 1 }] })).toThrow('tenant');
+    await expect(store.createService(nexio, { name: 'Broken', prices: { monthly: -1, quarterly: 0, halfYearly: 0, annual: 0 } })).rejects.toThrow('non-negative');
+    await expect(store.createQuotation(evo, { customerName: 'Other customer', lines: [{ serviceId: service.id, frequency: 'monthly', quantity: 1 }] })).rejects.toThrow('tenant');
   });
 
-  it('creates, filters, changes status, and scopes customers to the active tenant', () => {
-    const store = storeForTest(); const nexio = store.authenticate('nexio-admin'); const evo = store.authenticate('evo-admin');
+  it('creates, filters, changes status, and scopes customers to the active tenant', async () => {
+    const store = storeForTest(); const nexio = await store.authenticate('nexio-admin'); const evo = await store.authenticate('evo-admin');
     if (!nexio || !evo) throw new Error('Expected seeded sessions');
-    const created = store.createCustomer(nexio, { companyName: 'Meridian Labs', contactName: 'Aarav Mehta', email: 'aarav@meridian.example', phone: '+91 98765 43210', gstin: '29AAGCB7383J1Z4', billingAddress: '18 Meridian Road', invoiceDelivery: 'monthly' });
-    expect(store.listCustomers(nexio, { search: 'meridian' }).items).toEqual([expect.objectContaining({ id: created.id })]);
-    expect(store.listCustomers(evo, { search: 'meridian' }).total).toBe(0);
-    store.setCustomerStatus(nexio, created.id, 'inactive');
-    expect(store.listCustomers(nexio, { status: 'active' }).items).not.toEqual(expect.arrayContaining([expect.objectContaining({ id: created.id })]));
-    expect(store.listCustomers(nexio, { status: 'inactive' }).items).toEqual(expect.arrayContaining([expect.objectContaining({ id: created.id })]));
+    const created = await store.createCustomer(nexio, { companyName: 'Meridian Labs', contactName: 'Aarav Mehta', email: 'aarav@meridian.example', phone: '+91 98765 43210', gstin: '29AAGCB7383J1Z4', billingAddress: '18 Meridian Road', invoiceDelivery: 'monthly' });
+    expect((await store.listCustomers(nexio, { search: 'meridian' })).items).toEqual([expect.objectContaining({ id: created.id })]);
+    expect((await store.listCustomers(evo, { search: 'meridian' })).total).toBe(0);
+    await store.setCustomerStatus(nexio, created.id, 'inactive');
+    expect((await store.listCustomers(nexio, { status: 'active' })).items).not.toEqual(expect.arrayContaining([expect.objectContaining({ id: created.id })]));
+    expect((await store.listCustomers(nexio, { status: 'inactive' })).items).toEqual(expect.arrayContaining([expect.objectContaining({ id: created.id })]));
   });
 
-  it('rejects incomplete or invalid customer profiles', () => {
-    const store = storeForTest(); const nexio = store.authenticate('nexio-admin'); if (!nexio) throw new Error('Expected seeded session');
-    expect(() => store.createCustomer(nexio, { companyName: '', contactName: '', email: 'not-email', phone: '', gstin: '', billingAddress: '', invoiceDelivery: 'monthly' })).toThrow('Company name');
+  it('rejects incomplete or invalid customer profiles', async () => {
+    const store = storeForTest(); const nexio = await store.authenticate('nexio-admin'); if (!nexio) throw new Error('Expected seeded session');
+    await expect(store.createCustomer(nexio, { companyName: '', contactName: '', email: 'not-email', phone: '', gstin: '', billingAddress: '', invoiceDelivery: 'monthly' })).rejects.toThrow('Company name');
   });
 
-  it('persists complete tenant settings, template previews, and isolated operational logs', () => {
-    const store = storeForTest(); const nexio = store.authenticate('nexio-admin'); const evo = store.authenticate('evo-admin');
+  it('persists complete tenant settings, template previews, and isolated operational logs', async () => {
+    const store = storeForTest(); const nexio = await store.authenticate('nexio-admin'); const evo = await store.authenticate('evo-admin');
     if (!nexio || !evo) throw new Error('Expected seeded sessions');
-    const saved = store.updateTenantSettings(nexio, {
+    const saved = await store.updateTenantSettings(nexio, {
       companyName: 'Nexio Billing Services', gstin: '29AAGCB7383J1Z4', address: '42 Ledger Lane, Bengaluru',
       invoicePrefix: 'NX', paymentTermsDays: 21, footer: 'Thank you for your business.',
       invoiceTemplate: 'Invoice {{invoiceNumber}} for {{customerName}}', emailSubject: 'Your invoice {{invoiceNumber}}',
@@ -525,18 +525,18 @@ describe('tenant store', () => {
     });
 
     expect(saved.companyName).toBe('Nexio Billing Services');
-    expect(store.getTenantSettings(nexio)).toMatchObject({ invoicePrefix: 'NX', logoDataUrl: 'data:image/png;base64,logo' });
-    expect(store.previewTenantTemplate(nexio)).toContain('Invoice NX-2026-001 for Acme Industries');
-    expect(store.listOperationalLogs(nexio).some((log) => log.kind === 'feature-flow')).toBe(true);
-    expect(store.listOperationalLogs(evo)).toEqual([]);
+    expect(await store.getTenantSettings(nexio)).toMatchObject({ invoicePrefix: 'NX', logoDataUrl: 'data:image/png;base64,logo' });
+    expect(await store.previewTenantTemplate(nexio)).toContain('Invoice NX-2026-001 for Acme Industries');
+    expect((await store.listOperationalLogs(nexio)).some((log) => log.kind === 'feature-flow')).toBe(true);
+    expect(await store.listOperationalLogs(evo)).toEqual([]);
   });
 
-  it('keeps settings and operational logs restricted to tenant admins', () => {
+  it('keeps settings and operational logs restricted to tenant admins', async () => {
     const store = storeForTest();
-    const tenantUser = store.authenticate('nexio-user');
+    const tenantUser = await store.authenticate('nexio-user');
     if (!tenantUser) throw new Error('Expected seeded session');
 
-    expect(() => store.getTenantSettings(tenantUser)).toThrow('admin');
-    expect(() => store.listOperationalLogs(tenantUser)).toThrow('admin');
+    await expect(store.getTenantSettings(tenantUser)).rejects.toThrow('admin');
+    await expect(store.listOperationalLogs(tenantUser)).rejects.toThrow('admin');
   });
 });
