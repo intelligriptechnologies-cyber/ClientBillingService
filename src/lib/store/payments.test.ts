@@ -1,5 +1,6 @@
 import { expect, it } from 'vitest';
 import { describeStore, storeForTest, registerSeller } from './test-store';
+import { tenantContextOf } from '../auth/session-context';
 
 describeStore(['settings', 'customers', 'invoices', 'payments'], 'payments', () => {
   it('corrects an unpaid invoice by replacing it and edits payment details without changing allocations', async () => {
@@ -40,7 +41,7 @@ describeStore(['settings', 'customers', 'invoices', 'payments'], 'payments', () 
     const payment = await store.closeInvoice(nexio, invoice.id, 'Approved closeout');
     expect(payment).toMatchObject({ invoiceId: invoice.id, amountMinor: 0, writeOffMinor: invoice.outstandingMinor, reference: 'CLOSEOUT' });
     expect((await store.listPendingPayments(nexio)).map((item) => item.id)).not.toContain(invoice.id);
-    expect((await store.listOperationalLogs(nexio)).some((log) => log.message.includes(`Invoice ${invoice.invoiceNumber} was closed`))).toBe(true);
+    expect((await store.listOperationalLogs(tenantContextOf(nexio))).some((log) => log.message.includes(`Invoice ${invoice.invoiceNumber} was closed`))).toBe(true);
     await expect(store.closeInvoice(evo, invoice.id)).rejects.toThrow('tenant');
   });
 });

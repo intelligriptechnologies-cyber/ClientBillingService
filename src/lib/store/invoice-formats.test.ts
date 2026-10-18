@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { BUILTIN_DEFINITION } from '../invoice-format';
 import { renderInvoiceHtml } from '../invoice-html';
 import { createTenantStore } from '../tenant-store';
+import { tenantContextOf } from '../auth/session-context';
 
 const SELLER_GSTIN = '29AAGCB7383J1Z4';
 const stores: Array<ReturnType<typeof createTenantStore>> = [];
@@ -18,7 +19,7 @@ async function setup() {
   const admin = (await store.authenticate('nexio-admin'))!;
   const member = (await store.authenticate('nexio-user'))!;
   const other = (await store.authenticate('evo-admin'))!;
-  await store.updateTenantSettings(admin, { ...await store.getTenantSettings(admin), gstin: SELLER_GSTIN, legalName: 'Nexio Private Limited' });
+  await store.updateTenantSettings(tenantContextOf(admin), { ...await store.getTenantSettings(tenantContextOf(admin)), gstin: SELLER_GSTIN, legalName: 'Nexio Private Limited' });
   const customerId = (await store.listCustomers(admin)).items[0].id;
   const definition = (patch: Record<string, unknown> = {}) => ({ ...BUILTIN_DEFINITION, ...patch });
   const issue = (formatId?: string, session = admin) => store.createIssuedInvoice(session, { customerId, formatId, invoiceDate: '2026-11-02', dueDate: '2026-11-16', lines: [{ description: 'Consulting', quantity: 1, rateMinor: 100_000, taxType: 'cgst_sgst', gstRate: 18, hsnSac: '998311' }] });

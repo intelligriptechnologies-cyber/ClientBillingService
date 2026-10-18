@@ -3,6 +3,7 @@ import { createMailer, type SmtpTransport } from '@/lib/mailer';
 import { getInvoiceEmailDefaults, MailServiceError, sendInvoiceEmail, sendPaymentReminder, testSmtp, type MailDeps } from '@/lib/mail-service';
 import { settingsInput } from '@/lib/test-helpers';
 import { createTenantStore, type AppSession } from '@/lib/tenant-store';
+import { tenantContextOf } from './auth/session-context';
 
 type Store = ReturnType<typeof createTenantStore>;
 const PASSWORD = 'hunter2-secret';
@@ -14,7 +15,7 @@ let sent: Array<Parameters<SmtpTransport['sendMail']>[0]>; let transportBehaviou
 
 function must<T>(value: T | null | undefined): T { if (value === null || value === undefined) throw new Error('Expected fixture'); return value; }
 async function configure(session: AppSession, extra: Record<string, unknown> = {}) {
-  return store.updateTenantSettings(session, { ...settingsInput(await store.getTenantSettings(session)), smtpHost: 'smtp.nexio.example', smtpPort: 587, smtpFrom: 'billing@nexio.example', smtpUser: 'billing', smtpPassword: PASSWORD, ...extra });
+  return store.updateTenantSettings(tenantContextOf(session), { ...settingsInput(await store.getTenantSettings(tenantContextOf(session))), smtpHost: 'smtp.nexio.example', smtpPort: 587, smtpFrom: 'billing@nexio.example', smtpUser: 'billing', smtpPassword: PASSWORD, ...extra });
 }
 async function rejection(promise: Promise<unknown>) { try { await promise; } catch (cause) { return cause; } throw new Error('Expected a rejection'); }
 
@@ -28,21 +29,21 @@ afterEach(async () => store.close());
 
 describe('SMTP settings never expose the password', () => {
   it('stores it, reports only that it is set, and keeps it when a later save omits it', async () => {
-    expect(await store.getTenantSettings(admin)).toMatchObject({ smtpUser: '', smtpPasswordSet: false });
+    expect(await store.getTenantSettings(tenantContextOf(admin))).toMatchObject({ smtpUser: '', smtpPasswordSet: false });
     const saved = await configure(admin);
     expect(saved).toMatchObject({ smtpUser: 'billing', smtpPasswordSet: true });
-    expect(JSON.stringify(saved)).not.toContain(PASSWORD); expect(JSON.stringify(await store.getTenantSettings(admin))).not.toContain(PASSWORD);
-    await store.updateTenantSettings(admin, { ...settingsInput(await store.getTenantSettings(admin)), companyName: 'Nexio Renamed' });
-    expect((await store.getSmtpSettings(admin)).password).toBe(PASSWORD);
+    expect(JSON.stringify(saved)).not.toContain(PASSWORD); expect(JSON.stringify(await store.getTenantSettings(tenantContextOf(admin)))).not.toContain(PASSWORD);
+    await store.updateTenantSettings(tenantContextOf(admin), { ...settingsInput(await store.getTenantSettings(tenantContextOf(admin))), companyName: 'Nexio Renamed' });
+    expect((await store.getSmtpSettings(tenantContextOf(admin))).password).toBe(PASSWORD);
     await configure(admin, { smtpPassword: '' });
-    expect((await store.getTenantSettings(admin)).smtpPasswordSet).toBe(false); expect((await store.getSmtpSettings(admin)).password).toBe('');
+    expect((await store.getTenantSettings(tenantContextOf(admin))).smtpPasswordSet).toBe(false); expect((await store.getSmtpSettings(tenantContextOf(admin))).password).toBe('');
   });
 
   it('keeps another tenant out of the stored password and out of the logs', async () => {
     await configure(admin);
-    expect((await store.getSmtpSettings(evo)).password).toBe(''); expect((await store.getTenantSettings(evo)).smtpPasswordSet).toBe(false);
+    expect((await store.getSmtpSettings(tenantContextOf(evo))).password).toBe(''); expect((await store.getTenantSettings(tenantContextOf(evo))).smtpPasswordSet).toBe(false);
     await testSmtp(store, admin, deps); await sendInvoiceEmail(store, admin, INVOICE, {}, deps);
-    expect(JSON.stringify(await store.listOperationalLogs(admin))).not.toContain(PASSWORD);
+    expect(JSON.stringify(await store.listOperationalLogs(tenantContextOf(admin)))).not.toContain(PASSWORD);
     expect(JSON.stringify(await store.listDeliveries(admin, INVOICE))).not.toContain(PASSWORD);
   });
 });
@@ -151,7 +152,7 @@ describe('testing the SMTP settings', () => {
     transportBehaviour = { verify: async () => { throw Object.assign(new Error(`bad ${PASSWORD}`), { code: 'EAUTH' }); } };
     const bad = await testSmtp(store, admin, deps);
     expect(bad).toMatchObject({ status: 'failed', message: expect.stringContaining('(EAUTH)') });
-    const logs = (await store.listOperationalLogs(admin)).map((log) => log.message).join('\n');
+    const logs = (await store.listOperationalLogs(tenantContextOf(admin))).map((log) => log.message).join('\n');
     expect(logs).toContain('(EAUTH)'); expect(logs).not.toContain(PASSWORD); expect(logs).not.toContain('no external email was sent');
   });
 

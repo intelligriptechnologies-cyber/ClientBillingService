@@ -1,11 +1,12 @@
 import { expect, it } from 'vitest';
 import { describeStore, storeForTest } from './test-store';
+import { tenantContextOf } from '../auth/session-context';
 
 describeStore(['settings'], 'tenant settings and operational logs', () => {
   it('persists complete tenant settings, template previews, and isolated operational logs', async () => {
     const store = await storeForTest(); const nexio = await store.authenticate('nexio-admin'); const evo = await store.authenticate('evo-admin');
     if (!nexio || !evo) throw new Error('Expected seeded sessions');
-    const saved = await store.updateTenantSettings(nexio, {
+    const saved = await store.updateTenantSettings(tenantContextOf(nexio), {
       companyName: 'Nexio Billing Services', gstin: '29AAGCB7383J1Z4', address: '42 Ledger Lane, Bengaluru',
       invoicePrefix: 'NX', paymentTermsDays: 21, footer: 'Thank you for your business.',
       invoiceTemplate: 'Invoice {{invoiceNumber}} for {{customerName}}', emailSubject: 'Your invoice {{invoiceNumber}}',
@@ -14,10 +15,10 @@ describeStore(['settings'], 'tenant settings and operational logs', () => {
     });
 
     expect(saved.companyName).toBe('Nexio Billing Services');
-    expect(await store.getTenantSettings(nexio)).toMatchObject({ invoicePrefix: 'NX', logoDataUrl: 'data:image/png;base64,logo' });
-    expect(await store.previewTenantTemplate(nexio)).toContain('Invoice NX-2026-001 for Acme Industries');
-    expect((await store.listOperationalLogs(nexio)).some((log) => log.kind === 'feature-flow')).toBe(true);
-    expect(await store.listOperationalLogs(evo)).toEqual([]);
+    expect(await store.getTenantSettings(tenantContextOf(nexio))).toMatchObject({ invoicePrefix: 'NX', logoDataUrl: 'data:image/png;base64,logo' });
+    expect(await store.previewTenantTemplate(tenantContextOf(nexio))).toContain('Invoice NX-2026-001 for Acme Industries');
+    expect((await store.listOperationalLogs(tenantContextOf(nexio))).some((log) => log.kind === 'feature-flow')).toBe(true);
+    expect(await store.listOperationalLogs(tenantContextOf(evo))).toEqual([]);
   });
 
   it('keeps settings and operational logs restricted to tenant admins', async () => {
@@ -25,7 +26,7 @@ describeStore(['settings'], 'tenant settings and operational logs', () => {
     const tenantUser = await store.authenticate('nexio-user');
     if (!tenantUser) throw new Error('Expected seeded session');
 
-    await expect(store.getTenantSettings(tenantUser)).rejects.toThrow('admin');
-    await expect(store.listOperationalLogs(tenantUser)).rejects.toThrow('admin');
+    await expect(store.getTenantSettings(tenantContextOf(tenantUser))).rejects.toThrow('admin');
+    await expect(store.listOperationalLogs(tenantContextOf(tenantUser))).rejects.toThrow('admin');
   });
 });

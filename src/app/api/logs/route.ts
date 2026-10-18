@@ -2,11 +2,12 @@ import { recordOperationException } from '@/lib/operational-error';
 import { NextResponse } from 'next/server';
 import { getCurrentSession } from '@/lib/session';
 import { getTenantStore } from '@/lib/tenant-store';
+import { tenantContextOf } from '@/lib/auth/session-context';
 
 export async function GET() {
   const session = await getCurrentSession();
   if (!session) return NextResponse.json({ message: 'Sign in to view logs.' }, { status: 401 });
-  try { return NextResponse.json({ logs: await getTenantStore().listOperationalLogs(session) }); }
+  try { return NextResponse.json({ logs: await getTenantStore().listOperationalLogs(tenantContextOf(session)) }); }
   catch (error) { await recordOperationException(session, '/api/logs', error); return NextResponse.json({ message: error instanceof Error ? error.message : 'Unable to read logs.' }, { status: 403 }); }
 }
 

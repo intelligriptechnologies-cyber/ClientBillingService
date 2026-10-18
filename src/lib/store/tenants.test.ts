@@ -1,11 +1,10 @@
 import { expect, it } from 'vitest';
-import { describeStore, storeForTest } from './test-store';
+import { describeStore, memberContext, storeForTest, superadmin } from './test-store';
+import { platformActorOf } from '../auth/session-context';
 
 describeStore(['tenants'], 'tenant lifecycle', () => {
   it('lets the superadmin create, change, and disable a tenant while retaining lifecycle history', async () => {
     const store = await storeForTest();
-    const superadmin = await store.authenticate('superadmin');
-    if (!superadmin) throw new Error('Expected superadmin session');
 
     const created = await store.createTenant(superadmin, { name: 'Northstar Studio' });
 
@@ -26,13 +25,14 @@ describeStore(['tenants'], 'tenant lifecycle', () => {
     const tenantAdmin = await store.authenticate('nexio-admin');
     if (!tenantAdmin) throw new Error('Expected tenant admin session');
 
-    await expect(store.listTenants(tenantAdmin, {})).rejects.toThrow('superadmin');
-    await expect(store.createTenant(tenantAdmin, { name: 'Not allowed' })).rejects.toThrow('superadmin');
+    expect(() => platformActorOf(tenantAdmin)).toThrow('superadmin');
+    const context = await memberContext(store, 'nexio-admin');
+    await expect(store.listTenants(context as never, {})).rejects.toThrow('superadmin');
+    await expect(store.createTenant(context as never, { name: 'Not allowed' })).rejects.toThrow('superadmin');
   });
 
   it('lets the superadmin change only the capitalisation of a tenant name', async () => {
     const store = await storeForTest();
-    const superadmin = (await store.authenticate('superadmin'))!;
     const created = await store.createTenant(superadmin, { name: 'Harbour Works' });
 
     expect((await store.updateTenant(superadmin, created.id, { name: 'HARBOUR WORKS' })).name).toBe('HARBOUR WORKS');
@@ -42,7 +42,6 @@ describeStore(['tenants'], 'tenant lifecycle', () => {
 
   it('rejects empty, blank, duplicate and non-text tenant names with a readable message', async () => {
     const store = await storeForTest();
-    const superadmin = (await store.authenticate('superadmin'))!;
     await store.createTenant(superadmin, { name: 'Unique Co' });
 
     await expect(store.createTenant(superadmin, { name: '' })).rejects.toThrow('between 2 and 100');
@@ -54,14 +53,12 @@ describeStore(['tenants'], 'tenant lifecycle', () => {
 
   it('treats the tenant search text literally rather than as a LIKE pattern', async () => {
     const store = await storeForTest();
-    const superadmin = (await store.authenticate('superadmin'))!;
     expect((await store.listTenants(superadmin, { query: '%' })).total).toBe(0);
     expect((await store.listTenants(superadmin, { query: '_' })).total).toBe(0);
   });
 
   it('suspends and reactivates a tenant, blocking its sign-in meanwhile, and records each step', async () => {
     const store = await storeForTest();
-    const superadmin = (await store.authenticate('superadmin'))!;
     const created = await store.createTenant(superadmin, { name: 'Pause Me' });
     const adminId = `${created.id}-admin`;
 
@@ -91,11 +88,10 @@ describeStore(['tenants'], 'tenant identities and records', () => {
 
   it('does not permit a tenant session to read or write another tenant’s records', async () => {
     const store = await storeForTest();
-    const nexio = await store.authenticate('nexio-admin');
-    const evo = await store.authenticate('evo-admin');
-    if (!nexio || !evo) throw new Error('Expected seeded sessions');
+    const nexio = await memberContext(store, 'nexio-admin');
+    const evo = await memberContext(store, 'evo-admin');
 
     expect((await store.listTenantRecords(nexio)).map((record) => record.tenantId)).toEqual([nexio.tenantId]);
-    await expect(store.createTenantRecord(nexio, evo.tenantId!, 'Not allowed')).rejects.toThrow('tenant');
+    await expect(store.createTenantRecord(nexio, evo.tenantId, 'Not allowed')).rejects.toThrow('tenant');
   });
 });

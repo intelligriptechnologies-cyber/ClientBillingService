@@ -1,5 +1,6 @@
 import { expect, it } from 'vitest';
 import { describeStore, storeForTest, registerSeller } from './test-store';
+import { tenantContextOf } from '../auth/session-context';
 
 describeStore(['settings', 'customers', 'services', 'contracts', 'invoices'], 'invoices', () => {
   it('persists row-wise GST, billing details and corrected line items', async () => {
@@ -29,8 +30,8 @@ describeStore(['settings', 'customers', 'services', 'contracts', 'invoices'], 'i
     await expect(store.voidInvoice(nexio, invoice.id, '')).rejects.toThrow('reason');
     expect((await store.voidInvoice(nexio, invoice.id, 'Issued in error')).status).toBe('void');
     await expect(store.voidInvoice(nexio, invoice.id, 'Again')).rejects.toThrow('already void');
-    await store.recordOperationalError(nexio, 'Test operation', new Error('Test failure'));
-    expect(await store.listOperationalLogs(nexio)).toEqual(expect.arrayContaining([expect.objectContaining({ kind: 'error', message: expect.stringContaining('Test failure') })]));
+    await store.recordOperationalError(tenantContextOf(nexio), 'Test operation', new Error('Test failure'));
+    expect(await store.listOperationalLogs(tenantContextOf(nexio))).toEqual(expect.arrayContaining([expect.objectContaining({ kind: 'error', message: expect.stringContaining('Test failure') })]));
   });
 
   it('returns a tenant-scoped GST sales report with interstate and intrastate tax splits', async () => {
@@ -39,7 +40,7 @@ describeStore(['settings', 'customers', 'services', 'contracts', 'invoices'], 'i
     const evo = await store.authenticate('evo-admin');
     if (!nexio || !evo) throw new Error('Expected seeded sessions');
 
-    await store.updateTenantSettings(nexio, { ...await store.getTenantSettings(nexio), gstin: '29AAGCB7383J1Z4' });
+    await store.updateTenantSettings(tenantContextOf(nexio), { ...await store.getTenantSettings(tenantContextOf(nexio)), gstin: '29AAGCB7383J1Z4' });
     const customer = (await store.listCustomers(nexio, {})).items[0];
     const interstate = await store.createCustomer(nexio, { companyName: 'Interstate Buyer', contactName: 'Ravi', email: 'ravi@example.com', phone: '9000000000', gstin: '27AAPFU0939F1ZV', billingAddress: 'Mumbai', invoiceDelivery: 'email' });
     await store.createIssuedInvoice(nexio, { customerId: customer.id, invoiceDate: '2026-11-02', dueDate: '2026-11-16', taxableMinor: 10_000, gstRate: 18 });
@@ -70,7 +71,7 @@ describeStore(['settings', 'customers', 'services', 'contracts', 'invoices'], 'i
     const issued = await store.createIssuedInvoice(nexio, { contractId: contract.id, invoiceDate: '2026-10-01', dueDate: '2026-10-15', taxableMinor: 250000, gstRate: 18 });
     expect((await store.listInvoices(nexio, { month: '2026-10', search: customer.companyName })).items).toEqual(expect.arrayContaining([expect.objectContaining({ id: issued.id, customerName: customer.companyName, status: 'issued' })]));
     expect((await store.listInvoices(evo, {})).items).not.toEqual(expect.arrayContaining([expect.objectContaining({ id: issued.id })]));
-    await store.updateTenantSettings(nexio, { ...await store.getTenantSettings(nexio), companyName: 'Changed company', invoicePrefix: 'NEW' });
+    await store.updateTenantSettings(tenantContextOf(nexio), { ...await store.getTenantSettings(tenantContextOf(nexio)), companyName: 'Changed company', invoicePrefix: 'NEW' });
     expect(await store.getInvoice(nexio, issued.id)).toMatchObject({ invoiceNumber: expect.stringContaining('NEX'), snapshot: expect.objectContaining({ companyName: 'Nexio Hyper', customerName: customer.companyName, gstRate: 18 }) });
     await expect(store.getInvoice(evo, issued.id)).rejects.toThrow('tenant');
   });

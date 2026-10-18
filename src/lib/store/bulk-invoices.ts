@@ -2,7 +2,7 @@ import type { DatabaseSync } from 'node:sqlite';
 import { now, requireTenantMember } from './shared';
 import { amountOnlyLine, gstSnapshotFields, resolveSupply, sellerRegisteredIn } from '../invoice-gst';
 import { contractFromRow } from './contracts';
-import { settingsFromRow } from './settings';
+import { parseSettingsRow } from './rows';
 import { resolveFormatForInvoice } from './invoice-formats';
 import type { AppSession, Contract, InvoiceSnapshot, BulkInvoiceAdditionalLine, BulkInvoiceProposal, BulkInvoiceSkip, BulkInvoicePreview, BulkInvoiceRun, BulkInvoiceGeneration } from './types';
 
@@ -24,7 +24,7 @@ export function createBulkInvoiceMethods(database: DatabaseSync) {
       additionsByContract.set(String(row.contract_id), [...(additionsByContract.get(String(row.contract_id)) ?? []), line]);
     }
     const proposed: BulkInvoiceProposal[] = []; const skipped: BulkInvoiceSkip[] = [];
-    const seller = settingsFromRow(database.prepare('SELECT * FROM tenant_settings WHERE tenant_id = ?').get(session.tenantId) as Record<string, unknown>);
+    const seller = parseSettingsRow(database.prepare('SELECT * FROM tenant_settings WHERE tenant_id = ?').get(session.tenantId) as Record<string, unknown>);
     const gstRate = sellerRegisteredIn(seller.stateCode) ? 18 : 0;
     for (const row of rows) {
       const contract = contractFromRow(database, row);
@@ -55,7 +55,7 @@ export function createBulkInvoiceMethods(database: DatabaseSync) {
         const existing = database.prepare('SELECT id, billing_period, generated_count, skipped_count, created_at FROM bulk_invoice_runs WHERE tenant_id = ? AND billing_period = ?').get(session.tenantId, billingPeriod) as Record<string, unknown> | undefined;
         if (existing) { database.exec('COMMIT'); const run = bulkRunFromRow(existing); return { billingPeriod, generatedCount: run.generatedCount, skippedCount: run.skippedCount, alreadyGenerated: true, run }; }
         const preview = buildBulkPreview(session, billingPeriod);
-        const settings = settingsFromRow(database.prepare('SELECT * FROM tenant_settings WHERE tenant_id = ?').get(session.tenantId) as Record<string, unknown>);
+        const settings = parseSettingsRow(database.prepare('SELECT * FROM tenant_settings WHERE tenant_id = ?').get(session.tenantId) as Record<string, unknown>);
         const sequenceStart = Number((database.prepare('SELECT COUNT(*) AS count FROM invoices WHERE tenant_id = ?').get(session.tenantId) as { count: number }).count);
         const timestamp = now();
         const insertInvoice = database.prepare('INSERT INTO invoices (id, tenant_id, contract_id, customer_id, invoice_number, invoice_date, due_date, taxable_minor, gst_rate, gst_minor, total_minor, paid_minor, status, snapshot, issued_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?)');

@@ -2,6 +2,7 @@ import { renderInvoiceHtml } from './invoice-html';
 import { mailer, parseAddressList, type MailMessage, type Mailer } from './mailer';
 import { renderHtmlToPdf } from './pdf-renderer';
 import type { AppSession, DeliveryRecord, DeliveryStatus, PaymentReminder, TenantInvoice, createTenantStore } from './tenant-store';
+import { tenantContextOf } from './auth/session-context';
 
 type Store = ReturnType<typeof createTenantStore>;
 
@@ -41,7 +42,7 @@ export type InvoiceEmailDefaults = { to: string; subject: string; message: strin
 /** What the send dialog starts from. `configured` is false while the tenant has no usable SMTP settings. */
 export async function getInvoiceEmailDefaults(store: Store, session: AppSession, invoiceId: string, deps: MailDeps = defaultMailDeps): Promise<InvoiceEmailDefaults> {
   const invoice = await loadInvoice(store, session, invoiceId);
-  return { to: await billingEmail(store, session, invoice), subject: invoiceSubject(invoice), message: invoiceMessage(invoice), configured: deps.mailer.isConfigured(await store.getSmtpSettings(session)) };
+  return { to: await billingEmail(store, session, invoice), subject: invoiceSubject(invoice), message: invoiceMessage(invoice), configured: deps.mailer.isConfigured(await store.getSmtpSettings(tenantContextOf(session))) };
 }
 
 function parseSendInput(input: unknown, fallbackTo: string) {
@@ -67,12 +68,12 @@ export async function sendInvoiceEmail(store: Store, session: AppSession, invoic
   const invoice = await loadInvoice(store, session, invoiceId);
   if (invoice.status === 'void') throw new MailServiceError('A void invoice cannot be emailed.', 409);
   const { to, cc, message } = parseSendInput(input, await billingEmail(store, session, invoice));
-  const smtp = await store.getSmtpSettings(session);
+  const smtp = await store.getSmtpSettings(tenantContextOf(session));
   const subject = invoiceSubject(invoice); const text = message || invoiceMessage(invoice);
   const record = (status: DeliveryStatus, error: string) => store.recordDelivery(session, { invoiceId, to, cc, subject, status, error });
   const finish = async (status: DeliveryStatus, reason: string, summary: string): Promise<SendInvoiceResult> => {
     const delivery = await record(status, reason);
-    await store.logFeatureFlow(session, `Invoice ${invoice.invoiceNumber} email to ${to.join(', ')}: ${status}${reason ? ` (${reason})` : ''}`);
+    await store.logFeatureFlow(tenantContextOf(session), `Invoice ${invoice.invoiceNumber} email to ${to.join(', ')}: ${status}${reason ? ` (${reason})` : ''}`);
     return { status, message: summary, delivery };
   };
 
@@ -94,9 +95,9 @@ export type SmtpTestResult = { status: 'verified' | 'failed' | 'not-configured';
 
 export async function testSmtp(store: Store, session: AppSession, deps: MailDeps = defaultMailDeps): Promise<SmtpTestResult> {
   if (session.role !== 'admin' || !session.tenantId) throw new MailServiceError('Only a tenant admin can test SMTP.', 403);
-  const result = await deps.mailer.verify(await store.getSmtpSettings(session));
+  const result = await deps.mailer.verify(await store.getSmtpSettings(tenantContextOf(session)));
   const outcome: SmtpTestResult = result.status === 'verified' ? { status: 'verified', message: `SMTP test passed. ${result.detail}` } : result.status === 'failed' ? { status: 'failed', message: `SMTP test failed. ${result.reason}` } : { status: 'not-configured', message: result.reason };
-  await store.logFeatureFlow(session, outcome.message);
+  await store.logFeatureFlow(tenantContextOf(session), outcome.message);
   return outcome;
 }
 
@@ -107,13 +108,13 @@ export async function sendPaymentReminder(store: Store, session: AppSession, inv
   const reminder = await store.recordPaymentReminder(session, invoiceId, input);
   if (input.channel !== 'email') return { reminder, status: 'recorded', message: 'WhatsApp reminder recorded, not sent. Sending over WhatsApp is not available yet.' };
   const invoice = await loadInvoice(store, session, invoiceId);
-  const to = [await billingEmail(store, session, invoice)]; const smtp = await store.getSmtpSettings(session);
+  const to = [await billingEmail(store, session, invoice)]; const smtp = await store.getSmtpSettings(tenantContextOf(session));
   const outstanding = invoice.totalMinor - invoice.paidMinor; const note = input.note?.trim();
   const subject = `Payment reminder: invoice ${invoice.invoiceNumber} from ${invoice.snapshot.companyName}`;
   const text = `Hello ${invoice.customerName},\n\nThis is a reminder that invoice ${invoice.invoiceNumber} from ${invoice.snapshot.companyName} (${money(invoice.totalMinor)}, ${money(outstanding)} outstanding) was due on ${invoice.dueDate}.${note ? `\n\n${note}` : ''}\n\nThank you,\n${invoice.snapshot.companyName}`;
   const result = await deps.mailer.sendMail({ from: smtp.from.trim(), to, cc: [], subject, text, html: htmlFor(text) }, smtp);
   const status: DeliveryStatus = result.status;
   await store.recordDelivery(session, { invoiceId, to, cc: [], subject, status, error: result.status === 'sent' ? '' : result.reason });
-  await store.logFeatureFlow(session, `Payment reminder email for ${invoice.invoiceNumber}: ${status}${result.status === 'sent' ? '' : ` (${result.reason})`}`);
+  await store.logFeatureFlow(tenantContextOf(session), `Payment reminder email for ${invoice.invoiceNumber}: ${status}${result.status === 'sent' ? '' : ` (${result.reason})`}`);
   return { reminder, status, message: result.status === 'sent' ? `Email reminder sent to ${to.join(', ')}.` : `Reminder recorded, not sent. ${result.reason}` };
 }

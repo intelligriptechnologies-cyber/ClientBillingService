@@ -3,6 +3,7 @@ import { getCurrentSession } from '@/lib/session';
 import { getTenantStore } from '@/lib/tenant-store';
 import { pdfResponse } from '@/lib/pdf-renderer';
 import { renderBulkPreviewHtml } from '@/lib/bulk-preview-html';
+import { tenantContextOf } from '@/lib/auth/session-context';
 
 export async function GET(request: Request) {
   const session = await getCurrentSession();
@@ -10,7 +11,7 @@ export async function GET(request: Request) {
   const billingPeriod = new URL(request.url).searchParams.get('period') ?? '';
   try {
     const store = getTenantStore();
-    const html = renderBulkPreviewHtml(await store.previewBulkInvoices(session, billingPeriod), await store.getTenantSettings(session));
+    const html = renderBulkPreviewHtml(await store.previewBulkInvoices(session, billingPeriod), await store.getTenantSettings(tenantContextOf(session)));
     return await pdfResponse(`bulk-invoice-preview-${billingPeriod}.pdf`, html);
   } catch (cause) { await recordOperationException(session, '/api/invoices/bulk/download', cause); return new Response(cause instanceof Error ? cause.message : 'Unable to download preview.', { status: 400 }); }
 }

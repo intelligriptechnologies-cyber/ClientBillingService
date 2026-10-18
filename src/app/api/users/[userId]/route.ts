@@ -2,6 +2,7 @@ import { recordOperationException } from '@/lib/operational-error';
 import { NextResponse } from 'next/server';
 import { getCurrentSession } from '@/lib/session';
 import { getTenantStore, type TenantUserUpdate } from '@/lib/tenant-store';
+import { tenantContextOf } from '@/lib/auth/session-context';
 
 export async function PATCH(request: Request, context: { params: Promise<{ userId: string }> }) {
   const session = await getCurrentSession();
@@ -9,7 +10,7 @@ export async function PATCH(request: Request, context: { params: Promise<{ userI
   const { userId } = await context.params;
   try {
     const update = await request.json() as TenantUserUpdate;
-    const user = await getTenantStore().updateTenantUser(session, userId, update);
+    const user = await getTenantStore().updateTenantUser(tenantContextOf(session), userId, update);
     return NextResponse.json({ user });
   } catch (error) { await recordOperationException(session, '/api/users/[userId]', error);
     const message = error instanceof Error ? error.message : 'Unable to update this user.';
