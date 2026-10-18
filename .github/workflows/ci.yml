@@ -41,7 +41,7 @@ jobs:
       - run: npm run check:async-store
       - name: Database tests run, none skipped
         run: |
-          npx vitest run src/lib/db/roles.test.ts src/lib/db/isolation.test.ts --reporter=json --outputFile="$RUNNER_TEMP/db-tests.json"
+          npx vitest run src/lib/db/roles.test.ts src/lib/db/isolation.test.ts src/lib/db/import-sqlite.test.ts --reporter=json --outputFile="$RUNNER_TEMP/db-tests.json"
           node scripts/check-tests-ran.mjs "$RUNNER_TEMP/db-tests.json"
       - name: Store areas ported to Postgres run on it, none skipped
         run: |
