@@ -1,6 +1,7 @@
 import { amountInWords, roundToRupee } from './amount-words';
 import { documentShell, escapeHtml, imageHtml } from './document-html';
 import { formatDate, formatMoney } from './format';
+import { printedFormat, type FormatDefinition } from './invoice-format';
 import { stateName } from './gst';
 import { documentTitle, lineTaxLabel, printsGstColumns } from './invoice-document';
 import type { InvoiceLine } from './invoice-lines';
@@ -67,14 +68,14 @@ function partiesHtml(invoice: TenantInvoice): string {
   return `<section class="parties"><div>\n${billTo}\n</div><div>\n${details}\n</div></section>`;
 }
 
-function linesHtml(rows: PrintedLine[], taxed: boolean): string {
-  const hasHsn = rows.some((line) => line.hsnSac);
+function linesHtml(rows: PrintedLine[], taxed: boolean, showHsn: boolean): string {
+  const hasHsn = showHsn && rows.some((line) => line.hsnSac);
   const head = ['<th>#</th>', '<th>Description</th>', hasHsn ? '<th>HSN/SAC</th>' : '', '<th class="num">Qty</th>', '<th class="num">Rate</th>', taxed ? '<th class="num">Taxable value</th><th class="num">Tax</th>' : '', '<th class="num">Amount</th>'].filter(Boolean).join('');
   const body = rows.map((line, index) => `<tr><td>${index + 1}</td><td class="multiline">${e(line.description)}</td>${hasHsn ? `<td>${e(line.hsnSac)}</td>` : ''}<td class="num">${line.quantity}</td><td class="num">${e(formatMoney(line.rateMinor))}</td>${taxed ? `<td class="num">${e(formatMoney(line.amountMinor))}</td><td class="num">${e(line.taxLabel)}<span class="tax-amount">${e(formatMoney(line.gstMinor))}</span></td>` : ''}<td class="num">${e(formatMoney(line.totalMinor))}</td></tr>`).join('\n');
   return `<table class="lines"><thead><tr>${head}</tr></thead>\n<tbody>\n${body}\n</tbody></table>`;
 }
 
-function summaryHtml(invoice: TenantInvoice, taxed: boolean): string {
+function summaryHtml(invoice: TenantInvoice, taxed: boolean, showWords: boolean): string {
   const { roundedMinor, roundOffMinor } = roundToRupee(invoice.totalMinor);
   const rows = [
     row(taxed ? 'Taxable value' : 'Value of supply', formatMoney(invoice.taxableMinor)),
@@ -82,7 +83,32 @@ function summaryHtml(invoice: TenantInvoice, taxed: boolean): string {
     row('Round off', signed(roundOffMinor)),
     row('Amount payable', formatMoney(roundedMinor), 'payable'),
   ].join('\n');
-  return `<section class="summary"><div class="words"><h3>Amount in words</h3><p>${e(amountInWords(invoice.totalMinor))}</p></div><table class="totals">\n${rows}\n</table></section>`;
+  return `<section class="summary"><div class="words">${showWords ? `<h3>Amount in words</h3><p>${e(amountInWords(invoice.totalMinor))}</p>` : ''}</div><table class="totals">\n${rows}\n</table></section>`;
+}
+
+const PAYMENT_STYLES = `
+.payment { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; margin-top: 12px; break-inside: avoid; }
+.payment .bank { flex: 1; min-width: 0; }
+.upi-slot { width: 84px; height: 84px; margin-left: auto; border: 1px dashed #66757f; display: flex; align-items: center; justify-content: center; text-align: center; color: #66757f; font-size: 9px; letter-spacing: 0.06em; text-transform: uppercase; }
+`;
+const TERMS_STYLES = `
+.terms { margin-top: 12px; break-inside: avoid; }
+`;
+
+function paymentHtml(format: FormatDefinition): string {
+  const bank = format.blocks.bankDetails && format.bankDetails ? `<div class="bank"><h3>Bank details</h3><p class="multiline">${e(format.bankDetails)}</p></div>` : '';
+  const upi = format.blocks.upiQr ? `<div class="upi-slot"><span>UPI QR</span></div>` : '';
+  return bank || upi ? `<section class="payment">${bank}${upi}</section>` : '';
+}
+
+function termsHtml(format: FormatDefinition): string {
+  return format.blocks.terms && format.terms ? `<section class="terms"><h3>Terms</h3><p class="multiline">${e(format.terms)}</p></section>` : '';
+}
+
+function closingHtml(snapshot: TenantInvoice['snapshot'], format: FormatDefinition): string {
+  const marks = [format.blocks.stamp ? imageHtml(snapshot.stampDataUrl, 'Company stamp', 'stamp') : '', format.blocks.signature ? imageHtml(snapshot.signatureDataUrl, 'Authorised signature', 'signature') : ''].filter(Boolean).join('');
+  const signatory = format.blocks.stamp || format.blocks.signature ? `<div class="signatory"><div class="marks">${marks}</div><p>Authorised signatory</p></div>` : '';
+  return `<section class="closing"><p class="footer multiline">${e(snapshot.footer)}</p>${signatory}</section>`;
 }
 
 /** What the preview and the PDF both print: the issued snapshot, nothing read from live settings. */
@@ -91,15 +117,19 @@ export function renderInvoiceHtml(invoice: TenantInvoice): string {
   const taxed = printsGstColumns(snapshot);
   const title = documentTitle(snapshot);
   const heading = snapshot.invoiceTemplate?.replaceAll('{{invoiceNumber}}', invoice.invoiceNumber).replaceAll('{{customerName}}', snapshot.customerName).trim();
-  const marks = [imageHtml(snapshot.stampDataUrl, 'Company stamp', 'stamp'), imageHtml(snapshot.signatureDataUrl, 'Authorised signature', 'signature')].filter(Boolean).join('');
+  const { definition } = printedFormat(snapshot);
+  const payment = paymentHtml(definition);
+  const terms = termsHtml(definition);
   const body = [
-    `<header class="masthead"><div class="seller">${imageHtml(snapshot.logoDataUrl, 'Logo', 'logo')}<div>\n${sellerHtml(invoice, taxed)}\n</div></div><div class="doc"><h1>${e(title)}</h1><dl><dt>Invoice no.</dt><dd>${e(invoice.invoiceNumber)}</dd><dt>Issue date</dt><dd>${e(formatDate(invoice.invoiceDate))}</dd><dt>Due date</dt><dd>${e(formatDate(invoice.dueDate))}</dd></dl></div></header>`,
+    `<header class="masthead"><div class="seller">${definition.logo === 'show' ? imageHtml(snapshot.logoDataUrl, 'Logo', 'logo') : ''}<div>\n${sellerHtml(invoice, taxed)}\n</div></div><div class="doc"><h1>${e(title)}</h1><dl><dt>Invoice no.</dt><dd>${e(invoice.invoiceNumber)}</dd><dt>Issue date</dt><dd>${e(formatDate(invoice.invoiceDate))}</dd><dt>Due date</dt><dd>${e(formatDate(invoice.dueDate))}</dd></dl></div></header>`,
     heading ? `<p class="heading">${e(heading)}</p>` : '',
     partiesHtml(invoice),
-    linesHtml(lineRows(invoice), taxed),
-    summaryHtml(invoice, taxed),
+    linesHtml(lineRows(invoice), taxed, definition.blocks.hsnSac),
+    summaryHtml(invoice, taxed, definition.blocks.amountInWords),
+    payment,
     snapshot.notes ? `<section class="notes"><h3>Notes</h3><p class="multiline">${e(snapshot.notes)}</p></section>` : '',
-    `<section class="closing"><p class="footer multiline">${e(snapshot.footer)}</p><div class="signatory"><div class="marks">${marks}</div><p>Authorised signatory</p></div></section>`,
+    terms,
+    closingHtml(snapshot, definition),
   ].filter(Boolean).join('\n');
-  return documentShell(`${title} ${invoice.invoiceNumber}`, body);
+  return documentShell(`${title} ${invoice.invoiceNumber}`, body, { accent: definition.accent, compact: definition.layout === 'compact', extraStyles: (payment ? PAYMENT_STYLES : '') + (terms ? TERMS_STYLES : '') });
 }

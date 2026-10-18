@@ -6,6 +6,7 @@ import { calculateInvoiceLines, type InvoiceLineInput, type InvoiceTaxType } fro
 import { reportClientException } from '@/lib/client-error';
 import { stateName } from '@/lib/gst';
 import { invoiceDocumentType, lineTaxability, overridesSplit, type SupplyContext } from '@/lib/invoice-gst';
+import type { InvoiceFormat } from '@/lib/invoice-format';
 import type { Contract, CustomerRecord, TenantInvoice, TenantService } from '@/lib/tenant-store';
 import { StateSelect } from './state-select';
 
@@ -49,6 +50,8 @@ export function InvoiceEditorDialog({ invoice, onClose, onSaved }: Props) {
   const [lines, setLines] = useState<DraftLine[]>(() => invoice?.snapshot.lines?.length
     ? invoice.snapshot.lines.map((line) => ({ id: crypto.randomUUID(), description: line.description, quantity: String(line.quantity), rate: String(line.rateMinor / 100), taxType: line.taxType, gstRate: String(line.gstRate), hsnSac: line.hsnSac ?? '', serviceId: '', touched: true }))
     : invoice ? [{ ...newLine(), description: 'Invoice charges', rate: String(invoice.taxableMinor / 100), taxType: invoice.gstRate ? 'igst' : 'none', gstRate: String(invoice.gstRate), touched: true }] : [newLine()]);
+  const [formats, setFormats] = useState<InvoiceFormat[]>([]);
+  const [chosenFormatId, setChosenFormatId] = useState('');
   const [reason, setReason] = useState('');
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
@@ -66,6 +69,17 @@ export function InvoiceEditorDialog({ invoice, onClose, onSaved }: Props) {
     void apiFetch('/api/services').then(async (response) => { const body = await response.json() as { services?: TenantService[] }; if (active && response.ok) setServices((body.services ?? []).filter((service) => service.status === 'active')); }).catch((cause: unknown) => reportClientException('Load invoice services', cause));
     return () => { active = false; };
   }, []);
+
+  useEffect(() => {
+    let active = true;
+    void apiFetch('/api/invoice-formats').then(async (response) => { const body = await response.json() as { formats?: InvoiceFormat[] }; if (active && response.ok) setFormats(body.formats ?? []); }).catch((cause: unknown) => reportClientException('Load invoice formats', cause));
+    return () => { active = false; };
+  }, []);
+  const defaultFormatId = formats.find((format) => format.isDefault)?.id ?? '';
+  const keptFormatId = invoice?.snapshot.format && formats.some((format) => format.id === invoice.snapshot.format?.id) ? invoice.snapshot.format.id : '';
+  const customerFormatId = !invoice && source === 'existing' ? customers.find((customer) => customer.id === customerId)?.invoiceFormatId ?? '' : '';
+  const clientDefaultId = formats.some((format) => format.id === customerFormatId) ? customerFormatId : '';
+  const formatId = chosenFormatId || keptFormatId || clientDefaultId || defaultFormatId;
 
   const gstinInput = customerGstin.trim().toUpperCase();
   const supplyKey = [source === 'new' ? 'new' : customerId, gstinInput, source === 'new' ? newCustomer.stateCode : ''].join('|');
@@ -133,7 +147,7 @@ export function InvoiceEditorDialog({ invoice, onClose, onSaved }: Props) {
         if (!response.ok) throw new Error(body.message ?? 'Unable to create customer.');
         chosenCustomerId = body.id;
       }
-      const input = { customerId: chosenCustomerId, contractId: contractId || undefined, invoiceDate, dueDate, venue: invoice?.snapshot.venue, gstApplicable, customerPan, customerGstin, billingAddress, notes, taxSplitOverrideReason: overridden ? overrideReason.trim() : undefined, lines: calculated.lines.map(({ description, quantity, rateMinor, taxType, gstRate, hsnSac }) => ({ description, quantity, rateMinor, taxType, gstRate, hsnSac })) };
+      const input = { customerId: chosenCustomerId, contractId: contractId || undefined, formatId: formatId || undefined, invoiceDate, dueDate, venue: invoice?.snapshot.venue, gstApplicable, customerPan, customerGstin, billingAddress, notes, taxSplitOverrideReason: overridden ? overrideReason.trim() : undefined, lines: calculated.lines.map(({ description, quantity, rateMinor, taxType, gstRate, hsnSac }) => ({ description, quantity, rateMinor, taxType, gstRate, hsnSac })) };
       const response = await apiFetch(invoice ? `/api/invoices/${invoice.id}` : '/api/invoices', { method: invoice ? 'PATCH' : 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(invoice ? { correction: input, reason: reason.trim() } : input) });
       const body = await response.json() as { message?: string };
       if (!response.ok) throw new Error(body.message ?? 'Unable to save invoice.');
@@ -151,6 +165,7 @@ export function InvoiceEditorDialog({ invoice, onClose, onSaved }: Props) {
       {!invoice && source === 'new' && <div className="form-grid"><label className="field full"><span>Customer / company name <b>*</b></span><input className="input" required value={newCustomer.companyName} onChange={(event) => setNewCustomer({ ...newCustomer, companyName: event.target.value })} /></label><label className="field"><span>Contact name <b>*</b></span><input className="input" required value={newCustomer.contactName} onChange={(event) => setNewCustomer({ ...newCustomer, contactName: event.target.value })} /></label><label className="field"><span>Phone <b>*</b></span><input className="input" required value={newCustomer.phone} onChange={(event) => setNewCustomer({ ...newCustomer, phone: event.target.value })} /></label><label className="field full"><span>Email <b>*</b></span><input className="input" type="email" required value={newCustomer.email} onChange={(event) => setNewCustomer({ ...newCustomer, email: event.target.value })} /></label></div>}
       {!invoice && source === 'existing' && customerId && <label className="field"><span>Contract (optional)</span><select className="select" value={contractId} onChange={(event) => setContractId(event.target.value)}><option value="">No contract</option>{contracts.filter((contract) => contract.customerId === customerId).map((contract) => <option key={contract.id} value={contract.id}>{contract.name}</option>)}</select></label>}
       <div className="form-grid invoice-date-grid"><label className="field"><span>Invoice Date <b>*</b></span><input className="input" type="date" required value={invoiceDate} onChange={(event) => setInvoiceDate(event.target.value)} /></label><label className="field"><span>Due Date <b>*</b></span><input className="input" type="date" required min={invoiceDate} value={dueDate} onChange={(event) => setDueDate(event.target.value)} /></label></div>
+      {formats.length > 0 && <label className="field"><span>Invoice format</span><select className="select" value={formatId} onChange={(event) => setChosenFormatId(event.target.value)}>{formats.map((format) => <option key={format.id} value={format.id}>{format.name}{format.id === clientDefaultId ? ' (customer default)' : format.isDefault ? ' (default)' : ''}</option>)}</select></label>}
       <section className="invoice-lines" aria-label="Line Items"><div className="invoice-section-head"><h3>Line Items</h3><button className="button button-secondary" type="button" onClick={() => setLines((current) => [...current, newLine(gstApplicable ? supply : null)])}>Add Line</button></div><div className="invoice-lines-scroll"><div className="invoice-line-labels" aria-hidden="true"><span>Description</span><span>HSN/SAC</span><span>Qty</span><span>Rate</span><span>Tax Type</span><span>GST %</span><span>Amount</span><span /></div>{lines.map((line, index) => {
         const amount = Math.round(Number(line.quantity || 0) * Number(line.rate || 0) * 100);
         const gst = gstApplicable && line.taxType !== 'none' ? Math.round(amount * Number(line.gstRate || 0) / 100) : 0;

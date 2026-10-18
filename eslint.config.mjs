@@ -11,5 +11,5 @@ export default defineConfig([
       'no-restricted-globals': ['error', { name: 'fetch', message: 'Call apiFetch from @/lib/api-client so an expired session reloads the page (ADR 0002, decision 15).' }],
     },
   },
-  globalIgnores(['.next/**', '.next-*/**', 'node_modules/**', 'coverage/**', '.claude/**']),
+  globalIgnores(['.next/**', '.next-*/**', 'node_modules/**', 'coverage/**', '.claude/**', '.worktrees/**']),
 ]);
