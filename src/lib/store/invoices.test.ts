@@ -95,7 +95,7 @@ describeStore(['settings', 'customers', 'invoices'], 'invoices under concurrent 
     const customerId = (await store.listCustomers(nexio)).items[0].id;
     expect((await store.listInvoices(nexio)).total).toBe(2);
 
-    const issued = await Promise.all(Array.from({ length: 20 }, (_, index) => store.createIssuedInvoice(nexio, { customerId, invoiceDate: '2026-11-02', dueDate: '2026-11-16', taxableMinor: 1000 * (index + 1) })));
+    const issued = await Promise.all(Array.from({ length: 20 }, (_, index) => index).map((index) => store.createIssuedInvoice(nexio, { customerId, invoiceDate: '2026-11-02', dueDate: '2026-11-16', taxableMinor: 1000 * (index + 1) })));
 
     expect(issued.map((invoice) => invoice.invoiceNumber).sort()).toEqual(Array.from({ length: 20 }, (_, index) => `NEX-${String(index + 3).padStart(4, '0')}`));
     expect((await store.createIssuedInvoice(nexio, { customerId, invoiceDate: '2026-11-03', dueDate: '2026-11-17', taxableMinor: 500 })).invoiceNumber).toBe('NEX-0023');
