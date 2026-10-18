@@ -9,7 +9,7 @@ function paymentFromRow(row: Record<string, unknown>): TenantPayment {
 }
 function reminderFromRow(row: Record<string, unknown>): PaymentReminder { return { id: String(row.id), invoiceId: String(row.invoice_id), channel: row.channel as PaymentReminder['channel'], note: String(row.note), createdAt: String(row.created_at) }; }
 function daysLate(dueDate: string, today = new Date().toISOString().slice(0, 10)) { const [year, month, day] = dueDate.split('-').map(Number); const [todayYear, todayMonth, todayDay] = today.split('-').map(Number); return Math.max(0, Math.floor((Date.UTC(todayYear, todayMonth - 1, todayDay) - Date.UTC(year, month - 1, day)) / 86_400_000)); }
-function agingFor(days: number): PendingPayment['agingBucket'] { if (days === 0) return 'Current'; if (days <= 30) return '1â€“30'; if (days <= 60) return '31â€“60'; if (days <= 90) return '61â€“90'; return '90+'; }
+function agingFor(days: number): PendingPayment['agingBucket'] { if (days === 0) return 'Current'; if (days <= 30) return '1–30'; if (days <= 60) return '31–60'; if (days <= 90) return '61–90'; return '90+'; }
 
 export function createPaymentMethods(database: DatabaseSync) {
   return {
