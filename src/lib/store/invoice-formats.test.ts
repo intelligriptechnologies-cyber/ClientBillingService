@@ -218,6 +218,45 @@ describeStore(AREAS, 'default format per customer', () => {
   });
 });
 
+describeStore(AREAS, 'invoice formats under concurrent requests', () => {
+  async function racing() {
+    const { store, admin, definition } = await setup();
+    // Open two pooled connections first, so the racing requests start together instead of one waiting to connect.
+    await Promise.all([store.listCustomers(admin), store.listCustomers(admin)]);
+    return { store, admin, definition };
+  }
+
+  it('creates the Standard format once when a tenant first lists its formats twice at once', async () => {
+    const { store, admin } = await racing();
+
+    const lists = await Promise.all([store.listInvoiceFormats(admin), store.listInvoiceFormats(admin)]);
+
+    expect(lists.map((formats) => formats.map((format) => format.name))).toEqual([['Standard'], ['Standard']]);
+    expect(lists[0]).toEqual(lists[1]);
+  });
+
+  it('refuses the second of two formats created at once with one name in different case', async () => {
+    const { store, admin, definition } = await racing();
+    await store.listInvoiceFormats(admin);
+
+    const results = await Promise.allSettled([store.createInvoiceFormat(admin, { name: 'Lean', definition: definition() }), store.createInvoiceFormat(admin, { name: 'LEAN', definition: definition() })]);
+
+    expect(results.map((result) => result.status).sort()).toEqual(['fulfilled', 'rejected']);
+    expect(results.find((result) => result.status === 'rejected')).toMatchObject({ reason: expect.objectContaining({ message: 'A format with that name already exists.' }) });
+    expect((await store.listInvoiceFormats(admin)).map((format) => format.name.toLowerCase())).toEqual(['standard', 'lean']);
+  });
+
+  it('keeps exactly one default when two formats are made the default at once', async () => {
+    const { store, admin, definition } = await racing();
+    const lean = await store.createInvoiceFormat(admin, { name: 'Lean', definition: definition() });
+    const retainer = await store.createInvoiceFormat(admin, { name: 'Retainer', definition: definition() });
+
+    await Promise.all([store.setDefaultInvoiceFormat(admin, lean.id), store.setDefaultInvoiceFormat(admin, retainer.id)]);
+
+    expect((await store.listInvoiceFormats(admin)).filter((format) => format.isDefault)).toHaveLength(1);
+  });
+});
+
 describe('migration', () => {
   it('adds the formats table to a database that predates it and leaves existing invoices without a format', async () => {
     const folder = mkdtempSync(join(tmpdir(), 'formats-'));

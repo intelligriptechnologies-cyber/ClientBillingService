@@ -1,5 +1,5 @@
 import { expect, it } from 'vitest';
-import { describeStore, storeForTest, registerSeller } from './test-store';
+import { describeStore, memberContext, storeForTest, registerSeller } from './test-store';
 import { tenantContextOf } from '../auth/session-context';
 
 describeStore(['settings', 'customers', 'services', 'contracts', 'invoices'], 'invoices', () => {
@@ -74,5 +74,64 @@ describeStore(['settings', 'customers', 'services', 'contracts', 'invoices'], 'i
     await store.updateTenantSettings(tenantContextOf(nexio), { ...await store.getTenantSettings(tenantContextOf(nexio)), companyName: 'Changed company', invoicePrefix: 'NEW' });
     expect(await store.getInvoice(tenantContextOf(nexio), issued.id)).toMatchObject({ invoiceNumber: expect.stringContaining('NEX'), snapshot: expect.objectContaining({ companyName: 'Nexio Hyper', customerName: customer.companyName, gstRate: 18 }) });
     expect(await store.getInvoice(tenantContextOf(evo), issued.id)).toBeNull();
+  });
+});
+
+describeStore(['settings', 'customers', 'invoices'], 'invoices under concurrent requests', () => {
+  async function withInvoice() {
+    const store = await storeForTest();
+    const nexio = await memberContext(store, 'nexio-admin');
+    // Open two pooled connections first, so the racing requests start together instead of one waiting to connect.
+    await Promise.all([store.listInvoices(nexio), store.listInvoices(nexio)]);
+    const customerId = (await store.listCustomers(nexio)).items[0].id;
+    const issue = (taxableMinor = 10000) => store.createIssuedInvoice(nexio, { customerId, invoiceDate: '2026-11-02', dueDate: '2026-11-16', taxableMinor });
+    return { store, nexio, issue, invoice: await issue() };
+  }
+  const correction = { invoiceDate: '2026-11-02', dueDate: '2026-11-20', taxableMinor: 12000 };
+
+  it('numbers 20 invoices issued at once 3 to 22, after the two the tenant already has, with no gap and no repeat', async () => {
+    const store = await storeForTest();
+    const nexio = await memberContext(store, 'nexio-admin');
+    const customerId = (await store.listCustomers(nexio)).items[0].id;
+    expect((await store.listInvoices(nexio)).total).toBe(2);
+
+    const issued = await Promise.all(Array.from({ length: 20 }, (_, index) => store.createIssuedInvoice(nexio, { customerId, invoiceDate: '2026-11-02', dueDate: '2026-11-16', taxableMinor: 1000 * (index + 1) })));
+
+    expect(issued.map((invoice) => invoice.invoiceNumber).sort()).toEqual(Array.from({ length: 20 }, (_, index) => `NEX-${String(index + 3).padStart(4, '0')}`));
+    expect((await store.createIssuedInvoice(nexio, { customerId, invoiceDate: '2026-11-03', dueDate: '2026-11-17', taxableMinor: 500 })).invoiceNumber).toBe('NEX-0023');
+  });
+
+  it('replaces an invoice once when two corrections of it run at once', async () => {
+    const { store, nexio, invoice } = await withInvoice();
+
+    const results = await Promise.allSettled([store.correctInvoice(nexio, invoice.id, correction, 'First'), store.correctInvoice(nexio, invoice.id, correction, 'Second')]);
+
+    expect(results.map((result) => result.status).sort()).toEqual(['fulfilled', 'rejected']);
+    expect((await store.listInvoices(nexio, { pageSize: 100 })).items.filter((item) => item.status === 'issued' && item.taxableMinor === 12000)).toHaveLength(1);
+    expect((await store.listOperationalLogs(nexio)).filter((log) => log.message.startsWith(`Invoice ${invoice.invoiceNumber} corrected`))).toHaveLength(1);
+  });
+
+  it('lets only one of a void and a correction of one invoice through when they run at once', async () => {
+    const { store, nexio, invoice } = await withInvoice();
+
+    const results = await Promise.allSettled([store.voidInvoice(nexio, invoice.id, 'Issued in error'), store.correctInvoice(nexio, invoice.id, correction, 'Price change')]);
+
+    expect(results.map((result) => result.status).sort()).toEqual(['fulfilled', 'rejected']);
+    const replacements = (await store.listInvoices(nexio, { pageSize: 100 })).items.filter((item) => item.taxableMinor === 12000);
+    expect(replacements).toHaveLength(results[1].status === 'fulfilled' ? 1 : 0);
+  });
+});
+
+describeStore(['settings', 'customers', 'invoices'], 'invoice corrections', () => {
+  it('leaves the original issued and spends no number when the replacement is refused', async () => {
+    const store = await storeForTest();
+    const nexio = await memberContext(store, 'nexio-admin');
+    const customerId = (await store.listCustomers(nexio)).items[0].id;
+    const original = await store.createIssuedInvoice(nexio, { customerId, invoiceDate: '2026-11-02', dueDate: '2026-11-16', taxableMinor: 10000 });
+
+    await expect(store.correctInvoice(nexio, original.id, { invoiceDate: '2026-11-02', dueDate: '2026-11-16', taxableMinor: 12000, gstRate: 18 }, 'Add tax')).rejects.toThrow('Add your GSTIN');
+
+    expect(await store.getInvoice(nexio, original.id)).toMatchObject({ status: 'issued', invoiceNumber: 'NEX-0003' });
+    expect((await store.correctInvoice(nexio, original.id, { invoiceDate: '2026-11-02', dueDate: '2026-11-16', taxableMinor: 12000 }, 'Price change')).invoiceNumber).toBe('NEX-0004');
   });
 });
