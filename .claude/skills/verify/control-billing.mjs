@@ -471,7 +471,7 @@ async function cmdUp(flags) {
   mkdirSync(join(workspace, 'logs'), { recursive: true });
   const logFile = join(workspace, 'logs', `server-${runId}.log`);
   const out = openSync(logFile, 'a');
-  const env = { ...process.env, NODE_ENV: 'production', NEXT_TELEMETRY_DISABLED: '1', CLIENT_BILLING_DATABASE: dbPath, CLIENT_BILLING_SEED_MODE: 'demo' };
+  const env = { ...process.env, NODE_ENV: 'production', NEXT_TELEMETRY_DISABLED: '1', CLIENT_BILLING_DATABASE: dbPath, CLIENT_BILLING_SEED_MODE: 'demo', CLIENT_BILLING_MAIL_TRANSPORT: 'capture' };
   delete env.PORT; delete env.HOSTNAME;
   const child = spawn(process.execPath, [nextBin(deps), 'start', '-H', '127.0.0.1', '-p', String(port)], { cwd: app, env, detached: true, stdio: ['ignore', out, out], windowsHide: true });
   child.unref(); closeSync(out);
@@ -645,7 +645,7 @@ async function doApi(name, state, flags, method, path, bodyText, evidence) {
   const identity = flags.anonymous ? '(anonymous)' : identityFrom(flags, state);
   const session = flags.anonymous ? null : await sessionFor(name, state, identity);
   if (!path.startsWith('/')) throw new CliError(`api path must start with "/", got "${path}".`, 'Example: api GET /api/customers');
-  const headers = session ? { cookie: `${SESSION_COOKIE}=${session.cookie.value}` } : {};
+  const headers = { origin: state.url, ...(session ? { cookie: `${SESSION_COOKIE}=${session.cookie.value}` } : {}) };
   let payload;
   if (bodyText !== undefined) {
     try { JSON.parse(bodyText); } catch { throw new CliError('The body is not valid JSON.', `Pass one JSON argument, quoted for your shell, or use --body-file <file>. Received: ${bodyText.slice(0, 80)}. PowerShell strips inner double quotes from native arguments.`); }

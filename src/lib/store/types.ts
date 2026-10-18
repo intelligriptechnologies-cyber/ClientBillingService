@@ -50,8 +50,12 @@ export type AdditionalServiceList = { items: AdditionalService[]; total: number 
 export type TaskNote = { id: string; tenantId: string; customerId: string; customerName: string; date: string; note: string; createdAt: string; updatedAt: string };
 export type TaskNoteInput = { customerId: string; date: string; note: string };
 export type TaskNoteQuery = { customerId?: string; date?: string };
-export type TenantSettings = { companyName: string; legalName: string; gstin: string; stateCode: string; address: string; invoicePrefix: string; paymentTermsDays: number; footer: string; invoiceTemplate: string; emailSubject: string; emailBody: string; smtpHost: string; smtpPort: number; smtpFrom: string; logRetentionDays: number; logoDataUrl: string; stampDataUrl: string; signatureDataUrl: string; updatedAt: string };
-export type TenantSettingsInput = Omit<TenantSettings, 'updatedAt' | 'stateCode' | 'legalName'> & { legalName?: string };
+export type TenantSettings = { companyName: string; legalName: string; gstin: string; stateCode: string; address: string; invoicePrefix: string; paymentTermsDays: number; footer: string; invoiceTemplate: string; emailSubject: string; emailBody: string; smtpHost: string; smtpPort: number; smtpFrom: string; smtpUser: string; smtpPasswordSet: boolean; logRetentionDays: number; logoDataUrl: string; stampDataUrl: string; signatureDataUrl: string; updatedAt: string };
+/** smtpUser and smtpPassword left out keep the stored values. The password is write-only: an empty string clears it and nothing ever returns it. */
+export type TenantSettingsInput = Omit<TenantSettings, 'updatedAt' | 'stateCode' | 'legalName' | 'smtpUser' | 'smtpPasswordSet'> & { legalName?: string; smtpUser?: string; smtpPassword?: string };
+export type DeliveryStatus = 'sent' | 'failed' | 'not-configured';
+export type DeliveryRecord = { id: string; invoiceId: string; channel: 'email'; to: string[]; cc: string[]; subject: string; status: DeliveryStatus; error: string; attemptedAt: string; attemptedBy: string; attemptedByName: string };
+export type DeliveryInput = { invoiceId: string; to: string[]; cc: string[]; subject: string; status: DeliveryStatus; error: string };
 export type OperationalLog = { id: string; kind: 'feature-flow' | 'error'; message: string; createdAt: string };
 export type InvoiceStatus = 'issued' | 'paid' | 'partial' | 'overdue' | 'void';
 export type InvoiceSnapshot = { companyName: string; gstin: string; address: string; logoDataUrl: string; stampDataUrl: string; signatureDataUrl: string; customerName: string; customerEmail: string; customerAddress: string; gstRate: number; footer: string; invoiceTemplate?: string; venue?: string; customerPan?: string; customerGstin?: string; gstApplicable?: boolean; notes?: string; lines?: InvoiceLine[]; format?: SnapshotFormat } & Partial<GstSnapshotFields>;

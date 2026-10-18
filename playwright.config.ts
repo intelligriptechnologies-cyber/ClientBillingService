@@ -1,11 +1,13 @@
 import { defineConfig } from '@playwright/test';
-import { resolve } from 'node:path';
+import { dirname, resolve } from 'node:path';
 import { autheliaOrigin, autheliaPort, demoOrigin, demoPort, memberGroup, proxySecret, superadminGroup } from './e2e/test-ports';
 
 // Browser journeys intentionally share a database within one serial run, but
 // never inherit mutations from an earlier run or a developer's local demo.
 const databasePath = process.env.CLIENT_BILLING_DATABASE ?? resolve('.data', 'client-billing-e2e.sqlite');
 process.env.CLIENT_BILLING_DATABASE = databasePath;
+// The demo server writes outgoing mail here instead of sending it, and specs read it back.
+process.env.CLIENT_BILLING_MAIL_CAPTURE_FILE ??= resolve(dirname(databasePath), 'mail-capture.json');
 
 const serverCommand = (port: number) => process.env.CLIENT_BILLING_TEST_USE_START ? `npm run start -- --port ${port}` : `npm run dev -- --webpack --port ${port}`;
 const reuseExistingServer = !process.env.CI && !process.env.CLIENT_BILLING_TEST_PORT;
@@ -21,7 +23,7 @@ export default defineConfig({
   // The app rejects cookie POSTs without an Origin, and Playwright's API requests send none.
   use: { baseURL: demoOrigin, trace: 'retain-on-failure', extraHTTPHeaders: { Origin: demoOrigin } },
   webServer: [
-    { command: serverCommand(demoPort), url: demoOrigin, env: { ...process.env, CLIENT_BILLING_DATABASE: databasePath, CLIENT_BILLING_SEED_MODE: 'demo' }, reuseExistingServer },
+    { command: serverCommand(demoPort), url: demoOrigin, env: { ...process.env, CLIENT_BILLING_DATABASE: databasePath, CLIENT_BILLING_SEED_MODE: 'demo', CLIENT_BILLING_MAIL_TRANSPORT: 'capture' }, reuseExistingServer },
     {
       // A second server in authelia mode. Next locks one dist directory per dev server, so it gets its own.
       command: serverCommand(autheliaPort),

@@ -527,7 +527,6 @@ describe('tenant store', () => {
     expect(saved.companyName).toBe('Nexio Billing Services');
     expect(store.getTenantSettings(nexio)).toMatchObject({ invoicePrefix: 'NX', logoDataUrl: 'data:image/png;base64,logo' });
     expect(store.previewTenantTemplate(nexio)).toContain('Invoice NX-2026-001 for Acme Industries');
-    expect(store.testTenantSmtp(nexio)).toContain('SMTP test prepared');
     expect(store.listOperationalLogs(nexio).some((log) => log.kind === 'feature-flow')).toBe(true);
     expect(store.listOperationalLogs(evo)).toEqual([]);
   });

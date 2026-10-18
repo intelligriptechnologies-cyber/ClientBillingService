@@ -1,4 +1,8 @@
-﻿import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { settingsInput } from '@/lib/test-helpers';
 import { createTenantStore, type AppSession } from '@/lib/tenant-store';
 
 import * as additionalServices from '../app/api/additional-services/route';
@@ -17,6 +21,8 @@ import * as invoiceBulkDownload from '../app/api/invoices/bulk/download/route';
 import * as invoice from '../app/api/invoices/[invoiceId]/route';
 import * as invoiceDownload from '../app/api/invoices/[invoiceId]/download/route';
 import * as invoiceHtml from '../app/api/invoices/[invoiceId]/html/route';
+import * as invoiceSend from '../app/api/invoices/[invoiceId]/send/route';
+import * as invoiceDeliveries from '../app/api/invoices/[invoiceId]/deliveries/route';
 import * as logs from '../app/api/logs/route';
 import * as payments from '../app/api/payments/route';
 import * as paymentsDownload from '../app/api/payments/download/route';
@@ -34,6 +40,7 @@ import * as services from '../app/api/services/route';
 import * as service from '../app/api/services/[serviceId]/route';
 import * as settings from '../app/api/settings/route';
 import * as settingsPreview from '../app/api/settings/preview/route';
+import * as smtpTest from '../app/api/settings/smtp-test/route';
 import * as taskNotes from '../app/api/task-notes/route';
 import * as taskNote from '../app/api/task-notes/[noteId]/route';
 import * as tenants from '../app/api/tenants/route';
@@ -68,7 +75,10 @@ function must<T>(value: T | null | undefined): T {
   return value;
 }
 
+const SMTP_SECRET = 'nexio-smtp-secret-9f3a';
+
 function seedTenantA(session: AppSession) {
+  store.updateTenantSettings(session, { ...settingsInput(store.getTenantSettings(session)), smtpHost: 'smtp.nexio-secret.example', smtpFrom: 'billing@nexio-secret.example', smtpUser: 'nexio-smtp-user', smtpPassword: SMTP_SECRET });
   const customerId = must(store.listCustomers(session).items[0]).id;
   const contractId = must(store.listContracts(session).items[0]).id;
   const serviceId = must(store.listServices(session).find((item) => item.status === 'active')).id;
@@ -79,8 +89,9 @@ function seedTenantA(session: AppSession) {
   const userId = store.createTenantUser(session, { name: 'Nexio-secret colleague', email: 'secret@nexio.example', role: 'user' }).id;
   const formatId = store.createInvoiceFormat(session, { name: 'Nexio-secret format', definition: formatDefinition }).id;
   store.recordOperationalError(session, 'nexio-secret-operation', new Error('Nexio-secret failure'));
+  const deliveryId = store.recordDelivery(session, { invoiceId: pending.id, to: ['secret-recipient@nexio-secret.example'], cc: [], subject: 'Nexio-secret subject', status: 'sent', error: '' }).id;
   return {
-    customerId, contractId, serviceId, additionalServiceId, noteId, quotationId, userId, formatId,
+    customerId, contractId, serviceId, additionalServiceId, noteId, quotationId, userId, formatId, deliveryId,
     invoiceId: pending.id,
     invoiceNumber: pending.invoiceNumber,
     paymentId: must(store.listPayments(session).items[0]).id,
@@ -98,6 +109,8 @@ function snapshot(session: AppSession) {
     quotations: store.listQuotations(session), notes: store.listTaskNotes(session), users: store.listTenantUsers(session),
     logs: store.listOperationalLogs(session), settings: store.getTenantSettings(session), bulkRuns: store.listBulkInvoiceRuns(session), formats: store.listInvoiceFormats(session),
     audit: contractItems.map((item) => store.listContractAudit(session, item.id)),
+    deliveries: store.listInvoices(session, query).items.map((item) => store.listDeliveries(session, item.id)),
+    smtp: store.getSmtpSettings(session),
   };
 }
 
@@ -119,19 +132,23 @@ async function call(handler: Handler, as: AppSession, init: { url?: string; meth
   return { status: response.status, text: await response.text() };
 }
 
+let captureDirectory: string; let captureFile: string;
+
 beforeEach(() => {
   store = createTenantStore(':memory:');
   world.store = store;
   tenantA = must(store.authenticate('nexio-admin'));
   tenantB = must(store.authenticate('evo-admin'));
+  captureDirectory = mkdtempSync(join(tmpdir(), 'isolation-mail-')); captureFile = join(captureDirectory, 'mail-capture.json');
+  vi.stubEnv('CLIENT_BILLING_MAIL_TRANSPORT', 'capture'); vi.stubEnv('CLIENT_BILLING_MAIL_CAPTURE_FILE', captureFile);
 });
 
-afterEach(() => { store.close(); });
+afterEach(() => { store.close(); vi.unstubAllEnvs(); rmSync(captureDirectory, { recursive: true, force: true }); });
 
 const customerBody = { companyName: 'Hijacked Co', contactName: 'Mallory', email: 'm@evil.example', phone: '1', gstin: '', billingAddress: 'Evil street', invoiceDelivery: 'manual' };
 const contractBody = (f: Fixtures) => ({ name: 'Cross-tenant contract', customerId: f.customerId, serviceIds: [f.serviceId], startDate: '2026-01-01', endDate: '2026-12-31', valueMinor: 1000, paymentTermsDays: 14, billingFrequency: 'monthly', invoiceMonths: [], cycleDay: 1, escalationPercent: 0, escalationReviewDate: '', renewalNoticeDays: 30, securityDepositMinor: 0 });
 
-type Kind = 'invoice formats' | 'customers' | 'contracts' | 'invoices' | 'payments' | 'deposits' | 'renewals' | 'services' | 'additional services' | 'quotations' | 'task notes' | 'users' | 'logs';
+type Kind = 'deliveries' | 'invoice formats' | 'customers' | 'contracts' | 'invoices' | 'payments' | 'deposits' | 'renewals' | 'services' | 'additional services' | 'quotations' | 'task notes' | 'users' | 'logs';
 type Case = { kind: Kind; name: string; run: (as: AppSession, f: Fixtures) => Promise<Reply>; owns?: (f: Fixtures) => string; read?: boolean; leak?: string };
 
 const id = (key: keyof Fixtures) => (f: Fixtures) => String(f[key]);
@@ -151,6 +168,10 @@ const cases: Case[] = [
   { kind: 'invoices', name: 'PATCH /api/invoices/[id] corrects', run: (as, f) => call(invoice.PATCH, as, { method: 'PATCH', body: { reason: 'hijack', correction: { customerId: f.customerId, invoiceDate: '2026-10-07', dueDate: '2026-10-21', taxableMinor: 100 } }, params: { invoiceId: f.invoiceId } }) },
   { kind: 'invoices', name: 'POST /api/invoices with foreign customer', run: (as, f) => call(invoices.POST, as, { method: 'POST', body: { customerId: f.customerId, invoiceDate: '2026-10-07', dueDate: '2026-10-21', taxableMinor: 100 } }) },
   { kind: 'invoices', name: 'POST /api/invoices with foreign contract', run: (as, f) => call(invoices.POST, as, { method: 'POST', body: { contractId: f.contractId, invoiceDate: '2026-10-07', dueDate: '2026-10-21', taxableMinor: 100 } }) },
+  { kind: 'deliveries', name: 'GET /api/invoices/[id]/deliveries lists', run: (as, f) => call(invoiceDeliveries.GET, as, { params: { invoiceId: f.invoiceId } }) },
+  { kind: 'deliveries', name: 'POST /api/invoices/[id]/send emails', run: (as, f) => call(invoiceSend.POST, as, { method: 'POST', body: {}, params: { invoiceId: f.invoiceId } }) },
+  { kind: 'deliveries', name: 'POST /api/invoices/[id]/send with a recipient and message', run: (as, f) => call(invoiceSend.POST, as, { method: 'POST', body: { to: 'ap@acme.example', cc: 'boss@acme.example', message: 'Hijacked' }, params: { invoiceId: f.invoiceId } }) },
+  { kind: 'deliveries', name: 'POST /api/settings/smtp-test tests only the caller settings', run: (as) => call(smtpTest.POST, as, { method: 'POST' }) },
   { kind: 'invoice formats', name: 'GET /api/invoice-formats lists', owns: id('formatId'), run: (as) => call(invoiceFormats.GET, as) },
   { kind: 'invoice formats', name: 'PUT /api/invoice-formats/[id] updates', run: (as, f) => call(invoiceFormat.PUT, as, { method: 'PUT', body: { name: 'Hijacked', definition: formatDefinition }, params: { formatId: f.formatId } }) },
   { kind: 'invoice formats', name: 'DELETE /api/invoice-formats/[id] deletes', run: (as, f) => call(invoiceFormat.DELETE, as, { method: 'DELETE', params: { formatId: f.formatId } }) },
@@ -247,6 +268,9 @@ describe('store functions reached by id without a route', () => {
       ['getQuotation', () => store.getQuotation(tenantB, f.quotationId)],
       ['getInvoice', () => store.getInvoice(tenantB, f.invoiceId)],
       ['getPayment', () => store.getPayment(tenantB, f.paymentId)],
+      ['listDeliveries', () => store.listDeliveries(tenantB, f.invoiceId)],
+      ['recordDelivery', () => store.recordDelivery(tenantB, { invoiceId: f.invoiceId, to: ['x@y.example'], cc: [], subject: 'planted', status: 'sent', error: '' })],
+      ['getCustomer', () => store.getCustomer(tenantB, f.customerId)],
     ];
     for (const [name, run] of attempts) {
       let outcome: unknown;
@@ -254,6 +278,70 @@ describe('store functions reached by id without a route', () => {
       expect(outcome, name).toBeNull();
     }
     expect(snapshot(tenantA)).toEqual(before);
+  });
+});
+
+describe('the delivery log and mail settings', () => {
+  it('lists an invoice\'s deliveries to the owning tenant, with the defaults the send dialog needs', async () => {
+    const f = seedTenantA(tenantA);
+    const reply = await call(invoiceDeliveries.GET, tenantA, { params: { invoiceId: f.invoiceId } });
+    const body = JSON.parse(reply.text) as { deliveries: Array<{ id: string; status: string; to: string[] }>; defaults: { to: string; subject: string; message: string; configured: boolean } };
+    expect(body.deliveries.map((item) => item.id)).toEqual([f.deliveryId]);
+    expect(body.defaults).toMatchObject({ to: 'billing@nexio.example', configured: true });
+  });
+
+  it('writes no delivery row and no captured message when another tenant sends a foreign invoice', async () => {
+    const f = seedTenantA(tenantA);
+    const before = snapshot(tenantA); const evoBefore = snapshot(tenantB);
+    const reply = await call(invoiceSend.POST, tenantB, { method: 'POST', body: { to: 'ap@acme.example' }, params: { invoiceId: f.invoiceId } });
+    expect(reply.status).toBe(404);
+    expect(existsSync(captureFile)).toBe(false);
+    expect(snapshot(tenantA)).toEqual(before);
+    expect(snapshot(tenantB)).toEqual(evoBefore);
+  });
+
+  it('answers 400 and sends nothing when the request body is not valid JSON, and uses the defaults for an empty body', async () => {
+    const f = seedTenantA(tenantA);
+    world.session = tenantA;
+    const send = (body: string) => invoiceSend.POST(new Request('http://localhost/', { method: 'POST', body }), { params: Promise.resolve({ invoiceId: f.invoiceId }) });
+    expect((await send('{"to":"ap@acme.example"')).status).toBe(400);
+    expect(existsSync(captureFile)).toBe(false);
+    expect(store.listDeliveries(tenantA, f.invoiceId)).toHaveLength(1);
+    expect((await send('')).status).toBe(200);
+    expect(JSON.parse(readFileSync(captureFile, 'utf8'))[0].to).toEqual(['billing@nexio.example']);
+  }, 30_000);
+
+  it('delivers the owning tenant\'s message with the PDF through the capture transport', async () => {
+    const f = seedTenantA(tenantA);
+    const reply = await call(invoiceSend.POST, tenantA, { method: 'POST', body: { to: 'ap@acme.example' }, params: { invoiceId: f.invoiceId } });
+    expect(reply.status).toBe(200);
+    const captured = JSON.parse(readFileSync(captureFile, 'utf8')) as Array<{ to: string[]; from: string; attachments: Array<{ contentBase64: string }> }>;
+    expect(captured).toHaveLength(1);
+    expect(captured[0]).toMatchObject({ to: ['ap@acme.example'], from: 'billing@nexio-secret.example' });
+    expect(Buffer.from(captured[0].attachments[0].contentBase64, 'base64').subarray(0, 4).toString()).toBe('%PDF');
+    expect(store.listDeliveries(tenantA, f.invoiceId)).toHaveLength(2);
+  }, 30_000);
+
+  it('never returns the SMTP password from the settings or SMTP test routes, to its owner or anyone else', async () => {
+    seedTenantA(tenantA);
+    const input = settingsInput(store.getTenantSettings(tenantA));
+    const replies = [
+      await call(settings.GET, tenantA), await call(settings.PUT, tenantA, { method: 'PUT', body: { ...input, companyName: 'Nexio Renamed' } }),
+      await call(settings.PUT, tenantA, { method: 'PUT', body: { ...input, smtpPassword: SMTP_SECRET } }), await call(smtpTest.POST, tenantA, { method: 'POST' }),
+      await call(settings.GET, tenantB), await call(logs.GET, tenantA),
+    ];
+    for (const reply of replies) expect(reply.text).not.toContain(SMTP_SECRET);
+    expect(JSON.parse(replies[0].text).settings).toMatchObject({ smtpUser: 'nexio-smtp-user', smtpPasswordSet: true });
+    expect(store.getSmtpSettings(tenantA).password).toBe(SMTP_SECRET);
+    expect(store.getSmtpSettings(tenantB).password).toBe('');
+  });
+
+  it('refuses a tenant user who tries to change SMTP settings', async () => {
+    seedTenantA(tenantA);
+    const user = must(store.authenticate('nexio-user'));
+    const input = settingsInput(store.getTenantSettings(tenantA));
+    expect((await call(settings.PUT, user, { method: 'PUT', body: { ...input, smtpPassword: 'planted' } })).status).toBeGreaterThanOrEqual(400);
+    expect(store.getSmtpSettings(tenantA).password).toBe(SMTP_SECRET);
   });
 });
 

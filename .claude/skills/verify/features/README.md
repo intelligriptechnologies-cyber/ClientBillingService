@@ -48,7 +48,8 @@ Each feature file starts with an H1 title and one paragraph describing the user-
 - [Contracts and renewals](./contracts.md) covers contract creation and validation, the renewal tracker, and the security-deposit ledger.
 - [Customers and services](./customers-services.md) covers customer create, filter, edit, deactivate and tenant isolation, plus the service catalogue and quotations.
 - [GST sales report and exports](./gst-reports.md) covers the monthly GST register, CSV, HSN CSV and PDF exports, and the seller and client GST setup that shapes them.
-- [Settings and templates](./settings-templates.md) covers company settings, template preview, the local SMTP test and operational logs.
+- [Settings and templates](./settings-templates.md) covers company settings, template preview, the SMTP test and operational logs.
+- [Email delivery](./email.md) covers sending an invoice by email with the PDF attached, the per-invoice delivery log, and email payment reminders.
 - [Tenants (superadmin)](./tenants.md) covers platform tenant creation, editing, disabling, re-enabling and history.
 - [Demo login](./demo-login.md) covers the identity picker, role-based navigation, sign out and route protection.
 
