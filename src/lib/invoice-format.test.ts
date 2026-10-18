@@ -15,6 +15,32 @@ describe('parseFormatDefinition', () => {
     expect(parseFormatDefinition({ ...BUILTIN_DEFINITION, blocks }).blocks.upiQr).toBe(BUILTIN_DEFINITION.blocks.upiQr);
   });
 
+  it('accepts the panel layout with a second accent and a UPI ID, lower-casing the colour', () => {
+    const input = { ...BUILTIN_DEFINITION, layout: 'panel', accent: '#092A50', accentSecondary: '#079C9D', upiId: ' test@upi.example ', blocks: { ...BUILTIN_DEFINITION.blocks, upiId: true } };
+    expect(parseFormatDefinition(input)).toEqual({ ...input, accent: '#092a50', accentSecondary: '#079c9d', upiId: 'test@upi.example' });
+  });
+
+  it('adds nothing for a definition without the new fields, and drops an empty UPI ID', () => {
+    expect(Object.keys(parseFormatDefinition(BUILTIN_DEFINITION))).toEqual(Object.keys(BUILTIN_DEFINITION));
+    expect(parseFormatDefinition({ ...BUILTIN_DEFINITION, upiId: '  ' })).not.toHaveProperty('upiId');
+  });
+
+  it.each([
+    ['a second accent that is not six hex digits', { ...BUILTIN_DEFINITION, accentSecondary: 'teal' }, /colour/i],
+    ['a second accent that could close the style element', { ...BUILTIN_DEFINITION, accentSecondary: '#fff}</style><script>' }, /colour/i],
+    ['a second accent too light for white headings', { ...BUILTIN_DEFINITION, accentSecondary: '#f5f5a0' }, /darker/i],
+    ['a UPI ID that is not text', { ...BUILTIN_DEFINITION, upiId: 7 }, /UPI/],
+    ['a UPI ID over the limit', { ...BUILTIN_DEFINITION, upiId: 'x'.repeat(101) }, /UPI/],
+    ['a UPI ID on two lines', { ...BUILTIN_DEFINITION, upiId: 'a@b\nc@d' }, /UPI/],
+  ])('rejects %s', (_label, input, message) => {
+    expect(() => parseFormatDefinition(input)).toThrow(message);
+  });
+
+  it('keeps the teal of a real client template, which is lighter than the primary accent rule allows', () => {
+    expect(parseFormatDefinition({ ...BUILTIN_DEFINITION, accentSecondary: '#079c9d' }).accentSecondary).toBe('#079c9d');
+    expect(() => parseFormatDefinition({ ...BUILTIN_DEFINITION, accent: '#079c9d' })).toThrow(/darker/i);
+  });
+
   it.each([
     ['null', null, /format/i],
     ['an unknown layout', { ...BUILTIN_DEFINITION, layout: 'fancy' }, /layout/i],

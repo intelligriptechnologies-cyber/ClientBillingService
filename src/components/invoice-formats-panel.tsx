@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ConfirmDialog } from '@/components/confirm-dialog';
 import { reportClientException } from '@/lib/client-error';
-import { BANK_DETAILS_LIMIT, BLOCKS, BUILTIN_DEFINITION, LAYOUTS, LOGO_CHOICES, NAME_LIMIT, TERMS_LIMIT, parseFormatDefinition, snapshotFormat, type BlockId, type FormatDefinition, type InvoiceFormat, type LayoutId, type LogoChoice } from '@/lib/invoice-format';
+import { BANK_DETAILS_LIMIT, BLOCKS, BUILTIN_DEFINITION, LAYOUTS, LOGO_CHOICES, NAME_LIMIT, TERMS_LIMIT, UPI_ID_LIMIT, parseFormatDefinition, snapshotFormat, type BlockId, type FormatDefinition, type InvoiceFormat, type LayoutId, type LogoChoice } from '@/lib/invoice-format';
 import { sampleInvoice } from '@/lib/invoice-format-sample';
 import { renderInvoiceHtml } from '@/lib/invoice-html';
 import type { TenantSettings } from '@/lib/tenant-store';
@@ -12,7 +12,7 @@ import { apiFetch } from '@/lib/api-client';
 type Draft = { id: string | null; name: string; definition: FormatDefinition; isDefault: boolean };
 const PAGE_WIDTH = 794;
 const PAGE_HEIGHT = 1123;
-const LAYOUT_NOTES: Record<LayoutId, string> = { classic: 'Roomy header and rows. Reads well on screen.', compact: 'Tighter spacing. Fits more lines on a page.' };
+const LAYOUT_NOTES: Record<LayoutId, string> = { classic: 'Roomy header and rows. Reads well on screen.', compact: 'Tighter spacing. Fits more lines on a page.', panel: 'Tinted parties band, ruled item table, bank and UPI panel beside the totals.' };
 
 function Preview({ branding, definition, name }: { branding: TenantSettings; definition: FormatDefinition; name: string }) {
   const frame = useRef<HTMLDivElement>(null);
@@ -32,6 +32,8 @@ function FormatEditor({ initial, branding, onSaved, onCancel }: { initial: Draft
   const [draft, setDraft] = useState(initial);
   const [accentText, setAccentText] = useState(initial.definition.accent);
   const [accentError, setAccentError] = useState('');
+  const [secondaryText, setSecondaryText] = useState(initial.definition.accentSecondary ?? '');
+  const [secondaryError, setSecondaryError] = useState('');
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
   const { definition } = draft;
@@ -40,6 +42,12 @@ function FormatEditor({ initial, branding, onSaved, onCancel }: { initial: Draft
     setAccentText(value);
     try { change({ accent: parseFormatDefinition({ ...definition, accent: value }).accent }); setAccentError(''); }
     catch (cause) { setAccentError(cause instanceof Error ? cause.message : 'Choose a different colour.'); }
+  };
+  const setSecondary = (value: string) => {
+    setSecondaryText(value);
+    if (!value.trim()) { change({ accentSecondary: undefined }); setSecondaryError(''); return; }
+    try { change({ accentSecondary: parseFormatDefinition({ ...definition, accentSecondary: value }).accentSecondary }); setSecondaryError(''); }
+    catch (cause) { setSecondaryError(cause instanceof Error ? cause.message : 'Choose a different colour.'); }
   };
   const save = async (event: React.FormEvent) => {
     event.preventDefault(); setError(''); setSaving(true);
@@ -55,14 +63,16 @@ function FormatEditor({ initial, branding, onSaved, onCancel }: { initial: Draft
     <div className="formats-form">
       <label className="field"><span>Format name</span><input className="input" required maxLength={NAME_LIMIT} value={draft.name} onChange={(event) => setDraft({ ...draft, name: event.target.value })} /></label>
       <fieldset><legend>Base layout</legend><div className="layout-options">{(Object.keys(LAYOUTS) as LayoutId[]).map((id) => <label key={id} className="layout-option"><input type="radio" name="layout" value={id} checked={definition.layout === id} onChange={() => change({ layout: id })} /><strong>{LAYOUTS[id]}</strong><span className="hint">{LAYOUT_NOTES[id]}</span></label>)}</div></fieldset>
-      <fieldset><legend>Blocks on the invoice</legend><div className="check-list">{(Object.keys(BLOCKS) as BlockId[]).map((id) => <label key={id}><input type="checkbox" checked={definition.blocks[id]} onChange={(event) => change({ blocks: { ...definition.blocks, [id]: event.target.checked } })} />{BLOCKS[id]}</label>)}</div><p className="hint">The UPI QR slot is an empty box for now. Bank details and terms print only when they have text.</p></fieldset>
+      <fieldset><legend>Blocks on the invoice</legend><div className="check-list">{(Object.keys(BLOCKS) as BlockId[]).map((id) => <label key={id}><input type="checkbox" checked={Boolean(definition.blocks[id])} onChange={(event) => change({ blocks: { ...definition.blocks, [id]: event.target.checked } })} />{BLOCKS[id]}</label>)}</div><p className="hint">The UPI QR slot is an empty box for now. Bank details, terms and the UPI ID print only when they have text.</p></fieldset>
       <div className="field"><label htmlFor="format-accent">Accent colour</label><div className="color-row"><input type="color" aria-label="Pick accent colour" value={definition.accent} onChange={(event) => setAccent(event.target.value)} /><input id="format-accent" className="input" value={accentText} spellCheck={false} maxLength={7} aria-invalid={accentError ? true : undefined} onChange={(event) => setAccent(event.target.value)} /></div>{accentError ? <p className="form-error" role="alert">{accentError}</p> : <p className="hint">Used for the header rule and table headings.</p>}</div>
+      {definition.layout === 'panel' && <div className="field"><label htmlFor="format-accent-secondary">Second accent colour</label><div className="color-row"><input type="color" aria-label="Pick second accent colour" value={definition.accentSecondary ?? definition.accent} onChange={(event) => setSecondary(event.target.value)} /><input id="format-accent-secondary" className="input" value={secondaryText} placeholder={definition.accent} spellCheck={false} maxLength={7} aria-invalid={secondaryError ? true : undefined} onChange={(event) => setSecondary(event.target.value)} /></div>{secondaryError ? <p className="form-error" role="alert">{secondaryError}</p> : <p className="hint">Used by the Panel layout for the section labels, figure headings and tinted panels. Leave empty to follow the accent.</p>}</div>}
       <label className="field"><span>Logo</span><select className="select" value={definition.logo} onChange={(event) => change({ logo: event.target.value as LogoChoice })}>{(Object.keys(LOGO_CHOICES) as LogoChoice[]).map((id) => <option key={id} value={id}>{LOGO_CHOICES[id]}</option>)}</select></label>
       <label className="field"><span>Bank details to print</span><textarea className="textarea" maxLength={BANK_DETAILS_LIMIT} placeholder={'Account name\nBank, branch\nAccount number, IFSC'} value={definition.bankDetails} onChange={(event) => change({ bankDetails: event.target.value })} /></label>
+      <label className="field"><span>UPI ID to print</span><input className="input" maxLength={UPI_ID_LIMIT} placeholder="name@bank" spellCheck={false} value={definition.upiId ?? ''} onChange={(event) => change({ upiId: event.target.value })} /></label>
       <label className="field"><span>Terms to print</span><textarea className="textarea" maxLength={TERMS_LIMIT} placeholder="Payment due within 14 days. Late payments attract interest." value={definition.terms} onChange={(event) => change({ terms: event.target.value })} /></label>
       <label className="invoice-checkbox"><input type="checkbox" checked={draft.isDefault} onChange={(event) => setDraft({ ...draft, isDefault: event.target.checked })} disabled={initial.isDefault} /> Use as the default format for new invoices</label>
       {error && <p className="form-error" role="alert">{error}</p>}
-      <div className="toolbar"><button className="button button-primary" type="submit" disabled={saving || Boolean(accentError)}>{saving ? 'Saving...' : 'Save format'}</button><button className="button button-secondary" type="button" onClick={onCancel}>Cancel</button></div>
+      <div className="toolbar"><button className="button button-primary" type="submit" disabled={saving || Boolean(accentError) || Boolean(secondaryError)}>{saving ? 'Saving...' : 'Save format'}</button><button className="button button-secondary" type="button" onClick={onCancel}>Cancel</button></div>
     </div>
     <div className="formats-preview"><div className="panel-head formats-preview-head"><h3>Live preview</h3><span className="hint">Sample data with your branding</span></div><Preview branding={branding} definition={definition} name={draft.name} /></div>
   </form>;
