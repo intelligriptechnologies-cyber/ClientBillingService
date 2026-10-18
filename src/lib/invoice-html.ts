@@ -102,8 +102,14 @@ const TERMS_STYLES = `
 .terms { margin-top: 12px; break-inside: avoid; }
 `;
 
+function upiIdLine(format: FormatDefinition): string {
+  return format.blocks.upiId && format.upiId ? `<p>UPI ID: ${e(format.upiId)}</p>` : '';
+}
+
 function paymentHtml(format: FormatDefinition): string {
-  const bank = format.blocks.bankDetails && format.bankDetails ? `<div class="bank"><h3>Bank details</h3><p class="multiline">${e(format.bankDetails)}</p></div>` : '';
+  const bankText = format.blocks.bankDetails && format.bankDetails ? `<h3>Bank details</h3><p class="multiline">${e(format.bankDetails)}</p>` : '';
+  const upiText = upiIdLine(format);
+  const bank = bankText || upiText ? `<div class="bank">${bankText}${upiText}</div>` : '';
   const upi = format.blocks.upiQr ? UPI_SLOT_HTML : '';
   return bank || upi ? `<section class="payment">${bank}${upi}</section>` : '';
 }
@@ -203,7 +209,7 @@ function panelLinesHtml(rows: PrintedLine[], taxed: boolean, showHsn: boolean): 
 
 function panelBankHtml(format: FormatDefinition): string {
   const bank = format.blocks.bankDetails && format.bankDetails ? `<h3>BANK DETAILS</h3><p class="multiline">${e(format.bankDetails)}</p>` : '';
-  const upiId = format.blocks.upiId && format.upiId ? `<p>UPI ID: ${e(format.upiId)}</p>` : '';
+  const upiId = upiIdLine(format);
   const upi = upiId || format.blocks.upiQr ? `<h3>UPI</h3>${upiId}${format.blocks.upiQr ? UPI_SLOT_HTML : ''}` : '';
   return bank || upi ? `<div class="pn-bank">${bank}${upi}</div>` : '';
 }
