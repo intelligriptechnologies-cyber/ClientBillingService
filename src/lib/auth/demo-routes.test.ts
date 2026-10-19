@@ -39,9 +39,11 @@ describe('demo auth routes', () => {
     expect(listed.filter((identity) => identity.role !== 'superadmin')).toHaveLength(10);
     const response = await demoLogin.POST(login('superadmin'));
     expect(response.status).toBe(200);
-    expect(response.headers.get('set-cookie')).toContain('client-billing-demo-session=superadmin');
+    expect(response.headers.getSetCookie()).toEqual([expect.stringMatching(/^__Host-cbs_demo=platform;.*Path=\/.*Secure/i)]);
     const member = await demoLogin.POST(login('nexio-admin'));
-    expect(await member.json()).toMatchObject({ session: { id: 'nexio-admin', role: 'admin', tenantId: 'nexio' } });
+    expect(await member.json()).toMatchObject({ identity: { id: 'nexio-admin', role: 'admin', tenantId: 'nexio' } });
+    expect(member.headers.getSetCookie()).toEqual([expect.stringMatching(/^__Host-cbs_demo=nexio-admin;.*Path=\/.*Secure/i), expect.stringMatching(/^__Host-cbs_tenant=nexio;.*Path=\/.*Secure/i)]);
+    expect(member.headers.getSetCookie().join('\n')).not.toContain('client-billing-demo-session');
     expect((await demoLogin.POST(login('no-such-user'))).status).toBe(400);
   });
 
