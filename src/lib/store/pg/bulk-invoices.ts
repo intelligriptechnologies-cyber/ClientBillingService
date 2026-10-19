@@ -14,9 +14,9 @@ type Row = Record<string, unknown>;
 const runColumns = 'id, billing_period, generated_count, skipped_count, created_at';
 
 /**
- * The run for `billingPeriod` as it would go now. The period is a half-open range of days on the date columns, where
- * SQLite matches text prefixes. `lockAdditions` locks the unbilled additional services it bills, so none changes price
- * between the preview and being marked billed.
+ * The run for `billingPeriod` as it would go now. The period is a half-open range of days on the date columns.
+ * `lockAdditions` locks the unbilled additional services it bills, so none changes price between the preview and
+ * being marked billed.
  */
 async function preview(tx: Tx, tenantId: string, billingPeriod: string, lockAdditions = false): Promise<BulkInvoicePreview> {
   const days = billingPeriodDays(billingPeriod);

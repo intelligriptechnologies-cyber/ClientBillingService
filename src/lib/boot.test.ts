@@ -17,7 +17,7 @@ describe('checkConfigAtBoot', () => {
     expect(log.mock.calls.flat().join(' ')).toMatch(/demo.*production/i);
   });
 
-  it('exits when no database is configured instead of falling back to SQLite', () => {
+  it('exits when no database is configured', () => {
     const exit = vi.fn();
     const log = vi.fn();
     checkConfigAtBoot({}, exit as never, log);
@@ -25,24 +25,19 @@ describe('checkConfigAtBoot', () => {
     expect(log.mock.calls.flat().join(' ')).toMatch(/Refusing to start: No database is configured: DATABASE_URL and DATABASE_PLATFORM_URL unset/);
   });
 
-  it.each([
-    ['Postgres', postgres],
-    ['the legacy SQLite store asked for by name', { CLIENT_BILLING_STORE: 'sqlite' }],
-  ])('keeps running on an accepted config with %s', (_name, env) => {
+  it('keeps running on an accepted config with Postgres', () => {
     const exit = vi.fn();
-    checkConfigAtBoot(env, exit as never, vi.fn());
+    checkConfigAtBoot(postgres, exit as never, vi.fn());
     expect(exit).not.toHaveBeenCalled();
   });
 });
 
 describe('parseStoreConfig', () => {
   it.each([
-    ['both runtime URLs', postgres, { ok: true, config: { driver: 'pg', urls: { app: postgres.DATABASE_URL, platform: postgres.DATABASE_PLATFORM_URL } } }],
-    ['the legacy flag alone', { CLIENT_BILLING_STORE: 'sqlite', DATABASE_URL: '' }, { ok: true, config: { driver: 'sqlite' } }],
+    ['both runtime URLs', postgres, { ok: true, config: { urls: { app: postgres.DATABASE_URL, platform: postgres.DATABASE_PLATFORM_URL } } }],
     ['nothing', {}, { ok: false, reason: expect.stringContaining('DATABASE_URL and DATABASE_PLATFORM_URL unset') }],
     ['only DATABASE_URL', { DATABASE_URL: postgres.DATABASE_URL }, { ok: false, reason: expect.stringContaining('DATABASE_PLATFORM_URL unset') }],
-    ['the legacy flag and a DATABASE_URL', { ...postgres, CLIENT_BILLING_STORE: 'sqlite' }, { ok: false, reason: expect.stringContaining('not both') }],
-    ['an unknown store', { ...postgres, CLIENT_BILLING_STORE: 'mysql' }, { ok: false, reason: expect.stringContaining('sqlite or unset') }],
+    ['empty URLs', { DATABASE_URL: '', DATABASE_PLATFORM_URL: '' }, { ok: false, reason: expect.stringContaining('DATABASE_URL and DATABASE_PLATFORM_URL unset') }],
   ])('%s', (_name, env, expected) => {
     expect(parseStoreConfig(env)).toEqual(expected);
   });

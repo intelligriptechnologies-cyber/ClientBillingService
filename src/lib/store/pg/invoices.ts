@@ -77,7 +77,7 @@ async function issue(tx: Tx, tenantId: string, input: InvoiceInput): Promise<Ten
 
 export function createPgInvoiceMethods(db: Database) {
   return {
-    /** The month filter is a half-open range of days on the date column, where SQLite matches a text prefix; a month that is not YYYY-MM is ignored, as there. */
+    /** The month filter is a half-open range of days on the date column. A month that is not YYYY-MM is ignored. */
     async listInvoices(context: TenantContext, query: InvoiceQuery = {}): Promise<InvoiceList> {
       const conditions = ['invoices.tenant_id = $1'];
       const values: unknown[] = [context.tenantId];

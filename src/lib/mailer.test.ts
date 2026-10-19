@@ -132,10 +132,12 @@ describe('capture transport', () => {
     expect(result).toMatchObject({ status: 'verified' }); if (result.status === 'verified') expect(result.detail).toMatch(/capture/i);
   });
 
-  it('puts the file beside the database when no file is named, and under .data for an in-memory database', async () => {
-    const beside = createMailer({ env: { CLIENT_BILLING_MAIL_TRANSPORT: 'capture', CLIENT_BILLING_DATABASE: join(directory, 'app.sqlite') }, createTransport: fakeTransport().factory });
-    await beside.sendMail(message, smtp);
-    expect(existsSync(join(directory, 'mail-capture.json'))).toBe(true);
+  it('puts the file under .data in the working directory when no file is named', async () => {
+    const cwd = vi.spyOn(process, 'cwd').mockReturnValue(directory);
+    try {
+      await createMailer({ env: { CLIENT_BILLING_MAIL_TRANSPORT: 'capture' }, createTransport: fakeTransport().factory }).sendMail(message, smtp);
+    } finally { cwd.mockRestore(); }
+    expect(existsSync(join(directory, '.data', 'mail-capture.json'))).toBe(true);
   });
 
   it('refuses to run in production', async () => {

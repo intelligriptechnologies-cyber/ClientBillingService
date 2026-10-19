@@ -1,4 +1,4 @@
-// The demo data from src/lib/store/schema.ts, for Postgres (ADR 0001, unit D3). Run it on purpose with
+// The demo data: 5 tenants with their users, settings and seeded scenarios (ADR 0001, unit D3). Run it on purpose with
 // `npm run db:seed`, as cbs_owner through DATABASE_MIGRATE_URL; nothing seeds on app start. Every insert is
 // ON CONFLICT DO NOTHING, so a second run changes nothing. There is no superadmin row: the superadmin is an
 // Authelia group (ADR 0002, decision 3). Each demo user gets an authelia_username and no password.
@@ -10,7 +10,7 @@ type Queryable = Pick<pg.Client, 'query'>;
 
 const SEEDED_AT = '2026-10-01T09:00:00.000Z';
 
-// Each seller is registered, with a checksum-valid test GSTIN whose first two digits are its state. The legacy store seeds the same values.
+// Each seller is registered, with a checksum-valid test GSTIN whose first two digits are its state.
 const tenantSeeds = [
   { id: 'nexio', name: 'Nexio Hyper', adminEmail: 'Admin@nexio.com', userEmail: 'user@nexio.com', gstin: '29AABCN4821K1ZA', stateCode: '29' },
   { id: 'maasp', name: 'MAASP Associates', adminEmail: 'Admin@maasp.com', userEmail: 'user@massp.com', gstin: '27AABCM5932L1Z7', stateCode: '27' },

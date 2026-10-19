@@ -10,7 +10,7 @@ type ContractFields = ReturnType<typeof contractFields>;
 
 const contractWithCustomer = 'SELECT contracts.*, customers.company_name AS customer_name FROM contracts JOIN customers ON customers.tenant_id = contracts.tenant_id AND customers.id = contracts.customer_id';
 
-/** Contracts with the services each covers, in SQLite's bytewise name order. Bulk invoicing reads contracts through it too. */
+/** Contracts with the services each covers, in bytewise name order. Bulk invoicing reads contracts through it too. */
 export async function withServices(tx: Tx, tenantId: string, rows: Row[]): Promise<Contract[]> {
   if (!rows.length) return [];
   const { rows: services } = await tx.query<Row>(
@@ -53,7 +53,7 @@ async function deposits(tx: Tx, tenantId: string, depositId?: string): Promise<S
   return rows.map(parseDepositRow);
 }
 
-/** The contract search, as conditions on `contracts` joined with `customers`. ESCAPE '' keeps LIKE as SQLite reads it. */
+/** The contract search, as conditions on `contracts` joined with `customers`. ESCAPE '' leaves LIKE with no escape character. */
 function contractFilters(tenantId: string, query: ContractQuery) {
   const conditions = ['contracts.tenant_id = $1'];
   const values: unknown[] = [tenantId];

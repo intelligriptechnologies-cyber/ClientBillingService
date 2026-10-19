@@ -9,7 +9,7 @@ import { actorRole, renameUniqueViolation } from './shared';
 
 type Row = Record<string, unknown>;
 
-/** The tenant's formats, default first, then by name as SQLite's NOCASE orders it. */
+/** The tenant's formats, default first, then by name, ignoring ASCII case. */
 async function loadFormats(tx: Tx, tenantId: string): Promise<InvoiceFormat[]> {
   const { rows } = await tx.query<Row>('SELECT * FROM invoice_formats WHERE tenant_id = $1 ORDER BY is_default DESC, lower(name) COLLATE "C"', [tenantId]);
   return rows.map(parseInvoiceFormatRow);
