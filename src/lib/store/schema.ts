@@ -2,6 +2,9 @@ import type { DatabaseSync } from 'node:sqlite';
 import { stateFromGstin } from '../gst';
 import { now } from './shared';
 
+/** The management-consulting SAC the demo service bills under. db/seed/demo.ts seeds the same code. */
+const DEMO_HSN_SAC = '998311';
+
 type TenantSeed = { id: string; name: string; adminEmail: string; userEmail: string };
 
 const tenantSeeds: TenantSeed[] = [
@@ -57,7 +60,7 @@ export function seed(database: DatabaseSync) {
     const insertUser = database.prepare('INSERT INTO users (id, tenant_id, name, email, role, password, status) VALUES (?, ?, ?, ?, ?, ?, ?)');
     const insertRecord = database.prepare('INSERT INTO tenant_records (id, tenant_id, label) VALUES (?, ?, ?)');
     const insertCustomer = database.prepare('INSERT INTO customers (id, tenant_id, company_name, contact_name, email, phone, gstin, state_code, billing_address, invoice_delivery, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
-    const insertService = database.prepare('INSERT INTO services (id, tenant_id, name, description, status, monthly_minor, quarterly_minor, half_yearly_minor, annual_minor, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
+    const insertService = database.prepare('INSERT INTO services (id, tenant_id, name, description, hsn_sac, status, monthly_minor, quarterly_minor, half_yearly_minor, annual_minor, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
     for (const tenant of tenantSeeds) {
       insertTenant.run(tenant.id, tenant.name, 'active', timestamp, timestamp);
       insertUser.run(`${tenant.id}-admin`, tenant.id, `${tenant.name} Admin`, tenant.adminEmail, 'admin', 'admin123', 'active');
@@ -65,7 +68,7 @@ export function seed(database: DatabaseSync) {
       insertRecord.run(`${tenant.id}-baseline`, tenant.id, `${tenant.name} baseline demo record`);
       const now = '2026-10-01T09:00:00.000Z';
       insertCustomer.run(`${tenant.id}-customer`, tenant.id, `${tenant.name} Customer`, 'Billing Contact', `billing@${tenant.id}.example`, '+91 90000 00000', '29AAGCB7383J1Z4', '29', 'Demo billing address, Bengaluru', 'monthly', 'active', now, now);
-      insertService.run(`${tenant.id}-service`, tenant.id, 'Managed billing service', 'Seeded recurring billing service', 'active', 100000, 280000, 540000, 1000000, now, now);
+      insertService.run(`${tenant.id}-service`, tenant.id, 'Managed billing service', 'Seeded recurring billing service', DEMO_HSN_SAC, 'active', 100000, 280000, 540000, 1000000, now, now);
     }
     database.exec('COMMIT');
     seedSettings(database); seedInvoices(database); seedOperationalScenarios(database);

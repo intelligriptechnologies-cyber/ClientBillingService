@@ -53,7 +53,7 @@ describe('document and line classification', () => {
 
   it('lets an unregistered seller issue only no-tax lines, whatever the tax type or rate says', () => {
     const unregistered = resolveSupply('', { gstin: MAHARASHTRA_GSTIN, stateCode: '27' });
-    const issue = (lines: Array<{ taxType: 'none' | 'igst' | 'cgst_sgst'; gstRate: number }>) => gstSnapshotFields({ seller: { legalName: '' }, supply: unregistered, lines, requireHsn: false });
+    const issue = (lines: Array<{ taxType: 'none' | 'igst' | 'cgst_sgst'; gstRate: number }>) => gstSnapshotFields({ seller: { legalName: '' }, supply: unregistered, lines });
     expect(issue([{ taxType: 'none', gstRate: 0 }])).toMatchObject({ documentType: 'Bill of Supply', sellerStateCode: '', placeOfSupplyStateCode: '27' });
     for (const taxType of ['igst', 'cgst_sgst'] as const) {
       expect(() => issue([{ taxType, gstRate: 18 }])).toThrow(UNREGISTERED_SELLER_TAX_MESSAGE);
@@ -63,10 +63,10 @@ describe('document and line classification', () => {
   });
 
   it('taxes an amount-only invoice by the expected split and refuses a rate without one', () => {
-    expect(amountOnlyLine(resolveSupply('29', { gstin: '', stateCode: '29' }), 18)).toEqual({ taxType: 'cgst_sgst', gstRate: 18 });
-    expect(amountOnlyLine(resolveSupply('29', { gstin: MAHARASHTRA_GSTIN, stateCode: '27' }), 18)).toEqual({ taxType: 'igst', gstRate: 18 });
+    expect(amountOnlyLine(resolveSupply('29', { gstin: '', stateCode: '29' }), 18, '998311')).toEqual({ taxType: 'cgst_sgst', gstRate: 18, hsnSac: '998311' });
+    expect(amountOnlyLine(resolveSupply('29', { gstin: MAHARASHTRA_GSTIN, stateCode: '27' }), 18, '998311')).toEqual({ taxType: 'igst', gstRate: 18, hsnSac: '998311' });
     expect(amountOnlyLine(resolveSupply('', { gstin: '', stateCode: '29' }), 0)).toEqual({ taxType: 'none', gstRate: 0 });
-    expect(() => amountOnlyLine(resolveSupply('', { gstin: '', stateCode: '29' }), 18)).toThrow(UNREGISTERED_SELLER_TAX_MESSAGE);
+    expect(() => amountOnlyLine(resolveSupply('', { gstin: '', stateCode: '29' }), 18, '998311')).toThrow(UNREGISTERED_SELLER_TAX_MESSAGE);
   });
 
   it('starts correcting an invoice without line items on the split it was issued with, never a hard-coded one', () => {
@@ -77,8 +77,8 @@ describe('document and line classification', () => {
 
   it('lets a registered seller issue taxed and no-tax lines', () => {
     const registered = resolveSupply('29', { gstin: '', stateCode: '29' });
-    expect(gstSnapshotFields({ seller: { legalName: '' }, supply: registered, lines: [{ taxType: 'cgst_sgst', gstRate: 18 }], requireHsn: false })).toMatchObject({ documentType: 'Tax Invoice', taxSplit: 'intra' });
-    expect(gstSnapshotFields({ seller: { legalName: '' }, supply: registered, lines: [{ taxType: 'none', gstRate: 0 }], requireHsn: false })).toMatchObject({ documentType: 'Bill of Supply', taxSplit: 'intra' });
+    expect(gstSnapshotFields({ seller: { legalName: '' }, supply: registered, lines: [{ taxType: 'cgst_sgst', gstRate: 18, hsnSac: '998311' }] })).toMatchObject({ documentType: 'Tax Invoice', taxSplit: 'intra' });
+    expect(gstSnapshotFields({ seller: { legalName: '' }, supply: registered, lines: [{ taxType: 'none', gstRate: 0 }] })).toMatchObject({ documentType: 'Bill of Supply', taxSplit: 'intra' });
   });
 
   it('explains each GSTIN failure in plain words', () => {
@@ -86,5 +86,37 @@ describe('document and line classification', () => {
     expect(gstinMessage('format')).toMatch(/format/);
     expect(gstinMessage('state')).toMatch(/state code/);
     expect(gstinMessage('checksum')).toMatch(/check digit/);
+  });
+});
+
+describe('HSN/SAC on a Tax Invoice', () => {
+  const registered = resolveSupply('29', { gstin: '', stateCode: '29' });
+  const interstate = resolveSupply('29', { gstin: MAHARASHTRA_GSTIN, stateCode: '27' });
+  const issue = (lines: Array<{ taxType: 'none' | 'igst' | 'cgst_sgst'; gstRate: number; hsnSac?: string }>, supply = registered) => gstSnapshotFields({ seller: { legalName: '' }, supply, lines });
+
+  it('refuses a GST line with no HSN/SAC code, blank or missing', () => {
+    expect(() => issue([{ taxType: 'cgst_sgst', gstRate: 18 }])).toThrow('Line 1 needs an HSN/SAC code because a Tax Invoice taxes it.');
+    expect(() => issue([{ taxType: 'none', gstRate: 0, hsnSac: '' }, { taxType: 'cgst_sgst', gstRate: 18, hsnSac: '  ' }])).toThrow('Line 2 needs an HSN/SAC code');
+  });
+
+  it('refuses a malformed code on a GST line', () => {
+    for (const hsnSac of ['12', '12345', '1234567', '123456789', '99831', '9983', 'ABCD12']) {
+      expect(() => issue([{ taxType: 'cgst_sgst', gstRate: 18, hsnSac }]), hsnSac).toThrow('Enter a valid HSN/SAC code for line 1');
+    }
+  });
+
+  it('accepts a 4, 6 or 8 digit code and marks the invoice as one that must print it', () => {
+    for (const hsnSac of ['8517', '998311', '84713010']) expect(issue([{ taxType: 'cgst_sgst', gstRate: 18, hsnSac }]), hsnSac).toMatchObject({ documentType: 'Tax Invoice', hsnRequired: true });
+  });
+
+  it('treats an igst line at 0% inside a Tax Invoice as a GST line, but not inside a Bill of Supply', () => {
+    expect(() => issue([{ taxType: 'igst', gstRate: 18, hsnSac: '998311' }, { taxType: 'igst', gstRate: 0 }], interstate)).toThrow('Line 2 needs an HSN/SAC code');
+    expect(issue([{ taxType: 'igst', gstRate: 0 }, { taxType: 'none', gstRate: 0 }], interstate)).not.toHaveProperty('hsnRequired');
+  });
+
+  it('needs no code on a no-tax line of a Tax Invoice or on a Bill of Supply', () => {
+    expect(issue([{ taxType: 'cgst_sgst', gstRate: 18, hsnSac: '998311' }, { taxType: 'none', gstRate: 0 }])).toMatchObject({ documentType: 'Tax Invoice' });
+    expect(issue([{ taxType: 'none', gstRate: 0 }])).toMatchObject({ documentType: 'Bill of Supply' });
+    expect(issue([{ taxType: 'none', gstRate: 0 }])).not.toHaveProperty('hsnRequired');
   });
 });

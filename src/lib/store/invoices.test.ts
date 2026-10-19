@@ -43,8 +43,8 @@ describeStore(['settings', 'customers', 'services', 'contracts', 'invoices'], 'i
     await store.updateTenantSettings(tenantContextOf(nexio), { ...await store.getTenantSettings(tenantContextOf(nexio)), gstin: '29AAGCB7383J1Z4' });
     const customer = (await store.listCustomers(tenantContextOf(nexio), {})).items[0];
     const interstate = await store.createCustomer(tenantContextOf(nexio), { companyName: 'Interstate Buyer', contactName: 'Ravi', email: 'ravi@example.com', phone: '9000000000', gstin: '27AAPFU0939F1ZV', billingAddress: 'Mumbai', invoiceDelivery: 'email' });
-    await store.createIssuedInvoice(tenantContextOf(nexio), { customerId: customer.id, invoiceDate: '2026-11-02', dueDate: '2026-11-16', taxableMinor: 10_000, gstRate: 18 });
-    await store.createIssuedInvoice(tenantContextOf(nexio), { customerId: interstate.id, invoiceDate: '2026-11-03', dueDate: '2026-11-17', taxableMinor: 20_000, gstRate: 18 });
+    await store.createIssuedInvoice(tenantContextOf(nexio), { customerId: customer.id, invoiceDate: '2026-11-02', dueDate: '2026-11-16', taxableMinor: 10_000, gstRate: 18, hsnSac: '998311' });
+    await store.createIssuedInvoice(tenantContextOf(nexio), { customerId: interstate.id, invoiceDate: '2026-11-03', dueDate: '2026-11-17', taxableMinor: 20_000, gstRate: 18, hsnSac: '998311' });
 
     const report = await store.getGstSalesReport(tenantContextOf(nexio), '2026-11');
 
@@ -68,7 +68,7 @@ describeStore(['settings', 'customers', 'services', 'contracts', 'invoices'], 'i
       valueMinor: 250000, paymentTermsDays: 14, billingFrequency: 'monthly', invoiceMonths: [], cycleDay: 1,
       escalationPercent: 0, escalationReviewDate: '', renewalNoticeDays: 30, securityDepositMinor: 0,
     });
-    const issued = await store.createIssuedInvoice(tenantContextOf(nexio), { contractId: contract.id, invoiceDate: '2026-10-01', dueDate: '2026-10-15', taxableMinor: 250000, gstRate: 18 });
+    const issued = await store.createIssuedInvoice(tenantContextOf(nexio), { contractId: contract.id, invoiceDate: '2026-10-01', dueDate: '2026-10-15', taxableMinor: 250000, gstRate: 18, hsnSac: '998311' });
     expect((await store.listInvoices(tenantContextOf(nexio), { month: '2026-10', search: customer.companyName })).items).toEqual(expect.arrayContaining([expect.objectContaining({ id: issued.id, customerName: customer.companyName, status: 'issued' })]));
     expect((await store.listInvoices(tenantContextOf(evo), {})).items).not.toEqual(expect.arrayContaining([expect.objectContaining({ id: issued.id })]));
     await store.updateTenantSettings(tenantContextOf(nexio), { ...await store.getTenantSettings(tenantContextOf(nexio)), companyName: 'Changed company', invoicePrefix: 'NEW' });
@@ -128,7 +128,7 @@ describeStore(['settings', 'customers', 'contracts', 'invoices', 'bulkInvoices']
     const nexio = await memberContext(store, 'nexio-admin');
     await store.updateTenantSettings(nexio, { ...await store.getTenantSettings(nexio), gstin: '29AAGCB7383J1Z4' });
     const customerId = (await store.listCustomers(nexio)).items[0].id;
-    const issue = (invoiceDate: string, extra: { gstRate?: number; dueDate?: string } = {}) => store.createIssuedInvoice(nexio, { customerId, invoiceDate, dueDate: extra.dueDate ?? '2026-12-31', taxableMinor: 10000, gstRate: extra.gstRate });
+    const issue = (invoiceDate: string, extra: { gstRate?: number; dueDate?: string } = {}) => store.createIssuedInvoice(nexio, { customerId, invoiceDate, dueDate: extra.dueDate ?? '2026-12-31', taxableMinor: 10000, gstRate: extra.gstRate, hsnSac: '998311' });
     const lastOfOctober = await issue('2026-10-31');
     const firstOfNovember = await issue('2026-11-01', { gstRate: 12.345 });
     const ids = async (month: string) => (await store.listInvoices(nexio, { month, pageSize: 100 })).items.map((invoice) => invoice.id);
@@ -164,5 +164,76 @@ describeStore(['settings', 'customers', 'invoices'], 'invoice corrections', () =
 
     expect(await store.getInvoice(nexio, original.id)).toMatchObject({ status: 'issued', invoiceNumber: 'NEX-0003' });
     expect((await store.correctInvoice(nexio, original.id, { invoiceDate: '2026-11-02', dueDate: '2026-11-16', taxableMinor: 12000 }, 'Price change')).invoiceNumber).toBe('NEX-0004');
+  });
+});
+
+describeStore(['settings', 'customers', 'invoices'], 'HSN/SAC on GST invoices', () => {
+  async function registeredNexio() {
+    const store = await storeForTest();
+    const session = await store.authenticate('nexio-admin');
+    if (!session) throw new Error('Expected tenant session');
+    await registerSeller(store, session);
+    const context = tenantContextOf(session);
+    const customerId = (await store.listCustomers(context)).items[0].id;
+    const details = { customerId, invoiceDate: '2026-11-02', dueDate: '2026-11-16' };
+    const gstLine = (extra: { hsnSac?: string } = {}) => ({ description: 'Hall hire', quantity: 1, rateMinor: 10000, taxType: 'cgst_sgst' as const, gstRate: 18, ...extra });
+    return { store, context, details, gstLine };
+  }
+
+  it('refuses to issue a GST line with a missing or malformed code and issues it with a 4, 6 or 8 digit one', async () => {
+    const { store, context, details, gstLine } = await registeredNexio();
+
+    await expect(store.createIssuedInvoice(context, { ...details, lines: [gstLine()] })).rejects.toThrow('Line 1 needs an HSN/SAC code because a Tax Invoice taxes it.');
+    await expect(store.createIssuedInvoice(context, { ...details, lines: [gstLine({ hsnSac: '   ' })] })).rejects.toThrow('Line 1 needs an HSN/SAC code');
+    for (const hsnSac of ['12', '12345', '1234567', 'AB1234']) {
+      await expect(store.createIssuedInvoice(context, { ...details, lines: [gstLine({ hsnSac })] }), hsnSac).rejects.toThrow('Enter a valid HSN/SAC code for line 1');
+    }
+    expect((await store.listInvoices(context, { month: '2026-11' })).total).toBe(0);
+
+    for (const hsnSac of ['8517', '998311', '84713010']) {
+      expect(await store.createIssuedInvoice(context, { ...details, lines: [gstLine({ hsnSac })] }), hsnSac).toMatchObject({ snapshot: { documentType: 'Tax Invoice', hsnRequired: true, lines: [{ hsnSac }] } });
+    }
+  });
+
+  it('needs no code on an invoice whose lines carry no GST', async () => {
+    const { store, context, details } = await registeredNexio();
+
+    const invoice = await store.createIssuedInvoice(context, { ...details, lines: [{ description: 'Deposit', quantity: 1, rateMinor: 5000, taxType: 'none', gstRate: 0 }] });
+
+    expect(invoice.snapshot).toMatchObject({ documentType: 'Bill of Supply' });
+    expect(invoice.snapshot).not.toHaveProperty('hsnRequired');
+  });
+
+  it('refuses an amount-only GST invoice without a code and keeps the code it was issued with', async () => {
+    const { store, context, details } = await registeredNexio();
+    const amountOnly = { ...details, taxableMinor: 10000, gstRate: 18 };
+
+    await expect(store.createIssuedInvoice(context, amountOnly)).rejects.toThrow('Line 1 needs an HSN/SAC code because a Tax Invoice taxes it.');
+    await expect(store.createIssuedInvoice(context, { ...amountOnly, hsnSac: '12' })).rejects.toThrow('Enter a valid HSN/SAC code');
+
+    const invoice = await store.createIssuedInvoice(context, { ...amountOnly, hsnSac: ' 998311 ' });
+
+    expect(invoice.snapshot).toMatchObject({ documentType: 'Tax Invoice', hsnRequired: true, hsnSac: '998311' });
+    expect((await store.createIssuedInvoice(context, { ...details, taxableMinor: 10000 })).snapshot).not.toHaveProperty('hsnSac');
+  });
+
+  it('refuses a correction whose GST line has no code and leaves the original as it was', async () => {
+    const { store, context, details, gstLine } = await registeredNexio();
+    const original = await store.createIssuedInvoice(context, { ...details, lines: [gstLine({ hsnSac: '998311' })] });
+
+    await expect(store.correctInvoice(context, original.id, { ...details, lines: [gstLine()] }, 'Change rate')).rejects.toThrow('Line 1 needs an HSN/SAC code');
+    await expect(store.correctInvoice(context, original.id, { ...details, lines: [gstLine({ hsnSac: '99' })] }, 'Change rate')).rejects.toThrow('Enter a valid HSN/SAC code');
+
+    expect(await store.getInvoice(context, original.id)).toMatchObject({ status: 'issued' });
+    expect((await store.correctInvoice(context, original.id, { ...details, lines: [gstLine({ hsnSac: '8517' })] }, 'Change code')).snapshot).toMatchObject({ hsnRequired: true });
+  });
+
+  it('keeps the code of an amount-only invoice when it is corrected without naming one', async () => {
+    const { store, context, details } = await registeredNexio();
+    const original = await store.createIssuedInvoice(context, { ...details, taxableMinor: 10000, gstRate: 18, hsnSac: '998311' });
+
+    const corrected = await store.correctInvoice(context, original.id, { ...details, taxableMinor: 12000, gstRate: 18 }, 'Price change');
+
+    expect(corrected.snapshot).toMatchObject({ hsnSac: '998311', hsnRequired: true });
   });
 });
