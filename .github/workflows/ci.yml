@@ -54,3 +54,17 @@ jobs:
       - run: npx playwright install --with-deps chromium
       - name: End-to-end tests on Postgres (cbs_e2e)
         run: npm run test:e2e
+
+  deploy-edge:
+    name: Deploy edge (A5, A6)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: authelia-user.sh tests
+        run: bash deploy/authelia-user.test.sh
+      - name: Smoke stack (real Caddy, standalone Authelia, the app in authelia mode)
+        run: bash deploy/smoke/run.sh

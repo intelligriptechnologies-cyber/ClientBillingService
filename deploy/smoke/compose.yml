@@ -1,0 +1,144 @@
+# The A5 smoke stack (ADR 0002): real Caddy, a standalone Authelia and the real app image in authelia mode, with
+# Postgres on an internal network. Run it through deploy/smoke/run.sh, which generates every secret, the users
+# file, the Authelia configuration and a copy of deploy/caddy under deploy/smoke/.run, and passes the secrets in
+# through the environment.
+#
+#   production-edge  Caddy, the app and the probe. The app's only network besides its database.
+#   staging-edge     Caddy and the stand-in app that echoes what Caddy forwards. Separate from production-edge,
+#                    as in deploy/docker-compose.yml.
+#   auth             Caddy and Authelia.
+#   db               The app, the migrator and Postgres. Internal: no route out.
+#   other            A container that must not reach the app.
+#
+# The app publishes no port. Only Caddy does, on 127.0.0.1:${SMOKE_PORT}.
+name: cbs-smoke
+
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${SMOKE_PG_PASSWORD:?run deploy/smoke/run.sh}
+      POSTGRES_DB: cbs
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d cbs"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+    networks: [db]
+
+  migrator:
+    build:
+      context: ../..
+      target: migrator
+    image: cbs-smoke-migrator:local
+    profiles: ["migrate"]
+    restart: "no"
+    environment:
+      DATABASE_MIGRATE_URL: postgres://cbs_owner:${SMOKE_OWNER_PASSWORD:?}@db:5432/cbs
+    depends_on:
+      db:
+        condition: service_healthy
+    networks: [db]
+
+  app-production:
+    build:
+      context: ../..
+      target: runner
+    image: ${SMOKE_APP_IMAGE:-cbs-smoke-app:local}
+    environment:
+      CLIENT_BILLING_ENV: staging
+      CLIENT_BILLING_AUTH_MODE: authelia
+      CBS_PROXY_SECRET: ${SMOKE_PRODUCTION_SECRET:?}
+      CBS_AUTH_MEMBER_GROUP: cbs-users
+      CBS_AUTH_SUPERADMIN_GROUP: cbs-superadmin
+      CBS_AUTHELIA_LOGOUT_URL: https://auth.cbs.smoke.test:${SMOKE_PORT:?}/logout
+      CBS_PUBLIC_ORIGIN: https://cbs.smoke.test:${SMOKE_PORT}
+      DATABASE_URL: postgres://cbs_app:${SMOKE_APP_PASSWORD:?}@db:5432/cbs
+      DATABASE_PLATFORM_URL: postgres://cbs_platform:${SMOKE_PLATFORM_PASSWORD:?}@db:5432/cbs
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/api/health').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"]
+      interval: 3s
+      timeout: 5s
+      retries: 30
+      start_period: 5s
+    depends_on:
+      db:
+        condition: service_healthy
+    networks: [production-edge, db]
+
+  # Caddy's "staging" upstream: it shows what Caddy forwards.
+  app-staging:
+    image: node:22-bookworm-slim
+    command: ["node", "/echo.mjs"]
+    volumes:
+      - ./echo.mjs:/echo.mjs:ro
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/').then(() => process.exit(0)).catch(() => process.exit(1))"]
+      interval: 2s
+      timeout: 3s
+      retries: 20
+    networks: [staging-edge]
+
+  authelia:
+    image: authelia/authelia:4.39
+    command:
+      - authelia
+      - --config=/config/configuration.yml
+      - --config=/config/cbs-session-cookies.yml
+      - --config=/config/cbs-access-control.yml
+    environment:
+      AUTHELIA_IDENTITY_VALIDATION_RESET_PASSWORD_JWT_SECRET: ${SMOKE_AUTHELIA_JWT:?}
+      AUTHELIA_SESSION_SECRET: ${SMOKE_AUTHELIA_SESSION:?}
+      AUTHELIA_STORAGE_ENCRYPTION_KEY: ${SMOKE_AUTHELIA_STORAGE:?}
+    volumes:
+      - ./.run/authelia:/config:ro
+      - ./.run/users:/users
+      - ./.run/state:/state
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "-", "http://127.0.0.1:9091/api/health"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+    networks: [auth]
+
+  caddy:
+    image: caddy:2.10-alpine
+    environment:
+      PRODUCTION_DOMAIN: cbs.smoke.test:${SMOKE_PORT:?}
+      STAGING_DOMAIN: cbs-staging.smoke.test:${SMOKE_PORT}
+      PRODUCTION_PROXY_SECRET: ${SMOKE_PRODUCTION_SECRET:?}
+      STAGING_PROXY_SECRET: ${SMOKE_STAGING_SECRET:?}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./.run/caddy:/etc/caddy/caddy:ro
+    ports:
+      - "127.0.0.1:${SMOKE_PORT}:${SMOKE_PORT}"
+    depends_on:
+      authelia:
+        condition: service_healthy
+      app-production:
+        condition: service_healthy
+      app-staging:
+        condition: service_healthy
+    networks: [production-edge, staging-edge, auth]
+
+  # Sits on the production edge network, as Caddy does, to call the app directly.
+  probe:
+    image: curlimages/curl:8.11.1
+    entrypoint: ["sleep", "infinity"]
+    networks: [production-edge]
+
+  # Must not reach the app.
+  outsider:
+    image: curlimages/curl:8.11.1
+    entrypoint: ["sleep", "infinity"]
+    networks: [other]
+
+networks:
+  production-edge: {}
+  staging-edge: {}
+  auth: {}
+  other: {}
+  db:
+    internal: true
