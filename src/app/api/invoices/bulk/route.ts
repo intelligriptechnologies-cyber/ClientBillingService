@@ -1,24 +1,24 @@
 import { recordOperationException } from '@/lib/operational-error';
 import { NextResponse } from 'next/server';
-import { getCurrentSession } from '@/lib/session';
+import { getPrincipal } from '@/lib/auth/resolve';
 import { getTenantStore } from '@/lib/tenant-store';
-import { tenantContextOf } from "@/lib/auth/session-context";
+import { tenantContextOf } from '@/lib/auth/principal';
 
 function period(request: Request) { return new URL(request.url).searchParams.get('period') ?? ''; }
 function unauthorized() { return NextResponse.json({ message: 'A tenant session is required.' }, { status: 401 }); }
 
 export async function GET(request: Request) {
-  const session = await getCurrentSession();
-  if (!session?.tenantId) return unauthorized();
-  try { return NextResponse.json(await getTenantStore().previewBulkInvoices(tenantContextOf(session), period(request))); }
-  catch (cause) { await recordOperationException(session, '/api/invoices/bulk', cause); return NextResponse.json({ message: cause instanceof Error ? cause.message : 'Unable to preview bulk invoices.' }, { status: 400 }); }
+  const principal = await getPrincipal(request);
+  if (principal?.kind !== 'member') return unauthorized();
+  try { return NextResponse.json(await getTenantStore().previewBulkInvoices(tenantContextOf(principal), period(request))); }
+  catch (cause) { await recordOperationException(principal, '/api/invoices/bulk', cause); return NextResponse.json({ message: cause instanceof Error ? cause.message : 'Unable to preview bulk invoices.' }, { status: 400 }); }
 }
 
 export async function POST(request: Request) {
-  const session = await getCurrentSession();
-  if (!session?.tenantId) return unauthorized();
+  const principal = await getPrincipal(request);
+  if (principal?.kind !== 'member') return unauthorized();
   try {
     const body = await request.json() as { billingPeriod?: string };
-    return NextResponse.json(await getTenantStore().generateBulkInvoices(tenantContextOf(session), body.billingPeriod ?? ''));
-  } catch (cause) { await recordOperationException(session, '/api/invoices/bulk', cause); return NextResponse.json({ message: cause instanceof Error ? cause.message : 'Unable to issue bulk invoices.' }, { status: 400 }); }
+    return NextResponse.json(await getTenantStore().generateBulkInvoices(tenantContextOf(principal), body.billingPeriod ?? ''));
+  } catch (cause) { await recordOperationException(principal, '/api/invoices/bulk', cause); return NextResponse.json({ message: cause instanceof Error ? cause.message : 'Unable to issue bulk invoices.' }, { status: 400 }); }
 }

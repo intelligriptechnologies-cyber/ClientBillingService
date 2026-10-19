@@ -1,10 +1,11 @@
 import { mkdtempSync, rmSync } from 'node:fs';
+import { signIn } from '@/lib/store/test-store';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { expect, it } from 'vitest';
 import { createTenantStore } from './tenant-store';
-import { tenantContextOf } from './auth/session-context';
+import { tenantContextOf } from './auth/principal';
 
 it('starts a new app database with every saved record and keeps later edits on reopen', async () => {
   const directory = mkdtempSync(join(tmpdir(), 'client-billing-initial-data-'));
@@ -27,7 +28,7 @@ it('starts a new app database with every saved record and keeps later edits on r
     initial.close();
 
     store = createTenantStore(filename);
-    const session = await store.authenticate('nexio-admin');
+    const session = await signIn(store, 'nexio-admin');
     if (!session) throw new Error('Expected saved Nexio admin');
     await store.createCustomer(tenantContextOf(session), { companyName: 'After first open', contactName: 'New Contact', email: 'new@example.com', phone: '1234567890', gstin: '', billingAddress: 'New address', invoiceDelivery: 'monthly' });
     await store.close();

@@ -37,7 +37,7 @@ Preconditions:
 ## Gotchas
 
 - Identity ids are lowercase (`nexio-admin`), but the visible option text is `Nexio Hyper — Admin@nexio.com (admin)`. Select by id.
-- The cookie `client-billing-demo-session` holds the bare user id. A request carrying a valid id is fully authenticated, which is intended for the demo.
+- The cookie `__Host-cbs_demo` holds the bare user id, or `platform` for the superadmin entry. A request carrying a valid id is fully authenticated, which is intended for the demo.
 - A disabled tenant's users are redirected to `/` on their next request, so a stale saved session fails with a redirect, not a 401 page.
 - The seeded passwords (`admin123`) are never asked for. Do not report their absence as a defect.
 - `control-billing login` drives the real picker. `--no-browser` calls the login API and skips the picker, so do not use it as proof of the picker.

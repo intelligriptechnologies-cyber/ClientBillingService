@@ -1,10 +1,10 @@
 import { expect, it } from 'vitest';
-import { describeStore, memberContext, storeForTest, registerSeller } from './test-store';
-import { tenantContextOf } from '../auth/session-context';
+import { describeStore, memberContext, storeForTest, registerSeller, signIn } from './test-store';
+import { tenantContextOf } from '../auth/principal';
 
 describeStore(['settings', 'customers', 'services', 'contracts', 'invoices'], 'invoices', () => {
   it('persists row-wise GST, billing details and corrected line items', async () => {
-    const store = await storeForTest(); const session = await store.authenticate('nexio-admin');
+    const store = await storeForTest(); const session = await signIn(store, 'nexio-admin');
     if (!session) throw new Error('Expected tenant session');
     await registerSeller(store, session);
     const customer = (await store.listCustomers(tenantContextOf(session))).items[0];
@@ -23,7 +23,7 @@ describeStore(['settings', 'customers', 'services', 'contracts', 'invoices'], 'i
   });
 
   it('voids an unpaid invoice with a reason and records operation errors for tenant admins', async () => {
-    const store = await storeForTest(); const nexio = await store.authenticate('nexio-admin');
+    const store = await storeForTest(); const nexio = await signIn(store, 'nexio-admin');
     if (!nexio) throw new Error('Expected tenant session');
     const customer = (await store.listCustomers(tenantContextOf(nexio))).items[0];
     const invoice = await store.createIssuedInvoice(tenantContextOf(nexio), { customerId: customer.id, invoiceDate: '2026-10-07', dueDate: '2026-10-21', taxableMinor: 10000 });
@@ -36,8 +36,8 @@ describeStore(['settings', 'customers', 'services', 'contracts', 'invoices'], 'i
 
   it('returns a tenant-scoped GST sales report with interstate and intrastate tax splits', async () => {
     const store = await storeForTest();
-    const nexio = await store.authenticate('nexio-admin');
-    const evo = await store.authenticate('evo-admin');
+    const nexio = await signIn(store, 'nexio-admin');
+    const evo = await signIn(store, 'evo-admin');
     if (!nexio || !evo) throw new Error('Expected seeded sessions');
 
     await store.updateTenantSettings(tenantContextOf(nexio), { ...await store.getTenantSettings(tenantContextOf(nexio)), gstin: '29AAGCB7383J1Z4' });
@@ -58,8 +58,8 @@ describeStore(['settings', 'customers', 'services', 'contracts', 'invoices'], 'i
 
   it('keeps issued invoice snapshots stable, supports filters, and isolates invoices by tenant', async () => {
     const store = await storeForTest();
-    const nexio = await store.authenticate('nexio-admin');
-    const evo = await store.authenticate('evo-admin');
+    const nexio = await signIn(store, 'nexio-admin');
+    const evo = await signIn(store, 'evo-admin');
     if (!nexio || !evo) throw new Error('Expected seeded sessions');
     await registerSeller(store, nexio);
     const customer = (await store.listCustomers(tenantContextOf(nexio), {})).items[0];

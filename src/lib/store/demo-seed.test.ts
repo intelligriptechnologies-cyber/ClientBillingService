@@ -1,13 +1,13 @@
 import { expect, it } from 'vitest';
-import { describeStore, storeForTest } from './test-store';
-import { tenantContextOf } from '../auth/session-context';
+import { describeStore, storeForTest, signIn } from './test-store';
+import { tenantContextOf } from '../auth/principal';
 
 describeStore(['customers', 'contracts', 'deposits', 'invoices', 'payments'], 'demo seed', () => {
   it('seeds a complete billing scenario for every tenant', async () => {
     const store = await storeForTest();
 
     for (const tenantId of ['nexio', 'maasp', 'evo', 'gripdata', 'od']) {
-      const session = await store.authenticate(`${tenantId}-admin`);
+      const session = await signIn(store, `${tenantId}-admin`);
       if (!session) throw new Error(`Expected ${tenantId} admin session`);
 
       const customer = (await store.listCustomers(tenantContextOf(session), {})).items[0];

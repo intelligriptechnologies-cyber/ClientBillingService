@@ -8,7 +8,6 @@ import { UNREGISTERED_SELLER_TAX_MESSAGE } from '../invoice-gst';
 import { renderInvoiceHtml } from '../invoice-html';
 import type { InvoiceLineInput } from '../invoice-lines';
 import { createTenantStore } from '../tenant-store';
-import { tenantContextOf } from '../auth/session-context';
 import { describeStore, memberContext, storeForTest, type StoreArea } from './test-store';
 
 const KARNATAKA = '29AAGCB7383J1Z4';
@@ -342,7 +341,7 @@ describe('additive migration', () => {
 
       for (let open = 0; open < 2; open += 1) {
         const store = createTenantStore(filename);
-        const session = tenantContextOf({ id: 'legacy-admin', name: 'A', email: 'a@example.com', role: 'admin' as const, tenantId: 'legacy', tenantName: 'Legacy Co' });
+        const session = { tenantId: 'legacy', actor: { kind: 'user' as const, id: 'legacy-admin', username: null } };
         const customers = (await store.listCustomers(session, {})).items;
         expect(customers.map((item) => [item.id, item.gstin, item.stateCode]).sort()).toEqual([['c-blank', '', ''], ['c-junk', 'NA', ''], ['c-valid', MAHARASHTRA, '27']]);
         expect(await store.getTenantSettings(session)).toMatchObject({ gstin: KARNATAKA, stateCode: '29', legalName: '' });

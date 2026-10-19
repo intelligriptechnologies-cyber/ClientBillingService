@@ -1,11 +1,11 @@
 import { expect, it } from 'vitest';
-import { describeStore, memberContext, storeForTest, registerSeller } from './test-store';
+import { describeStore, memberContext, storeForTest, registerSeller, signIn } from './test-store';
 import type { PaymentInput, PaymentQuery, TenantInvoice } from './types';
-import { tenantContextOf } from '../auth/session-context';
+import { tenantContextOf } from '../auth/principal';
 
 describeStore(['settings', 'customers', 'invoices', 'payments'], 'payments', () => {
   it('corrects an unpaid invoice by replacing it and edits payment details without changing allocations', async () => {
-    const store = await storeForTest(); const nexio = await store.authenticate('nexio-admin');
+    const store = await storeForTest(); const nexio = await signIn(store, 'nexio-admin');
     if (!nexio) throw new Error('Expected tenant session');
     await registerSeller(store, nexio);
     const customer = (await store.listCustomers(tenantContextOf(nexio))).items[0];
@@ -22,7 +22,7 @@ describeStore(['settings', 'customers', 'invoices', 'payments'], 'payments', () 
   });
 
   it('allocates manual payments with TDS and write-off without exceeding an invoice balance', async () => {
-    const store = await storeForTest(); const nexio = await store.authenticate('nexio-admin'); const evo = await store.authenticate('evo-admin');
+    const store = await storeForTest(); const nexio = await signIn(store, 'nexio-admin'); const evo = await signIn(store, 'evo-admin');
     if (!nexio || !evo) throw new Error('Expected seeded sessions');
     const invoice = (await store.listInvoices(tenantContextOf(nexio), {})).items[0];
     const payment = await store.recordPayment(tenantContextOf(nexio), { invoiceId: invoice.id, paymentDate: '2026-10-07', amountMinor: 100000, tdsMinor: 10000, writeOffMinor: 8000, method: 'bank_transfer', reference: 'UTR-2042', notes: 'Reconciled with customer.' });
@@ -35,7 +35,7 @@ describeStore(['settings', 'customers', 'invoices', 'payments'], 'payments', () 
 
   it('closes an outstanding tenant invoice with an auditable write-off allocation', async () => {
     const store = await storeForTest();
-    const nexio = await store.authenticate('nexio-admin'); const evo = await store.authenticate('evo-admin');
+    const nexio = await signIn(store, 'nexio-admin'); const evo = await signIn(store, 'evo-admin');
     if (!nexio || !evo) throw new Error('Expected seeded sessions');
     const invoice = (await store.listPendingPayments(tenantContextOf(nexio)))[0];
     if (!invoice) throw new Error('Expected an outstanding invoice');
@@ -122,7 +122,7 @@ describeStore(['invoices', 'payments'], 'payments under concurrent requests', ()
 
 describeStore(['invoices', 'payments', 'reminders'], 'payment reminders', () => {
   it('lists aging pending invoices and records demo-only reminder history', async () => {
-    const store = await storeForTest(); const nexio = await store.authenticate('nexio-admin');
+    const store = await storeForTest(); const nexio = await signIn(store, 'nexio-admin');
     if (!nexio) throw new Error('Expected seeded session');
     const invoice = (await store.listInvoices(tenantContextOf(nexio), {})).items[0];
     const pending = await store.listPendingPayments(tenantContextOf(nexio));

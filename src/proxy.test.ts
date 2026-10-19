@@ -30,7 +30,7 @@ afterEach(() => vi.unstubAllEnvs());
 describe('proxy origin check', () => {
   it('rejects a cookie POST from a foreign Origin and one with no Origin', async () => {
     stubEnv({});
-    const cookie = { cookie: 'client-billing-demo-session=nexio-admin' };
+    const cookie = { cookie: '__Host-cbs_demo=nexio-admin' };
     const foreign = proxy(request('/api/customers', { method: 'POST', headers: { ...cookie, origin: 'https://evil.example' } }));
     expect(foreign.status).toBe(403);
     expect(await foreign.json()).toEqual({ message: 'Cross-origin request refused.' });

@@ -1,11 +1,11 @@
 import { expect, it } from 'vitest';
-import { describeStore, memberContext, storeForTest, registerSeller } from './test-store';
-import { tenantContextOf } from '../auth/session-context';
+import { describeStore, memberContext, storeForTest, registerSeller, signIn } from './test-store';
+import { tenantContextOf } from '../auth/principal';
 
 describeStore(['settings', 'customers', 'services', 'contracts', 'additionalServices', 'invoices', 'bulkInvoices'], 'bulk invoice runs', () => {
   it('previews a period billing run with additional services, explains skips, and issues it only once', async () => {
     const store = await storeForTest();
-    const nexio = await store.authenticate('nexio-admin');
+    const nexio = await signIn(store, 'nexio-admin');
     if (!nexio) throw new Error('Expected seeded session');
     await registerSeller(store, nexio);
     const customer = (await store.listCustomers(tenantContextOf(nexio), {})).items[0];

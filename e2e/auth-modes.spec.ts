@@ -1,8 +1,6 @@
 import { expect, test, type APIRequestContext, type Playwright } from '@playwright/test';
 import { autheliaOrigin, demoOrigin, memberGroup, proxySecret, superadminGroup } from './test-ports';
 
-const sessionCookie = 'client-billing-demo-session';
-
 // A context with no config-level headers, so each request carries exactly what the test gives it.
 const bare = (playwright: Playwright, baseURL: string) => playwright.request.newContext({ baseURL, extraHTTPHeaders: {} });
 
@@ -82,9 +80,9 @@ test.describe('authelia mode', () => {
     expect((await request.post('/api/auth/login', { data: { userId: 'superadmin' }, headers: { ...signedIn, origin: autheliaOrigin } })).status()).toBe(404);
   });
 
-  test('gives the demo cookie no authority', async () => {
-    const headers = { ...signedIn, cookie: `${sessionCookie}=superadmin`, 'remote-groups': memberGroup };
-    expect((await request.get('/api/tenants', { headers })).status()).toBe(401);
+  test('gives the demo and tenant cookies no authority', async () => {
+    const headers = { ...signedIn, cookie: '__Host-cbs_demo=platform; __Host-cbs_tenant=nexio', 'remote-groups': memberGroup };
+    expect((await request.get('/api/tenants', { headers })).status()).toBe(403);
     expect((await request.get('/api/customers', { headers })).status()).toBe(401);
   });
 

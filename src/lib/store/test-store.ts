@@ -1,9 +1,9 @@
 import { afterEach, describe } from 'vitest';
 import { databaseForTest } from '../db/test-database';
 import { createPgStore } from './pg/create-pg-store';
-import { createTenantStore, type AppSession, type TenantStore } from '../tenant-store';
-import type { PlatformActor, TenantContext } from '../auth/principal';
-import { tenantContextOf } from '../auth/session-context';
+import { createTenantStore, type TenantStore } from '../tenant-store';
+import { tenantContextOf, type Member, type PlatformActor, type Resolution, type TenantContext } from '../auth/principal';
+import { demoCookie, resolvePrincipal } from '../auth/resolve';
 
 // The store tests run on one driver per run: TEST_DRIVER=sqlite (the default) or TEST_DRIVER=pg (ADR 0001, D4).
 // Under pg every storeForTest() call clones the seeded template, so tests stay as independent as :memory: stores.
@@ -69,14 +69,20 @@ export async function storeForTest(): Promise<TenantStore> {
 /** The superadmin, built directly: under Postgres it is an Authelia group with no users row (ADR 0002, decision 3). */
 export const superadmin: PlatformActor = { kind: 'platform', username: 'superadmin' };
 
+/** The member a demo sign-in as `userId` resolves to, through the real resolver, or null when that id is not an active member. */
+export async function signIn(store: TenantStore, userId: string): Promise<Member | null> {
+  const principal = await resolvePrincipal({ mode: 'demo', env: 'test' }, { headers: new Headers({ cookie: `${demoCookie}=${userId}` }) }, store);
+  return principal?.kind === 'member' ? principal : null;
+}
+
 /** A seeded user acting inside its tenant. */
 export async function memberContext(store: TenantStore, userId: string): Promise<TenantContext> {
-  const session = await store.authenticate(userId);
-  if (!session) throw new Error(`Expected an active session for ${userId}.`);
-  return tenantContextOf(session);
+  const member = await signIn(store, userId);
+  if (!member) throw new Error(`Expected an active member for ${userId}.`);
+  return member.context;
 }
 
 /** The seeded sellers are unregistered and may not charge GST, so a test that bills GST registers its seller first. */
-export async function registerSeller(store: TenantStore, session: AppSession) {
-  await store.updateTenantSettings(tenantContextOf(session), { ...await store.getTenantSettings(tenantContextOf(session)), gstin: '29AAGCB7383J1Z4' });
+export async function registerSeller(store: TenantStore, principal: Resolution) {
+  await store.updateTenantSettings(tenantContextOf(principal), { ...await store.getTenantSettings(tenantContextOf(principal)), gstin: '29AAGCB7383J1Z4' });
 }

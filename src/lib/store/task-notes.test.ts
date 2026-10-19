@@ -1,11 +1,11 @@
 import { expect, it } from 'vitest';
-import { describeStore, memberContext, storeForTest } from './test-store';
-import { tenantContextOf } from '../auth/session-context';
+import { describeStore, memberContext, storeForTest, signIn } from './test-store';
+import { tenantContextOf } from '../auth/principal';
 
 describeStore(['customers', 'taskNotes'], 'task notes', () => {
   it('creates, filters, edits, and deletes task notes within the tenant', async () => {
     const store = await storeForTest();
-    const nexio = await store.authenticate('nexio-admin'); const evo = await store.authenticate('evo-admin');
+    const nexio = await signIn(store, 'nexio-admin'); const evo = await signIn(store, 'evo-admin');
     if (!nexio || !evo) throw new Error('Expected tenant sessions');
     const nexioCustomer = (await store.listCustomers(tenantContextOf(nexio))).items[0]; const evoCustomer = (await store.listCustomers(tenantContextOf(evo))).items[0];
     const input = { customerId: nexioCustomer.id, date: '2026-10-07', note: 'Call customer about renewal' };

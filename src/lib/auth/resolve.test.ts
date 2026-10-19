@@ -72,18 +72,36 @@ function stubEnv(values: Record<string, string>) {
 
 afterEach(() => { vi.unstubAllEnvs(); });
 
-describe('getPrincipal in authelia mode', () => {
-  let store: TenantStore;
-  beforeEach(async () => { store = await storeForTest(); world.store = store; });
-
+describe('getPrincipal in authelia mode, before any store read', () => {
   it.each([
     ['no secret', null],
     ['a same-length wrong secret', 'q'.repeat(32)],
     ['a short secret', 'short'],
-  ])('resolves a forged Remote-User with %s to nothing, without reading the store', async (_label, presented) => {
+  ])('resolves a forged Remote-User with %s to nothing', async (_label, presented) => {
     expect(await arrive(untouchable, { username: 'mallory', groups: 'cbs-superadmin', email: 'Admin@nexio.com', secret: presented })).toBeNull();
     expect(await arrive(untouchable, { username: 'nexio-admin', secret: presented })).toBeNull();
   });
+
+  it('resolves the superadmin group to the platform principal from the group alone', async () => {
+    expect(await arrive(untouchable, { username: 'root', email: 'root@a7.example', groups: 'cbs-users, cbs-superadmin' })).toEqual({ kind: 'platform', actor: { kind: 'platform', username: 'root' }, viewer: { name: 'root', email: 'root@a7.example' } });
+  });
+
+  it('refuses a person outside the allowed groups without binding anything', async () => {
+    expect(await arrive(untouchable, { username: 'cwerp-user', email: 'Admin@nexio.com', groups: 'cwerp-users' })).toEqual({ kind: 'noAccess' });
+  });
+
+  it('never reads the demo cookie', async () => {
+    expect(await resolvePrincipal(authelia, { headers: new Headers({ cookie: `${demoCookie}=platform` }) }, untouchable)).toBeNull();
+  });
+});
+
+// Users.authelia_username exists only in the Postgres schema, and so does one email in two tenants: the legacy
+// SQLite store serves demo mode alone. These run whenever a database is configured, under either TEST_DRIVER.
+describe.skipIf(!process.env.DATABASE_MIGRATE_URL)(`getPrincipal in authelia mode, on Postgres (${DATABASE_TESTS_SKIP_REASON})`, () => {
+  let store: TenantStore;
+  let drop: () => Promise<void>;
+  beforeEach(async () => { const database = await databaseForTest(); store = createPgStore(database.db); drop = database.drop; world.store = store; });
+  afterEach(async () => { await drop(); });
 
   it('gives a person with one active row that tenant, with no chooser', async () => {
     const person = newPerson('one');
@@ -163,7 +181,6 @@ describe('getPrincipal in authelia mode', () => {
     expect((await customers.GET(new Request('http://localhost/api/customers', { headers }))).status).toBe(401);
     expect((await tenants.GET(new Request('http://localhost/api/tenants', { headers }))).status).toBe(200);
     const member = headersFor({ username: 'nexio-admin', email: 'Admin@nexio.com' });
-    await store.bindMemberships('nexio-admin', 'Admin@nexio.com');
     expect((await tenants.GET(new Request('http://localhost/api/tenants', { headers: member }))).status).toBe(403);
   });
 });
@@ -189,10 +206,6 @@ describe('getPrincipal in demo mode', () => {
     await store.updateTenantUser(await memberContext(store, 'nexio-admin'), 'nexio-user', { status: 'disabled' });
     expect(await resolvePrincipal(demo, demoRequest({ [demoCookie]: 'nexio-user' }), store)).toEqual({ kind: 'noAccess' });
     expect(await resolvePrincipal(demo, demoRequest({ [demoCookie]: 'no-such-user' }), store)).toEqual({ kind: 'noAccess' });
-  });
-
-  it('never reads the demo cookie in authelia mode', async () => {
-    expect(await resolvePrincipal(authelia, { headers: new Headers({ cookie: `${demoCookie}=platform` }) }, untouchable)).toBeNull();
   });
 });
 

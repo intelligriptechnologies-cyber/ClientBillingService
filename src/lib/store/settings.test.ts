@@ -1,11 +1,11 @@
 import { expect, it } from 'vitest';
-import { describeStore, memberContext, storeForTest } from './test-store';
+import { describeStore, memberContext, storeForTest, signIn } from './test-store';
 import { settingsInput } from '../test-helpers';
-import { tenantContextOf } from '../auth/session-context';
+import { tenantContextOf } from '../auth/principal';
 
 describeStore(['settings'], 'tenant settings and operational logs', () => {
   it('persists complete tenant settings, template previews, and isolated operational logs', async () => {
-    const store = await storeForTest(); const nexio = await store.authenticate('nexio-admin'); const evo = await store.authenticate('evo-admin');
+    const store = await storeForTest(); const nexio = await signIn(store, 'nexio-admin'); const evo = await signIn(store, 'evo-admin');
     if (!nexio || !evo) throw new Error('Expected seeded sessions');
     const saved = await store.updateTenantSettings(tenantContextOf(nexio), {
       companyName: 'Nexio Billing Services', gstin: '29AAGCB7383J1Z4', address: '42 Ledger Lane, Bengaluru',
@@ -24,7 +24,7 @@ describeStore(['settings'], 'tenant settings and operational logs', () => {
 
   it('keeps settings and operational logs restricted to tenant admins', async () => {
     const store = await storeForTest();
-    const tenantUser = await store.authenticate('nexio-user');
+    const tenantUser = await signIn(store, 'nexio-user');
     if (!tenantUser) throw new Error('Expected seeded session');
 
     await expect(store.getTenantSettings(tenantContextOf(tenantUser))).rejects.toThrow('admin');

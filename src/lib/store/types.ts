@@ -7,7 +7,6 @@ import type { Membership, TenantContext, PlatformActor } from '../auth/principal
 
 export type AppRole = 'superadmin' | 'admin' | 'user';
 export type DemoIdentity = { id: string; name: string; email: string; role: AppRole; tenantId: string | null; tenantName: string | null };
-export type AppSession = DemoIdentity;
 export type TenantRecord = { id: string; tenantId: string; label: string };
 export type TenantStatus = 'active' | 'disabled';
 export type Tenant = { id: string; name: string; status: TenantStatus; createdAt: string; updatedAt: string; userCount: number };
@@ -89,7 +88,6 @@ export type GstSalesReport = { month: string; companyName: string; gstin: string
 /** The store contract. The SQLite store wraps synchronous bodies, so each call settles after its whole body has run. */
 export interface TenantStore {
   listIdentities(): Promise<DemoIdentity[]>;
-  authenticate(userId: string): Promise<AppSession | null>;
   /** The rows bound to an Authelia username, in active tenants. A withPlatform lookup: it runs before a tenant is chosen. */
   listMemberships(username: string): Promise<Membership[]>;
   /** First-arrival binding (ADR 0002, decision 5). Gives the username every unbound active row with that email, unless another username already holds the email, logs one row per binding, and returns the rows it bound. */

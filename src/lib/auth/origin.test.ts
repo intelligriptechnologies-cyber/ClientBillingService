@@ -9,7 +9,7 @@ function check(overrides: Partial<Omit<Input, 'headers'>> & { headers?: Record<s
     method: 'POST',
     pathname: '/api/customers',
     protocol: 'http',
-    headers: new Headers({ host: 'localhost:3100', cookie: 'client-billing-demo-session=nexio-admin', origin: 'http://localhost:3100', ...headers }),
+    headers: new Headers({ host: 'localhost:3100', cookie: '__Host-cbs_demo=nexio-admin', origin: 'http://localhost:3100', ...headers }),
     credentials: 'cookie',
     ...rest,
   });

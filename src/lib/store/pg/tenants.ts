@@ -3,7 +3,7 @@ import type { Database, Tx } from '../../db/database';
 import { parseIdentityRow, parseMembershipRow, parseTenantHistoryRow, parseTenantNameRow, parseTenantRecordRow, parseTenantRow, parseTenantUserRow } from '../rows';
 import { bindingLogMessage, cleanTenantName, defaultSettingsColumns, DUPLICATE_EMAIL_MESSAGE, DUPLICATE_TENANT_MESSAGE, LAST_ADMIN_MESSAGE, monthRange, newTenantUser, tenantIdBase, updatedTenantUser } from '../rules';
 import { now, requireAdminRole, requirePlatform } from '../shared';
-import type { AppSession, DemoIdentity, Tenant, TenantFilters, TenantHistoryEvent, TenantInput, TenantList, TenantName, TenantRecord, TenantStore, TenantUpdate, TenantUser, TenantUserInput, TenantUserUpdate } from '../types';
+import type { DemoIdentity, Tenant, TenantFilters, TenantHistoryEvent, TenantInput, TenantList, TenantName, TenantRecord, TenantStore, TenantUpdate, TenantUser, TenantUserInput, TenantUserUpdate } from '../types';
 import { actorRole, renameUniqueViolation } from './shared';
 
 type Row = Record<string, unknown>;
@@ -11,7 +11,7 @@ type Row = Record<string, unknown>;
 const duplicateTenantName = renameUniqueViolation(['tenants_name_key', 'tenants_lower_name'], DUPLICATE_TENANT_MESSAGE);
 const duplicateEmail = renameUniqueViolation(['users_tenant_email'], DUPLICATE_EMAIL_MESSAGE);
 
-// Sign-in lookups cross tenants before one is chosen, so they run through withPlatform (ADR 0001, Consequences).
+// The demo picker lists members of every tenant before one is chosen, so it runs through withPlatform.
 const identities = `SELECT users.id, users.name, users.email, users.role, users.tenant_id, tenants.name AS tenant_name
   FROM users JOIN tenants ON tenants.id = users.tenant_id
   WHERE users.status = 'active' AND tenants.status = 'active'`;
@@ -50,12 +50,6 @@ export function createPgTenantMethods(db: Database) {
   return {
     async listIdentities(): Promise<DemoIdentity[]> {
       return db.withPlatform(async (tx) => (await tx.query<Row>(`${identities} ORDER BY CASE users.role WHEN 'admin' THEN 1 ELSE 2 END, tenants.name COLLATE "C", users.id`)).rows.map(parseIdentityRow));
-    },
-    async authenticate(userId: string): Promise<AppSession | null> {
-      return db.withPlatform(async (tx) => {
-        const { rows } = await tx.query<Row>(`${identities} AND users.id = $1`, [userId]);
-        return rows[0] ? parseIdentityRow(rows[0]) : null;
-      });
     },
     async listMemberships(username: string): Promise<Membership[]> {
       return db.withPlatform(async (tx) => (await tx.query<Row>(`SELECT users.tenant_id, users.id, users.role, users.status FROM users JOIN tenants ON tenants.id = users.tenant_id
