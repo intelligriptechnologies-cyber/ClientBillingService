@@ -1,5 +1,5 @@
 import { expect, it } from 'vitest';
-import { describeStore, memberContext, storeForTest, registerSeller } from './test-store';
+import { describeStore, memberContext, storeForTest, registerSeller, unregisterSeller } from './test-store';
 import { tenantContextOf } from '../auth/session-context';
 
 describeStore(['settings', 'customers', 'services', 'contracts', 'invoices'], 'invoices', () => {
@@ -157,6 +157,7 @@ describeStore(['settings', 'customers', 'invoices'], 'invoice corrections', () =
   it('leaves the original issued and spends no number when the replacement is refused', async () => {
     const store = await storeForTest();
     const nexio = await memberContext(store, 'nexio-admin');
+    await unregisterSeller(store, nexio);
     const customerId = (await store.listCustomers(nexio)).items[0].id;
     const original = await store.createIssuedInvoice(nexio, { customerId, invoiceDate: '2026-11-02', dueDate: '2026-11-16', taxableMinor: 10000 });
 

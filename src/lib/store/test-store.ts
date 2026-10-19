@@ -76,7 +76,12 @@ export async function memberContext(store: TenantStore, userId: string): Promise
   return tenantContextOf(session);
 }
 
-/** The seeded sellers are unregistered and may not charge GST, so a test that bills GST registers its seller first. */
+/** A seller with this GSTIN is registered in Karnataka. The demo sellers already are, with GSTINs of their own, so this changes the one a test depends on. */
 export async function registerSeller(store: TenantStore, session: AppSession) {
   await store.updateTenantSettings(tenantContextOf(session), { ...await store.getTenantSettings(tenantContextOf(session)), gstin: '29AAGCB7383J1Z4' });
+}
+
+/** The demo sellers are registered. A test about a seller with no GSTIN, which issues a Bill of Supply and may not charge GST, clears it first. */
+export async function unregisterSeller(store: TenantStore, context: TenantContext) {
+  await store.updateTenantSettings(context, { ...await store.getTenantSettings(context), gstin: '' });
 }

@@ -9,7 +9,7 @@ import { renderInvoiceHtml } from '../invoice-html';
 import type { InvoiceLineInput } from '../invoice-lines';
 import { createTenantStore } from '../tenant-store';
 import { tenantContextOf } from '../auth/session-context';
-import { describeStore, memberContext, storeForTest, type StoreArea } from './test-store';
+import { describeStore, memberContext, storeForTest, unregisterSeller, type StoreArea } from './test-store';
 
 const KARNATAKA = '29AAGCB7383J1Z4';
 const MAHARASHTRA = '27AAPFU0939F1ZV';
@@ -22,7 +22,8 @@ async function setup() {
   const customer = (fields: { gstin?: string; stateCode?: string; name?: string } = {}) => store.createCustomer(session, { companyName: fields.name ?? `Buyer ${crypto.randomUUID()}`, contactName: 'Buyer', email: 'buyer@example.com', phone: '9000000000', gstin: fields.gstin ?? '', stateCode: fields.stateCode, billingAddress: 'Somewhere', invoiceDelivery: 'manual' });
   const line = (fields: Partial<InvoiceLineInput> = {}): InvoiceLineInput => ({ description: 'Consulting', quantity: 1, rateMinor: 100_000, taxType: 'cgst_sgst', gstRate: 18, hsnSac: '998311', ...fields });
   const invoice = (customerId: string, lines: InvoiceLineInput[], extra: { taxSplitOverrideReason?: string; invoiceDate?: string } = {}) => store.createIssuedInvoice(session, { customerId, invoiceDate: extra.invoiceDate ?? '2026-11-02', dueDate: '2026-11-30', gstApplicable: true, lines, taxSplitOverrideReason: extra.taxSplitOverrideReason });
-  return { store, session, register, customer, line, invoice };
+  const unregister = () => unregisterSeller(store, session);
+  return { store, session, register, unregister, customer, line, invoice };
 }
 
 describeStore(['settings'], 'seller GST setup', () => {
@@ -31,7 +32,7 @@ describeStore(['settings'], 'seller GST setup', () => {
     const settings = await store.getTenantSettings(session);
     await expect(store.updateTenantSettings(session, { ...settings, gstin: '29AAGCB7383J1Z5' })).rejects.toThrow(/check digit/);
     await expect(store.updateTenantSettings(session, { ...settings, gstin: '29ABC' })).rejects.toThrow(/15 characters/);
-    expect((await store.getTenantSettings(session)).gstin).toBe('');
+    expect((await store.getTenantSettings(session)).gstin).toBe(settings.gstin);
   });
 
   it('stores a valid GSTIN in capitals with the legal name and the state taken from its first two digits', async () => {
@@ -133,7 +134,8 @@ describeStore(INVOICING, 'place of supply and tax split', () => {
   });
 
   it('preselects nothing and asks for no override reason when the seller is unregistered', async () => {
-    const { store, session, customer, line, invoice } = await setup();
+    const { store, session, unregister, customer, line, invoice } = await setup();
+    await unregister();
     const buyer = await customer({ stateCode: '29' });
     expect(await store.getSupplyContext(session, { customerId: buyer.id })).toMatchObject({ sellerRegistered: false, taxSplit: null, expectedTaxType: null });
     const issued = await invoice(buyer.id, [line({ taxType: 'none', gstRate: 0, hsnSac: '' })]);
@@ -174,12 +176,13 @@ describeStore(INVOICING, 'place of supply and tax split', () => {
 
 describeStore(INVOICING, 'document type', () => {
   it('issues a Bill of Supply when the seller is unregistered or nothing is taxable', async () => {
-    const { store, session, register, customer, line, invoice } = await setup();
+    const { store, session, register, unregister, customer, line, invoice } = await setup();
+    await unregister();
     expect((await invoice((await customer()).id, [line({ taxType: 'none', gstRate: 0, hsnSac: '' })])).snapshot.documentType).toBe('Bill of Supply');
     await register();
     expect((await invoice((await customer()).id, [line({ taxType: 'none', gstRate: 0, hsnSac: '' })])).snapshot.documentType).toBe('Bill of Supply');
     expect((await invoice((await customer()).id, [line()])).snapshot.documentType).toBe('Tax Invoice');
-    expect((await store.listInvoices(session, {})).items.find((item) => item.snapshot.documentType === undefined)).toBeTruthy();
+    expect((await store.listInvoices(session, {})).items.every((item) => item.snapshot.documentType !== undefined)).toBe(true);
   });
 
   it('puts a registered seller\'s no-tax lines on a Bill of Supply and in the nil, exempt and non-GST section', async () => {
@@ -210,7 +213,8 @@ describeStore(INVOICING, 'document type', () => {
 
 describeStore(INVOICING, 'an unregistered seller cannot charge GST', () => {
   it.each(['igst', 'cgst_sgst'] as const)('rejects a %s line with the message that says how to fix it and issues nothing', async (taxType) => {
-    const { store, session, customer, line, invoice } = await setup();
+    const { store, session, unregister, customer, line, invoice } = await setup();
+    await unregister();
     const buyer = await customer({ stateCode: '29' });
     const before = (await store.listInvoices(session, {})).total;
     await expect(invoice(buyer.id, [line({ taxType, hsnSac: '' })])).rejects.toThrow(UNREGISTERED_SELLER_TAX_MESSAGE);
@@ -219,7 +223,8 @@ describeStore(INVOICING, 'an unregistered seller cannot charge GST', () => {
   });
 
   it('rejects an amount-only invoice that carries a GST rate', async () => {
-    const { store, session, customer } = await setup();
+    const { store, session, unregister, customer } = await setup();
+    await unregister();
     const buyer = await customer({ stateCode: '29' });
     const amountOnly = { customerId: buyer.id, invoiceDate: '2026-11-02', dueDate: '2026-11-30', taxableMinor: 10_000 };
     await expect(store.createIssuedInvoice(session, { ...amountOnly, gstRate: 18 })).rejects.toThrow(UNREGISTERED_SELLER_TAX_MESSAGE);
@@ -227,7 +232,8 @@ describeStore(INVOICING, 'an unregistered seller cannot charge GST', () => {
   });
 
   it('rejects a correction that adds GST and leaves the original invoice untouched', async () => {
-    const { store, session, customer, line, invoice } = await setup();
+    const { store, session, unregister, customer, line, invoice } = await setup();
+    await unregister();
     const original = await invoice((await customer({ stateCode: '29' })).id, [line({ taxType: 'none', gstRate: 0, hsnSac: '' })]);
     const input = { invoiceDate: '2026-11-02', dueDate: '2026-11-30', gstApplicable: true, lines: [line({ taxType: 'igst' })] };
     const before = (await store.listInvoices(session, {})).total;
@@ -239,7 +245,8 @@ describeStore(INVOICING, 'an unregistered seller cannot charge GST', () => {
   });
 
   it('proposes and issues bulk invoices without GST, as a Bill of Supply filed as nil, exempt and non-GST', async () => {
-    const { store, session } = await setup();
+    const { store, session, unregister } = await setup();
+    await unregister();
     const preview = await store.previewBulkInvoices(session, '2026-11');
     expect(preview.proposed.length).toBeGreaterThan(0);
     expect(preview.proposed.every((item) => item.gstRate === 0 && item.gstMinor === 0 && item.totalMinor === item.taxableMinor)).toBe(true);
@@ -256,7 +263,8 @@ describeStore(INVOICING, 'an unregistered seller cannot charge GST', () => {
   });
 
   it('charges GST again as soon as the seller registers', async () => {
-    const { register, customer, line, invoice } = await setup();
+    const { register, unregister, customer, line, invoice } = await setup();
+    await unregister();
     const buyer = await customer({ stateCode: '29' });
     await expect(invoice(buyer.id, [line()])).rejects.toThrow(UNREGISTERED_SELLER_TAX_MESSAGE);
     await register();
