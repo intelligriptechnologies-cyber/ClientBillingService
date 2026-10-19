@@ -39,6 +39,8 @@ jobs:
       - run: npm run lint
       - run: npm run typecheck
       - run: npm run check:async-store
+      # Tenant-isolation coverage renders invoice PDFs, so Chromium must exist before Vitest starts.
+      - run: npx playwright install --with-deps chromium
       - name: Every test runs on Postgres, none skipped
         run: |
           npx vitest run --reporter=default --reporter=json --outputFile.json="$RUNNER_TEMP/tests.json"
@@ -46,7 +48,6 @@ jobs:
       - run: npm run build
       - run: node scripts/check-boot-refusal.mjs 3212
       - run: node scripts/check-matrix.mjs
-      - run: npx playwright install --with-deps chromium
       - name: End-to-end tests on Postgres (cbs_e2e)
         run: npm run test:e2e
 
