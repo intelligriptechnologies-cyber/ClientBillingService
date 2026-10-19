@@ -1,8 +1,9 @@
+import type { Membership } from '../auth/principal';
 import { parseFormatDefinition, type InvoiceFormat } from '../invoice-format';
 import type { SmtpSettings } from '../mailer';
 import type {
   AdditionalService, BulkInvoiceRun, Contract, ContractAuditEvent, CustomerRecord, DeliveryRecord, DemoIdentity, InvoiceSnapshot, OperationalLog, PaymentReminder, Quotation, QuotationLine,
-  SecurityDeposit, TaskNote, Tenant, TenantHistoryEvent, TenantInvoice, TenantPayment, TenantRecord, TenantService, TenantSettings, TenantUser,
+  SecurityDeposit, TaskNote, Tenant, TenantHistoryEvent, TenantName, TenantInvoice, TenantPayment, TenantRecord, TenantService, TenantSettings, TenantUser,
 } from './types';
 import { paymentMethods } from './rules';
 
@@ -51,6 +52,14 @@ export function parseTenantRecordRow(row: Row): TenantRecord {
 /** A users row joined with its tenant's name. The SQLite superadmin row has no tenant. */
 export function parseIdentityRow(row: Row): DemoIdentity {
   return { id: text(row, 'id'), name: text(row, 'name'), email: text(row, 'email'), role: oneOf(row, 'role', ['superadmin', ...memberRoles]), tenantId: nullableText(row, 'tenant_id'), tenantName: nullableText(row, 'tenant_name') };
+}
+
+export function parseMembershipRow(row: Row): Membership {
+  return { tenantId: text(row, 'tenant_id'), id: text(row, 'id'), role: oneOf(row, 'role', memberRoles), status: oneOf(row, 'status', tenantStatuses) };
+}
+
+export function parseTenantNameRow(row: Row): TenantName {
+  return { id: text(row, 'id'), name: text(row, 'name') };
 }
 
 export function parseTenantUserRow(row: Row): TenantUser {

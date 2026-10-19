@@ -1,10 +1,10 @@
 import type { DatabaseSync } from 'node:sqlite';
-import type { PlatformActor, TenantContext } from '../auth/principal';
+import type { Membership, PlatformActor, TenantContext } from '../auth/principal';
 import { now, requireAdminRole, requirePlatform } from './shared';
 import { seedSettings } from './schema';
-import { parseIdentityRow, parseTenantHistoryRow, parseTenantRecordRow, parseTenantRow, parseTenantUserRow } from './rows';
-import { cleanTenantName, DUPLICATE_EMAIL_MESSAGE, DUPLICATE_TENANT_MESSAGE, LAST_ADMIN_MESSAGE, newTenantUser, tenantIdBase, updatedTenantUser } from './rules';
-import type { DemoIdentity, AppSession, TenantRecord, Tenant, TenantHistoryEvent, TenantList, TenantUser, TenantUserInput, TenantUserUpdate, TenantFilters, TenantInput, TenantUpdate } from './types';
+import { parseIdentityRow, parseMembershipRow, parseTenantHistoryRow, parseTenantNameRow, parseTenantRecordRow, parseTenantRow, parseTenantUserRow } from './rows';
+import { bindingLogMessage, cleanTenantName, DUPLICATE_EMAIL_MESSAGE, DUPLICATE_TENANT_MESSAGE, LAST_ADMIN_MESSAGE, newTenantUser, tenantIdBase, updatedTenantUser } from './rules';
+import type { DemoIdentity, AppSession, TenantRecord, Tenant, TenantHistoryEvent, TenantList, TenantName, TenantUser, TenantUserInput, TenantUserUpdate, TenantFilters, TenantInput, TenantUpdate } from './types';
 
 type Row = Record<string, unknown>;
 
@@ -32,6 +32,29 @@ export function createTenantMethods(database: DatabaseSync) {
     authenticate(userId: string): AppSession | null {
       const row = database.prepare(`${withIdentity} AND users.id = ?`).get(userId) as Row | undefined;
       return row ? parseIdentityRow(row) : null;
+    },
+    listMemberships(username: string): Membership[] {
+      return (database.prepare(`SELECT users.tenant_id, users.id, users.role, users.status FROM users JOIN tenants ON tenants.id = users.tenant_id
+        WHERE users.authelia_username = ? AND tenants.status = 'active' AND users.role IN ('admin', 'user') ORDER BY users.tenant_id`).all(username) as Row[]).map(parseMembershipRow);
+    },
+    bindMemberships(username: string, email: string): Membership[] {
+      const address = email.trim();
+      if (!address) return [];
+      database.exec('BEGIN');
+      try {
+        const bound = (database.prepare(`UPDATE users SET authelia_username = ?
+          WHERE authelia_username IS NULL AND status = 'active' AND role IN ('admin', 'user') AND lower(email) = lower(?)
+            AND NOT EXISTS (SELECT 1 FROM users claimed WHERE lower(claimed.email) = lower(?) AND claimed.authelia_username <> ?)
+          RETURNING tenant_id, id, role, status`).all(username, address, address, username) as Row[]).map(parseMembershipRow);
+        const log = database.prepare(`INSERT INTO operational_logs (id, tenant_id, kind, message, created_at) VALUES (?, ?, 'feature-flow', ?, ?)`);
+        for (const row of bound) log.run(crypto.randomUUID(), row.tenantId, bindingLogMessage(username, row.id), now());
+        database.exec('COMMIT');
+        return bound.sort((a, b) => (a.tenantId < b.tenantId ? -1 : 1));
+      } catch (error) { database.exec('ROLLBACK'); throw error; }
+    },
+    listTenantNames(tenantIds: readonly string[]): TenantName[] {
+      if (tenantIds.length === 0) return [];
+      return (database.prepare(`SELECT id, name FROM tenants WHERE id IN (${tenantIds.map(() => '?').join(', ')}) AND status = 'active' ORDER BY name COLLATE NOCASE, id`).all(...tenantIds) as Row[]).map(parseTenantNameRow);
     },
     listTenantRecords(context: TenantContext): TenantRecord[] {
       return (database.prepare('SELECT id, tenant_id, label FROM tenant_records WHERE tenant_id = ? ORDER BY id').all(context.tenantId) as Row[]).map(parseTenantRecordRow);

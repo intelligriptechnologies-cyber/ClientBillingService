@@ -3,7 +3,7 @@ import type { Gstr1Section } from '../gst';
 import type { GstSnapshotFields, SupplyContext } from '../invoice-gst';
 import type { SnapshotFormat, InvoiceFormat } from '../invoice-format';
 import type { SmtpSettings } from '../mailer';
-import type { TenantContext, PlatformActor } from '../auth/principal';
+import type { Membership, TenantContext, PlatformActor } from '../auth/principal';
 
 export type AppRole = 'superadmin' | 'admin' | 'user';
 export type DemoIdentity = { id: string; name: string; email: string; role: AppRole; tenantId: string | null; tenantName: string | null };
@@ -13,6 +13,7 @@ export type TenantStatus = 'active' | 'disabled';
 export type Tenant = { id: string; name: string; status: TenantStatus; createdAt: string; updatedAt: string; userCount: number };
 export type TenantHistoryEvent = { id: string; tenantId: string; action: 'created' | 'updated' | 'disabled' | 'enabled'; detail: string; occurredAt: string };
 export type TenantList = { items: Tenant[]; total: number };
+export type TenantName = { id: string; name: string };
 export type TenantFilters = { query?: string; month?: string; status?: TenantStatus | 'all'; page?: number; pageSize?: number };
 export type TenantInput = { name: string };
 export type TenantUpdate = { name?: string; status?: TenantStatus };
@@ -89,6 +90,12 @@ export type GstSalesReport = { month: string; companyName: string; gstin: string
 export interface TenantStore {
   listIdentities(): Promise<DemoIdentity[]>;
   authenticate(userId: string): Promise<AppSession | null>;
+  /** The rows bound to an Authelia username, in active tenants. A withPlatform lookup: it runs before a tenant is chosen. */
+  listMemberships(username: string): Promise<Membership[]>;
+  /** First-arrival binding (ADR 0002, decision 5). Gives the username every unbound active row with that email, unless another username already holds the email, logs one row per binding, and returns the rows it bound. */
+  bindMemberships(username: string, email: string): Promise<Membership[]>;
+  /** The active tenants among 	enantIds, by name, for the tenant chooser and switcher. */
+  listTenantNames(tenantIds: readonly string[]): Promise<TenantName[]>;
   listTenantRecords(context: TenantContext): Promise<TenantRecord[]>;
   createTenantRecord(context: TenantContext, tenantId: string, label: string): Promise<TenantRecord>;
   listTenants(platform: PlatformActor, filters: TenantFilters): Promise<TenantList>;
