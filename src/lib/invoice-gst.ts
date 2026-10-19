@@ -22,6 +22,8 @@ export type GstSnapshotFields = {
   placeOfSupplyStateCode: string;
   taxSplit?: TaxSplit;
   taxSplitOverrideReason?: string;
+  /** Set on every Tax Invoice issued under the owner's HSN rule. It makes the print show the HSN/SAC column whatever the format says; invoices issued before it keep printing as they were. */
+  hsnRequired?: true;
 };
 
 /** An unregistered seller issues a Bill of Supply, which carries no GST. */
@@ -55,6 +57,9 @@ export function parseHsnSac(input: string | undefined, label = 'HSN/SAC code'): 
   return code;
 }
 
+/** A line carries GST when its tax type says so, even at 0%. On a Tax Invoice it needs an HSN/SAC code. */
+export function isGstLine(line: { taxType: InvoiceTaxType }): boolean { return line.taxType !== 'none'; }
+
 export function lineTaxability(line: TaxedLine): Taxability { return line.taxType !== 'none' && line.gstRate > 0 ? 'taxable' : 'nil'; }
 
 export function invoiceDocumentType(sellerRegistered: boolean, lines: ReadonlyArray<TaxedLine>): DocumentType {
@@ -79,11 +84,11 @@ export function resolveSupply(sellerStateCode: string, client: { gstin: string; 
   return { sellerRegistered: true, sellerStateCode, placeOfSupplyStateCode, placeOfSupplyState: stateName(placeOfSupplyStateCode) ?? '', taxSplit, expectedTaxType: taxSplit === 'intra' ? 'cgst_sgst' : 'igst' };
 }
 
-/** The one line an amount-only invoice stands for, taxed the way the place of supply says. Only a registered seller has a split to tax it with. */
-export function amountOnlyLine(supply: SupplyContext, gstRate: number): TaxedLine {
+/** The one line an amount-only invoice stands for, taxed the way the place of supply says. Only a registered seller has a split to tax it with, and a taxed line carries the HSN/SAC code given for it. */
+export function amountOnlyLine(supply: SupplyContext, gstRate: number, hsnSac?: string): TaxedLine & { hsnSac?: string } {
   if (gstRate <= 0) return { taxType: 'none', gstRate: 0 };
   if (!supply.expectedTaxType) throw new Error(UNREGISTERED_SELLER_TAX_MESSAGE);
-  return { taxType: supply.expectedTaxType, gstRate };
+  return { taxType: supply.expectedTaxType, gstRate, hsnSac };
 }
 
 export function overridesSplit(lines: ReadonlyArray<TaxedLine>, supply: SupplyContext): boolean {
@@ -93,7 +98,7 @@ export function overridesSplit(lines: ReadonlyArray<TaxedLine>, supply: SupplyCo
 type DraftLine = TaxedLine & { hsnSac?: string };
 
 /** Checks every GST rule that depends on more than one line and returns the fields to snapshot. */
-export function gstSnapshotFields(input: { seller: { legalName: string }; supply: SupplyContext; lines: ReadonlyArray<DraftLine>; requireHsn: boolean; overrideReason?: string }): GstSnapshotFields {
+export function gstSnapshotFields(input: { seller: { legalName: string }; supply: SupplyContext; lines: ReadonlyArray<DraftLine>; overrideReason?: string }): GstSnapshotFields {
   const { supply, lines } = input;
   if (!supply.sellerRegistered && lines.some((line) => line.taxType !== 'none')) throw new Error(UNREGISTERED_SELLER_TAX_MESSAGE);
   const type = invoiceDocumentType(supply.sellerRegistered, lines);
@@ -102,7 +107,7 @@ export function gstSnapshotFields(input: { seller: { legalName: string }; supply
   if (overridden && !reason) throw new Error('Enter a reason for overriding the tax split that was preselected from the place of supply.');
   lines.forEach((line, index) => {
     const code = parseHsnSac(line.hsnSac, `HSN/SAC code for line ${index + 1}`);
-    if (input.requireHsn && type === 'Tax Invoice' && lineTaxability(line) === 'taxable' && !code) throw new Error(`Line ${index + 1} needs an HSN/SAC code because a Tax Invoice taxes it.`);
+    if (type === 'Tax Invoice' && isGstLine(line) && !code) throw new Error(`Line ${index + 1} needs an HSN/SAC code because a Tax Invoice taxes it.`);
   });
   return {
     documentType: type,
@@ -111,5 +116,6 @@ export function gstSnapshotFields(input: { seller: { legalName: string }; supply
     placeOfSupplyStateCode: supply.placeOfSupplyStateCode,
     ...(supply.taxSplit ? { taxSplit: supply.taxSplit } : {}),
     ...(overridden ? { taxSplitOverrideReason: reason } : {}),
+    ...(type === 'Tax Invoice' ? { hsnRequired: true as const } : {}),
   };
 }

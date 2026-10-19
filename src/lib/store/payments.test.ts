@@ -9,7 +9,7 @@ describeStore(['settings', 'customers', 'invoices', 'payments'], 'payments', () 
     if (!nexio) throw new Error('Expected tenant session');
     await registerSeller(store, nexio);
     const customer = (await store.listCustomers(tenantContextOf(nexio))).items[0];
-    const original = await store.createIssuedInvoice(tenantContextOf(nexio), { customerId: customer.id, invoiceDate: '2026-10-07', dueDate: '2026-10-21', taxableMinor: 10000, gstRate: 18 });
+    const original = await store.createIssuedInvoice(tenantContextOf(nexio), { customerId: customer.id, invoiceDate: '2026-10-07', dueDate: '2026-10-21', taxableMinor: 10000, gstRate: 18, hsnSac: '998311' });
     const corrected = await store.correctInvoice(tenantContextOf(nexio), original.id, { invoiceDate: '2026-10-07', dueDate: '2026-10-24', taxableMinor: 12000, gstRate: 18 }, 'Corrected price');
     expect(corrected.id).not.toBe(original.id);
     expect(corrected.taxableMinor).toBe(12000);

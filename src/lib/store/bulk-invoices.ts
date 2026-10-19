@@ -19,7 +19,8 @@ export function createBulkInvoiceMethods(database: DatabaseSync) {
     const additions = (database.prepare(`SELECT id, contract_id, description, price_minor, service_date FROM additional_services WHERE tenant_id = ? AND status = 'active' AND billed_at IS NULL AND service_date LIKE ?`).all(tenantId, `${billingPeriod}%`) as Row[])
       .map((row): BulkAddition => ({ id: String(row.id), contractId: String(row.contract_id), description: String(row.description), priceMinor: Number(row.price_minor), serviceDate: String(row.service_date) }));
     const invoiced = new Set((database.prepare('SELECT DISTINCT contract_id FROM invoices WHERE tenant_id = ? AND contract_id IS NOT NULL AND substr(invoice_date, 1, 7) = ?').all(tenantId, billingPeriod) as Row[]).map((row) => String(row.contract_id)));
-    return bulkInvoicePreview(billingPeriod, contracts, additions, invoiced, settingsOf(tenantId).stateCode);
+    const services = new Map((database.prepare('SELECT id, name, hsn_sac FROM services WHERE tenant_id = ?').all(tenantId) as Row[]).map((row) => [String(row.id), { name: String(row.name), hsnSac: String(row.hsn_sac) }]));
+    return bulkInvoicePreview(billingPeriod, contracts, additions, invoiced, services, settingsOf(tenantId).stateCode);
   }
 
   return {

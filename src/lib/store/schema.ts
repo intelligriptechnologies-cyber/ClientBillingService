@@ -2,15 +2,32 @@ import type { DatabaseSync } from 'node:sqlite';
 import { stateFromGstin } from '../gst';
 import { now } from './shared';
 
-type TenantSeed = { id: string; name: string; adminEmail: string; userEmail: string };
+/** The management-consulting SAC the demo service bills under. db/seed/demo.ts seeds the same code. */
+const DEMO_HSN_SAC = '998311';
 
+type TenantSeed = { id: string; name: string; adminEmail: string; userEmail: string; gstin: string; stateCode: string };
+
+/** Each demo seller is registered, with a checksum-valid test GSTIN whose first two digits are its state. db/seed/demo.ts seeds the same values. */
 const tenantSeeds: TenantSeed[] = [
-  { id: 'nexio', name: 'Nexio Hyper', adminEmail: 'Admin@nexio.com', userEmail: 'user@nexio.com' },
-  { id: 'maasp', name: 'MAASP Associates', adminEmail: 'Admin@maasp.com', userEmail: 'user@massp.com' },
-  { id: 'evo', name: 'Evo Fitness', adminEmail: 'Admin@evo.com', userEmail: 'user@evo.com' },
-  { id: 'gripdata', name: 'Gripdata Analytics', adminEmail: 'Admin@gripdata.com', userEmail: 'user@gripdata.com' },
-  { id: 'od', name: 'OD Badminton', adminEmail: 'Admin@od.com', userEmail: 'user@od.com' },
+  { id: 'nexio', name: 'Nexio Hyper', adminEmail: 'Admin@nexio.com', userEmail: 'user@nexio.com', gstin: '29AABCN4821K1ZA', stateCode: '29' },
+  { id: 'maasp', name: 'MAASP Associates', adminEmail: 'Admin@maasp.com', userEmail: 'user@massp.com', gstin: '27AABCM5932L1Z7', stateCode: '27' },
+  { id: 'evo', name: 'Evo Fitness', adminEmail: 'Admin@evo.com', userEmail: 'user@evo.com', gstin: '33AABCE6043M1ZO', stateCode: '33' },
+  { id: 'gripdata', name: 'Gripdata Analytics', adminEmail: 'Admin@gripdata.com', userEmail: 'user@gripdata.com', gstin: '36AABCG7154N1Z8', stateCode: '36' },
+  { id: 'od', name: 'OD Badminton', adminEmail: 'Admin@od.com', userEmail: 'user@od.com', gstin: '29AABCO8265P1ZL', stateCode: '29' },
 ];
+const DEMO_CUSTOMER_GSTIN = '29AAGCB7383J1Z4';
+const DEMO_CUSTOMER_STATE = '29';
+
+/** The Tax Invoice every demo seller issued to the demo customer: one taxed line with an HSN/SAC code, split by the seller's state. */
+function demoSnapshot(tenant: TenantSeed, customer: { email: string; billing_address: string }): string {
+  const taxSplit = tenant.stateCode === DEMO_CUSTOMER_STATE ? 'intra' : 'inter';
+  const line = { description: 'Managed billing service', quantity: 1, rateMinor: 100000, taxType: taxSplit === 'intra' ? 'cgst_sgst' : 'igst', gstRate: 18, hsnSac: DEMO_HSN_SAC, amountMinor: 100000, gstMinor: 18000, totalMinor: 118000 };
+  return JSON.stringify({
+    companyName: tenant.name, gstin: tenant.gstin, address: '', logoDataUrl: '', stampDataUrl: '', signatureDataUrl: '', customerName: `${tenant.name} Customer`, customerEmail: customer.email, customerAddress: customer.billing_address,
+    customerGstin: DEMO_CUSTOMER_GSTIN, gstApplicable: true, gstRate: 18, footer: 'Thank you for your business.', lines: [line],
+    documentType: 'Tax Invoice', sellerLegalName: '', sellerStateCode: tenant.stateCode, placeOfSupplyStateCode: DEMO_CUSTOMER_STATE, taxSplit, hsnRequired: true,
+  });
+}
 
 export function seed(database: DatabaseSync) {
   database.exec(`
@@ -57,7 +74,7 @@ export function seed(database: DatabaseSync) {
     const insertUser = database.prepare('INSERT INTO users (id, tenant_id, name, email, role, password, status) VALUES (?, ?, ?, ?, ?, ?, ?)');
     const insertRecord = database.prepare('INSERT INTO tenant_records (id, tenant_id, label) VALUES (?, ?, ?)');
     const insertCustomer = database.prepare('INSERT INTO customers (id, tenant_id, company_name, contact_name, email, phone, gstin, state_code, billing_address, invoice_delivery, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
-    const insertService = database.prepare('INSERT INTO services (id, tenant_id, name, description, status, monthly_minor, quarterly_minor, half_yearly_minor, annual_minor, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
+    const insertService = database.prepare('INSERT INTO services (id, tenant_id, name, description, hsn_sac, status, monthly_minor, quarterly_minor, half_yearly_minor, annual_minor, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
     for (const tenant of tenantSeeds) {
       insertTenant.run(tenant.id, tenant.name, 'active', timestamp, timestamp);
       insertUser.run(`${tenant.id}-admin`, tenant.id, `${tenant.name} Admin`, tenant.adminEmail, 'admin', 'admin123', 'active');
@@ -65,10 +82,10 @@ export function seed(database: DatabaseSync) {
       insertRecord.run(`${tenant.id}-baseline`, tenant.id, `${tenant.name} baseline demo record`);
       const now = '2026-10-01T09:00:00.000Z';
       insertCustomer.run(`${tenant.id}-customer`, tenant.id, `${tenant.name} Customer`, 'Billing Contact', `billing@${tenant.id}.example`, '+91 90000 00000', '29AAGCB7383J1Z4', '29', 'Demo billing address, Bengaluru', 'monthly', 'active', now, now);
-      insertService.run(`${tenant.id}-service`, tenant.id, 'Managed billing service', 'Seeded recurring billing service', 'active', 100000, 280000, 540000, 1000000, now, now);
+      insertService.run(`${tenant.id}-service`, tenant.id, 'Managed billing service', 'Seeded recurring billing service', DEMO_HSN_SAC, 'active', 100000, 280000, 540000, 1000000, now, now);
     }
     database.exec('COMMIT');
-    seedSettings(database); seedInvoices(database); seedOperationalScenarios(database);
+    seedSettings(database); registerDemoSellers(database); seedInvoices(database); seedOperationalScenarios(database);
   } catch (error) {
     database.exec('ROLLBACK');
     throw error;
@@ -84,7 +101,11 @@ export function backfillStateCodes(database: DatabaseSync) {
   }
 }
 export function seedSettings(database: DatabaseSync) { const rows = database.prepare('SELECT id, name FROM tenants').all() as Array<{ id: string; name: string }>; const insert = database.prepare(`INSERT OR IGNORE INTO tenant_settings (tenant_id, company_name, gstin, address, invoice_prefix, payment_terms_days, footer, invoice_template, email_subject, email_body, smtp_host, smtp_port, smtp_from, log_retention_days, logo_data_url, stamp_data_url, signature_data_url, updated_at) VALUES (?, ?, '', '', ?, 14, 'Thank you for your business.', 'Invoice {{invoiceNumber}} for {{customerName}}', 'Your invoice {{invoiceNumber}}', 'Hello {{customerName}}, please find your invoice attached.', '', 587, '', 30, '', '', '', ?)`); for (const row of rows) insert.run(row.id, row.name, row.name.slice(0, 3).toUpperCase(), '2026-10-01T09:00:00.000Z'); }
-function seedInvoices(database: DatabaseSync) { const rows = database.prepare('SELECT tenants.id, tenants.name, customers.id AS customer_id, customers.email, customers.billing_address FROM tenants JOIN customers ON customers.tenant_id = tenants.id').all() as Array<{ id: string; name: string; customer_id: string; email: string; billing_address: string }>; const insert = database.prepare('INSERT OR IGNORE INTO invoices (id, tenant_id, contract_id, customer_id, invoice_number, invoice_date, due_date, taxable_minor, gst_rate, gst_minor, total_minor, paid_minor, status, snapshot, issued_at) VALUES (?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?)'); for (const row of rows) { const taxableMinor = 100000; const gstMinor = 18000; const snapshot = JSON.stringify({ companyName: row.name, gstin: '', address: '', logoDataUrl: '', stampDataUrl: '', signatureDataUrl: '', customerName: `${row.name} Customer`, customerEmail: row.email, customerAddress: row.billing_address, gstRate: 18, footer: 'Thank you for your business.' }); insert.run(`${row.id}-invoice-001`, row.id, row.customer_id, `${row.name.slice(0, 3).toUpperCase()}-2026-001`, '2026-10-01', '2026-10-15', taxableMinor, 18, gstMinor, taxableMinor + gstMinor, 'issued', snapshot, '2026-10-01T09:00:00.000Z'); } }
+function registerDemoSellers(database: DatabaseSync) {
+  const update = database.prepare('UPDATE tenant_settings SET gstin = ?, state_code = ? WHERE tenant_id = ?');
+  for (const tenant of tenantSeeds) update.run(tenant.gstin, tenant.stateCode, tenant.id);
+}
+function seedInvoices(database: DatabaseSync) { const rows = database.prepare('SELECT tenants.id, tenants.name, customers.id AS customer_id, customers.email, customers.billing_address FROM tenants JOIN customers ON customers.tenant_id = tenants.id').all() as Array<{ id: string; name: string; customer_id: string; email: string; billing_address: string }>; const insert = database.prepare('INSERT OR IGNORE INTO invoices (id, tenant_id, contract_id, customer_id, invoice_number, invoice_date, due_date, taxable_minor, gst_rate, gst_minor, total_minor, paid_minor, status, snapshot, issued_at) VALUES (?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?)'); for (const row of rows) { const taxableMinor = 100000; const gstMinor = 18000; const snapshot = demoSnapshot(tenantSeeds.find((tenant) => tenant.id === row.id)!, row); insert.run(`${row.id}-invoice-001`, row.id, row.customer_id, `${row.name.slice(0, 3).toUpperCase()}-2026-001`, '2026-10-01', '2026-10-15', taxableMinor, 18, gstMinor, taxableMinor + gstMinor, 'issued', snapshot, '2026-10-01T09:00:00.000Z'); } }
 function seedOperationalScenarios(database: DatabaseSync) {
   const rows = database.prepare('SELECT tenants.id, tenants.name, customers.id AS customer_id, customers.email, customers.billing_address FROM tenants JOIN customers ON customers.tenant_id = tenants.id').all() as Array<{ id: string; name: string; customer_id: string; email: string; billing_address: string }>;
   const timestamp = '2026-10-01T09:00:00.000Z';
@@ -99,7 +120,7 @@ function seedOperationalScenarios(database: DatabaseSync) {
     const currentInvoiceId = `${row.id}-invoice-001`;
     const paidInvoiceId = `${row.id}-invoice-payment-001`;
     const prefix = row.name.slice(0, 3).toUpperCase();
-    const snapshot = JSON.stringify({ companyName: row.name, gstin: '', address: '', logoDataUrl: '', stampDataUrl: '', signatureDataUrl: '', customerName: `${row.name} Customer`, customerEmail: row.email, customerAddress: row.billing_address, gstRate: 18, footer: 'Thank you for your business.' });
+    const snapshot = demoSnapshot(tenantSeeds.find((tenant) => tenant.id === row.id)!, row);
     insertContract.run(contractId, row.id, row.customer_id, `${row.name} managed billing contract`, timestamp, timestamp);
     insertContractService.run(contractId, `${row.id}-service`);
     insertDeposit.run(`${row.id}-seed-deposit`, row.id, contractId, row.customer_id, timestamp);

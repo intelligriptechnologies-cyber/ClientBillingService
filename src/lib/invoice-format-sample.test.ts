@@ -17,8 +17,8 @@ describe('the format preview invoice', () => {
     expect(html.match(/<img /g)).toHaveLength(3);
   });
 
-  it('shows each switch changing the preview', () => {
-    expect(preview({}, { hsnSac: false })).not.toContain('HSN/SAC');
+  it('shows each switch changing the preview, except the HSN/SAC column that a Tax Invoice always prints', () => {
+    expect(preview({}, { hsnSac: false })).toContain('HSN/SAC');
     expect(preview({}, { amountInWords: false })).not.toContain('Indian Rupees');
     expect(preview({ logo: 'hide' })).not.toContain('alt="Logo"');
     expect(preview({ accent: '#1f3a5f' })).toContain('#1f3a5f');

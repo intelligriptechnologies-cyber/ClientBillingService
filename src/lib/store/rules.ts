@@ -330,17 +330,18 @@ export type InvoiceTax = { supply: SupplyContext; gstFields: GstSnapshotFields }
 /** Where the invoice's tax lands and the GST fields it keeps. Every GST rule, the unregistered-seller rule among them, comes from invoice-gst. */
 export function invoiceTax(input: InvoiceInput, amounts: InvoiceAmounts, seller: TenantSettings, customer: CustomerRecord): InvoiceTax {
   const supply = resolveSupply(seller.stateCode, clientForSupply(customer, input.customerGstin));
-  const lines = amounts.lines ?? [amountOnlyLine(supply, amounts.gstRate)];
-  return { supply, gstFields: gstSnapshotFields({ seller, supply, lines, requireHsn: Boolean(amounts.lines), overrideReason: input.taxSplitOverrideReason }) };
+  const lines = amounts.lines ?? [amountOnlyLine(supply, amounts.gstRate, input.hsnSac)];
+  return { supply, gstFields: gstSnapshotFields({ seller, supply, lines, overrideReason: input.taxSplitOverrideReason }) };
 }
 
 /** What an issued invoice prints, so later edits to the seller, the client or the format never change it. */
 export function issuedInvoiceSnapshot(input: InvoiceInput, amounts: InvoiceAmounts, seller: TenantSettings, customer: CustomerRecord, tax: InvoiceTax, format: SnapshotFormat): InvoiceSnapshot {
+  const amountOnlyHsn = !amounts.lines && tax.gstFields.hsnRequired ? input.hsnSac?.trim() : undefined;
   return {
     companyName: seller.companyName, gstin: seller.gstin, address: seller.address, logoDataUrl: seller.logoDataUrl, stampDataUrl: seller.stampDataUrl, signatureDataUrl: seller.signatureDataUrl,
     customerName: customer.companyName, customerEmail: customer.email, customerAddress: input.billingAddress?.trim() || customer.billingAddress, customerPan: input.customerPan?.trim().toUpperCase() || undefined,
     customerGstin: input.customerGstin?.trim().toUpperCase() || customer.gstin, venue: input.venue?.trim(), gstApplicable: tax.supply.sellerRegistered && (input.gstApplicable ?? amounts.gstMinor > 0),
-    notes: input.notes?.trim(), lines: amounts.lines, gstRate: amounts.gstRate, footer: seller.footer, invoiceTemplate: seller.invoiceTemplate, format, ...tax.gstFields,
+    notes: input.notes?.trim(), lines: amounts.lines, gstRate: amounts.gstRate, footer: seller.footer, invoiceTemplate: seller.invoiceTemplate, format, ...tax.gstFields, ...(amountOnlyHsn ? { hsnSac: amountOnlyHsn } : {}),
   };
 }
 
@@ -368,7 +369,7 @@ export function replacementInput(current: TenantInvoice, correction: InvoiceInpu
   return {
     ...correction, contractId: current.contractId ?? undefined, customerId: current.customerId, venue: correction.venue ?? kept.venue, customerPan: correction.customerPan ?? kept.customerPan,
     customerGstin: correction.customerGstin ?? kept.customerGstin, billingAddress: correction.billingAddress ?? kept.customerAddress, gstApplicable: correction.gstApplicable ?? kept.gstApplicable,
-    notes: correction.notes ?? kept.notes, formatId: correction.formatId ?? formatId,
+    notes: correction.notes ?? kept.notes, formatId: correction.formatId ?? formatId, hsnSac: correction.hsnSac ?? kept.hsnSac,
   };
 }
 
@@ -387,15 +388,28 @@ function addCalendarDays(date: string, days: number) {
 
 export type BulkAddition = BulkInvoiceAdditionalLine & { contractId: string };
 
+export type BulkServiceCodes = ReadonlyMap<string, { name: string; hsnSac: string }>;
+
+/** The one HSN/SAC code a bulk invoice for `contract` carries, or why the contract's services cannot give it one. */
+function bulkHsn(contract: Contract, services: BulkServiceCodes): { hsnSac: string } | { problem: string } {
+  const billed = contract.serviceIds.flatMap((id) => services.get(id) ?? []);
+  const uncoded = billed.filter((service) => !service.hsnSac.trim());
+  if (uncoded.length) return { problem: `Contract "${contract.name}" bills ${uncoded.map((service) => `"${service.name}"`).join(', ')}, which has no HSN/SAC code.` };
+  const codes = [...new Set(billed.map((service) => service.hsnSac.trim()))].sort();
+  if (codes.length > 1) return { problem: `Contract "${contract.name}" bills services with different HSN/SAC codes (${codes.join(', ')}), and a bulk invoice carries one. Issue it from the Invoices page with a line for each service.` };
+  return { hsnSac: codes[0] ?? '' };
+}
+
 /**
  * The invoices a run for `billingPeriod` would issue and the contracts it skips, in the order of `contracts`.
  * `additions` are the period's unbilled active additional services, `invoiced` the contracts already invoiced in it.
+ * A GST invoice needs an HSN/SAC code, which comes from the contract's services. A contract that cannot give one stops the run, because a skipped contract would not be billed again for the period.
  */
-export function bulkInvoicePreview(billingPeriod: string, contracts: readonly Contract[], additions: readonly BulkAddition[], invoiced: ReadonlySet<string>, sellerStateCode: string): BulkInvoicePreview {
+export function bulkInvoicePreview(billingPeriod: string, contracts: readonly Contract[], additions: readonly BulkAddition[], invoiced: ReadonlySet<string>, services: BulkServiceCodes, sellerStateCode: string): BulkInvoicePreview {
   const days = billingPeriodDays(billingPeriod);
   const month = Number(billingPeriod.slice(5));
   const gstRate = sellerRegisteredIn(sellerStateCode) ? 18 : 0;
-  const proposed: BulkInvoiceProposal[] = []; const skipped: BulkInvoiceSkip[] = [];
+  const proposed: BulkInvoiceProposal[] = []; const skipped: BulkInvoiceSkip[] = []; const uncoded: string[] = [];
   for (const contract of contracts) {
     const common = { contractId: contract.id, contractName: contract.name, customerName: contract.customerName };
     if (contract.status !== 'active') { skipped.push({ ...common, reason: 'Contract is inactive.' }); continue; }
@@ -405,19 +419,22 @@ export function bulkInvoicePreview(billingPeriod: string, contracts: readonly Co
     const additionalLines = additions.filter((line) => line.contractId === contract.id).map(({ id, description, priceMinor, serviceDate }) => ({ id, description, priceMinor, serviceDate }));
     const taxableMinor = contract.valueMinor + additionalLines.reduce((total, line) => total + line.priceMinor, 0);
     const gstMinor = Math.round(taxableMinor * gstRate / 100);
-    proposed.push({ ...common, customerId: contract.customerId, billingPeriod, invoiceDate: days.start, dueDate: addCalendarDays(days.start, contract.paymentTermsDays), taxableMinor, gstRate, gstMinor, totalMinor: taxableMinor + gstMinor, additionalLines });
+    const code = gstRate > 0 ? bulkHsn(contract, services) : { hsnSac: '' };
+    if ('problem' in code) { uncoded.push(code.problem); continue; }
+    proposed.push({ ...common, customerId: contract.customerId, billingPeriod, invoiceDate: days.start, dueDate: addCalendarDays(days.start, contract.paymentTermsDays), taxableMinor, gstRate, gstMinor, totalMinor: taxableMinor + gstMinor, hsnSac: code.hsnSac, additionalLines });
   }
+  if (uncoded.length) throw new Error(`A GST invoice needs an HSN/SAC code, so this run cannot go ahead. ${uncoded.join(' ')}`);
   return { billingPeriod, proposed, skipped };
 }
 
 /** What a bulk-issued invoice prints: the contract amount on one amount-only line, taxed by the place of supply. */
 export function bulkInvoiceSnapshot(proposal: BulkInvoiceProposal, seller: TenantSettings, customer: CustomerRecord, format: SnapshotFormat): InvoiceSnapshot {
   const supply = resolveSupply(seller.stateCode, { gstin: customer.gstin, stateCode: customer.stateCode });
-  const gstFields = gstSnapshotFields({ seller, supply, lines: [amountOnlyLine(supply, proposal.gstRate)], requireHsn: false });
+  const gstFields = gstSnapshotFields({ seller, supply, lines: [amountOnlyLine(supply, proposal.gstRate, proposal.hsnSac)] });
   return {
     companyName: seller.companyName, gstin: seller.gstin, address: seller.address, logoDataUrl: seller.logoDataUrl, stampDataUrl: seller.stampDataUrl, signatureDataUrl: seller.signatureDataUrl,
     customerName: customer.companyName, customerEmail: customer.email, customerAddress: customer.billingAddress, customerGstin: customer.gstin, gstRate: proposal.gstRate, footer: seller.footer,
-    invoiceTemplate: seller.invoiceTemplate, format, ...gstFields,
+    invoiceTemplate: seller.invoiceTemplate, format, ...gstFields, ...(gstFields.hsnRequired ? { hsnSac: proposal.hsnSac } : {}),
   };
 }
 

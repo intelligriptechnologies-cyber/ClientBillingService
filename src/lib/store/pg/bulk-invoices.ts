@@ -31,7 +31,8 @@ async function preview(tx: Tx, tenantId: string, billingPeriod: string, lockAddi
     [tenantId, days.start, days.end],
   )).rows.map((row): BulkAddition => ({ id: String(row.id), contractId: String(row.contract_id), description: String(row.description), priceMinor: Number(row.price_minor), serviceDate: String(row.service_date) }));
   const invoiced = await tx.query<Row>('SELECT DISTINCT contract_id FROM invoices WHERE tenant_id = $1 AND contract_id IS NOT NULL AND invoice_date >= $2 AND invoice_date < $3', [tenantId, days.start, days.end]);
-  return bulkInvoicePreview(billingPeriod, await withServices(tx, tenantId, rows), additions, new Set(invoiced.rows.map((row) => String(row.contract_id))), (await tenantSettings(tx, tenantId)).stateCode);
+  const services = new Map((await tx.query<Row>('SELECT id, name, hsn_sac FROM services WHERE tenant_id = $1', [tenantId])).rows.map((row) => [String(row.id), { name: String(row.name), hsnSac: String(row.hsn_sac) }]));
+  return bulkInvoicePreview(billingPeriod, await withServices(tx, tenantId, rows), additions, new Set(invoiced.rows.map((row) => String(row.contract_id))), services, (await tenantSettings(tx, tenantId)).stateCode);
 }
 
 export function createPgBulkInvoiceMethods(db: Database) {
