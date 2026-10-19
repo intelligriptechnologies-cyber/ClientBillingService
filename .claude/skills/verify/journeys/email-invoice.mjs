@@ -1,6 +1,6 @@
 // node control-billing.mjs run journeys/email-invoice.mjs --as nexio-admin [--args '{"invoiceId":"nexio-invoice-001"}']
 // Saves SMTP settings for the tenant, sends an invoice by email from the invoice detail page and reads back the
-// delivery log through the API and the sqlite file. The instance uses the capture transport, so nothing leaves the machine.
+// delivery log through the API and the instance database. The instance uses the capture transport, so nothing leaves the machine.
 // Selectors come from e2e/invoice-email.spec.ts.
 export default async function journey({ page, api, db, shot, args }) {
   const invoiceId = args.invoiceId ?? 'nexio-invoice-001';

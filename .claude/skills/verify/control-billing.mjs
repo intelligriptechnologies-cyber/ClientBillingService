@@ -21,7 +21,8 @@ const EVIDENCE_ROOT = join(SKILL_DIR, 'evidence');
 const CACHE_ROOT = process.env.CLIENT_BILLING_VERIFY_HOME ?? join(tmpdir(), 'client-billing-verify');
 const NEVER_TOUCH_PORTS = [3000, 3100];
 const SESSION_COOKIE = '__Host-cbs_demo';
-const SOURCE_ITEMS = ['src', 'public', 'seed', 'next.config.ts', 'package.json', 'tsconfig.json', 'next-env.d.ts'];
+const SOURCE_ITEMS = ['src', 'public', 'db', 'next.config.ts', 'package.json', 'tsconfig.json', 'next-env.d.ts'];
+const DATABASE_PREFIX = 'cbs_verify_';
 const IS_WIN = process.platform === 'win32';
 
 class CliError extends Error {
@@ -43,13 +44,13 @@ const AS = {
 
 const COMMANDS = {
   doctor: {
-    summary: 'Read-only check: is the instance ours, which port, db path, build/commit, health, session.',
+    summary: 'Read-only check: is the instance ours, which port, which database, build/commit, health, session.',
     usage: 'doctor [--name <instance>]',
     flags: { ...INSTANCE },
     examples: ['node control-billing.mjs doctor'],
   },
   up: {
-    summary: 'Build a private copy of the working tree and start it on an isolated port with a fresh demo database.',
+    summary: 'Build a private copy of the working tree and start it on an isolated port with a fresh, seeded Postgres database.',
     usage: 'up [--name <instance>] [--port <n>] [--rebuild] [--dry-run]',
     flags: {
       ...INSTANCE,
@@ -64,7 +65,7 @@ const COMMANDS = {
     usage: 'down [--name <instance>] [--keep-data] [--purge] [--dry-run]',
     flags: {
       ...INSTANCE,
-      'keep-data': { type: 'boolean', desc: 'Keep the instance database directory (default: delete it, it is scratch).' },
+      'keep-data': { type: 'boolean', desc: 'Keep the instance database and its data directory (default: drop and delete them, they are scratch).' },
       purge: { type: 'boolean', desc: 'Also delete the instance workspace and its build cache.' },
       'dry-run': { type: 'boolean', desc: 'Print the kill command and the paths that would be removed; change nothing.' },
     },
@@ -113,13 +114,13 @@ const COMMANDS = {
     ],
   },
   db: {
-    summary: 'Read-only SQL against the isolated sqlite (node:sqlite, opened readOnly).',
+    summary: 'Read-only SQL against the instance Postgres database, as cbs_owner (every tenant) in a READ ONLY transaction.',
     usage: 'db "<SELECT ...>" [--param <v>]... [--limit <n>] [--out <file>] [--name <instance>]',
     flags: {
       ...INSTANCE, ...EVIDENCE,
       limit: { type: 'string', desc: 'Max rows returned (default 200).' },
       out: { type: 'string', desc: 'Also write the result JSON to this file inside the evidence dir.' },
-      param: { type: 'string', desc: 'Positional ? parameter; repeat the flag for more.', multiple: true },
+      param: { type: 'string', desc: 'Value for the next ? outside quotes (sent as $1, $2, ...); repeat the flag for more.', multiple: true },
     },
     examples: ['node control-billing.mjs db "SELECT invoice_number,total_minor,status FROM invoices WHERE tenant_id=\'nexio\'"'],
   },
@@ -353,20 +354,67 @@ function identityFrom(flags, state) { return flags.as ?? state.currentIdentity ?
 
 // ---------------------------------------------------------------- db
 
-async function openDb(state) {
-  if (!state.dbPath || !existsSync(state.dbPath)) throw new CliError(`Database file ${state.dbPath} does not exist yet.`, 'The app opens its database on first request. Run `doctor` or `login` once, or check `up` finished.');
-  const { DatabaseSync } = await import('node:sqlite');
-  return new DatabaseSync(state.dbPath, { readOnly: true, timeout: 3000 });
+/** The four role URLs from .env.example, pointed at this instance's own database. `server` stays on the admin URL's database, to create and drop it. */
+function databaseFor(name) {
+  const names = { admin: 'DATABASE_ADMIN_URL', owner: 'DATABASE_MIGRATE_URL', app: 'DATABASE_URL', platform: 'DATABASE_PLATFORM_URL' };
+  const missing = Object.values(names).filter((key) => !process.env[key]);
+  if (missing.length) throw new CliError(`The instance needs Postgres, and ${missing.join(', ')} ${missing.length === 1 ? 'is' : 'are'} unset.`, 'Start Postgres with `npm run db:up` and export the four URLs it prints (see .env.example).');
+  const database = `${DATABASE_PREFIX}${name.replaceAll('-', '_')}`;
+  const on = (url) => { const parsed = new URL(url); parsed.pathname = `/${database}`; return parsed.toString(); };
+  return { database, server: process.env[names.admin], admin: on(process.env[names.admin]), owner: on(process.env[names.owner]), app: on(process.env[names.app]), platform: on(process.env[names.platform]) };
 }
+
+async function withClient(deps, url, fn, options = {}) {
+  const { Client } = createRequire(join(deps, 'package.json'))('pg');
+  const client = new Client({ connectionString: url, ...options });
+  try { await client.connect(); } catch (error) { throw new CliError(`Cannot reach Postgres at ${new URL(url).host}: ${error.message}`, 'Start it with `npm run db:up`, or check the exported URLs.'); }
+  try { return await fn(client); } finally { await client.end(); }
+}
+
+/** Drops and recreates the instance database, then migrates and seeds it the way e2e/global-setup.ts builds cbs_e2e. */
+async function recreateDatabase(deps, app, db) {
+  log(`recreating ${db.database}: migrate, then the demo seed`);
+  await withClient(deps, db.server, async (client) => {
+    await client.query(`DROP DATABASE IF EXISTS ${db.database} WITH (FORCE)`);
+    await client.query(`CREATE DATABASE ${db.database}`);
+  });
+  const { SCHEMA_GRANTS } = await import(pathToFileURL(join(app, 'src', 'lib', 'db', 'schema-grants.ts')).href);
+  await withClient(deps, db.admin, (client) => client.query(SCHEMA_GRANTS));
+  const asOwner = (what, args) => {
+    try { execFileSync(process.execPath, args, { cwd: app, env: { ...process.env, DATABASE_MIGRATE_URL: db.owner }, stdio: ['ignore', 'ignore', 'pipe'], encoding: 'utf8' }); }
+    catch (error) { throw new CliError(`${what} ${db.database} failed:\n${String(error.stderr ?? error.message).trim().split('\n').slice(-8).join('\n')}`, 'Fix the migration or db/seed/demo.ts in the checkout, then rerun `up`.'); }
+  };
+  asOwner('Migrating', [join(deps, 'node_modules', 'node-pg-migrate', 'bin', 'node-pg-migrate.js'), 'up', '-m', 'db/migrations', '-d', 'DATABASE_MIGRATE_URL', '--no-verbose']);
+  asOwner('Seeding', [join('db', 'seed', 'demo.ts')]);
+}
+
+async function dropDatabase(state) {
+  if (!state.db?.database?.startsWith(DATABASE_PREFIX)) throw new CliError(`Refusing to drop ${state.db?.database}: only ${DATABASE_PREFIX}* databases belong to this tool.`, 'Drop it by hand if it is really ours.');
+  await withClient(state.depsDir, state.db.server, (client) => client.query(`DROP DATABASE IF EXISTS ${state.db.database} WITH (FORCE)`));
+}
+
+/** `?` outside single quotes becomes $1, $2, ... so the SQL can sit in double quotes in any shell. */
+function numberPlaceholders(sql) {
+  let count = 0; let quoted = false; let text = '';
+  for (const char of sql) {
+    if (char === "'") quoted = !quoted;
+    text += char === '?' && !quoted ? `$${++count}` : char;
+  }
+  return text;
+}
+
 async function runQuery(state, sql, params = [], limit = 200) {
-  if (!/^\s*(select|with|pragma\s+table_info|pragma\s+table_xinfo|explain)\b/i.test(sql)) throw new CliError('db only accepts read queries (SELECT, WITH, PRAGMA table_info, EXPLAIN).', 'Change data through the app (`api` or the UI), then read it back with `db`.');
-  const database = await openDb(state);
-  try {
-    const rows = database.prepare(sql).all(...params);
-    return { count: rows.length, truncated: rows.length > limit, rows: rows.slice(0, limit) };
-  } catch (error) {
-    throw new CliError(`SQL failed: ${error.message}`, 'List tables with `db "SELECT name FROM sqlite_master WHERE type=\'table\'"` and columns with `db "PRAGMA table_info(invoices)"`.');
-  } finally { database.close(); }
+  if (!/^\s*(select|with|explain)\b/i.test(sql)) throw new CliError('db only accepts read queries (SELECT, WITH, EXPLAIN).', 'Change data through the app (`api` or the UI), then read it back with `db`.');
+  const { pgTypes } = await import(pathToFileURL(join(state.app, 'src', 'lib', 'db', 'types.ts')).href);
+  return withClient(state.depsDir, state.db.owner, async (client) => {
+    await client.query('BEGIN READ ONLY');
+    try {
+      const { rows } = await client.query(numberPlaceholders(sql), params);
+      return { count: rows.length, truncated: rows.length > limit, rows: rows.slice(0, limit) };
+    } catch (error) {
+      throw new CliError(`SQL failed: ${error.message}`, 'List tables with `db "SELECT table_name FROM information_schema.tables WHERE table_schema = \'public\' ORDER BY 1"` and columns with `db "SELECT column_name, data_type FROM information_schema.columns WHERE table_name = ?" --param invoices`.');
+    } finally { await client.query('ROLLBACK'); }
+  }, { types: pgTypes });
 }
 
 // ---------------------------------------------------------------- commands
@@ -403,12 +451,14 @@ async function cmdDoctor(flags) {
       check('seeded', identities.some((i) => i.id === 'nexio-admin'), `${identities.length} demo identities, nexio-admin ${identities.some((i) => i.id === 'nexio-admin') ? 'present' : 'missing'}`);
     } catch (error) { check('health', false, `request failed: ${error.message}`); }
   }
-  const dbExists = existsSync(state.dbPath);
-  check('database-file', dbExists, dbExists ? `${state.dbPath} (${statSync(state.dbPath).size} bytes)` : `${state.dbPath} missing`);
+  try {
+    const tenants = await withClient(state.depsDir, state.db.owner, async (client) => (await client.query('SELECT count(*)::int AS n FROM tenants')).rows[0].n);
+    check('database', tenants > 0, `${state.db.database} holds ${tenants} tenants`);
+  } catch (error) { check('database', false, `${state.db?.database}: ${error.message}`); }
   const current = gitInfo();
   const stale = current.commit !== state.git?.commit || state.sourceFingerprint !== sourceFingerprint();
   out.instance = {
-    name, url: state.url, port: state.port, pid: state.pid, listenerPid: ownerPid, dbPath: state.dbPath, workspace: state.workspace, logFile: state.logFile,
+    name, url: state.url, port: state.port, pid: state.pid, listenerPid: ownerPid, database: state.db?.database, mailCaptureFile: state.mailCaptureFile, workspace: state.workspace, logFile: state.logFile,
     startedAt: state.startedAt, runId: state.runId, evidenceDir: join(EVIDENCE_ROOT, state.runId), currentIdentity: state.currentIdentity ?? null,
     builtFrom: state.git, sourceChangedSinceBuild: stale,
   };
@@ -433,9 +483,10 @@ async function cmdUp(flags) {
     if (owner) throw new CliError(`Port ${port} is already in use by pid ${owner}, which this tool did not start.`, 'Omit --port to get a free port.');
   }
   const deps = depsDir();
+  const db = databaseFor(name);
   const plan = {
-    runId, workspace, app, deps, port: port ?? '(free ephemeral port chosen at start)', commit: gitInfo(),
-    steps: ['npm ci into the dependency cache once per package-lock.json hash', 'copy src, public, seed and config into the workspace (the workspace sits inside the dependency cache, so node_modules resolves by walking up)', 'next build in the workspace (skipped when the source fingerprint is unchanged)', 'next start -H 127.0.0.1 with CLIENT_BILLING_SEED_MODE=demo and a fresh CLIENT_BILLING_DATABASE', 'wait until /api/auth/identities lists nexio-admin and /dashboard renders "Nexio Hyper dashboard"'],
+    runId, workspace, app, deps, database: db.database, port: port ?? '(free ephemeral port chosen at start)', commit: gitInfo(),
+    steps: ['npm ci into the dependency cache once per package-lock.json hash', 'copy src, public, db and config into the workspace (the workspace sits inside the dependency cache, so node_modules resolves by walking up)', `drop and recreate ${db.database} on the exported Postgres, migrate it and run db/seed/demo.ts, as e2e/global-setup.ts does for cbs_e2e`, 'next build in the workspace (skipped when the source fingerprint is unchanged)', `next start -H 127.0.0.1 with DATABASE_URL and DATABASE_PLATFORM_URL on ${db.database} and the capture mail transport`, 'wait until /api/auth/identities lists nexio-admin and /dashboard renders "Nexio Hyper dashboard"'],
   };
   if (flags['dry-run']) return { ok: true, dryRun: true, plan };
 
@@ -451,11 +502,16 @@ async function cmdUp(flags) {
     mkdirSync(app, { recursive: true });
     for (const item of [...SOURCE_ITEMS, '.next', '.data']) rmSync(join(app, item), { recursive: true, force: true });
     for (const item of SOURCE_ITEMS) { const from = join(REPO_ROOT, item); if (existsSync(from)) cpSync(from, join(app, item), { recursive: true }); }
+  }
+  await recreateDatabase(deps, app, db);
+  const appEnv = { ...process.env, NODE_ENV: 'production', NEXT_TELEMETRY_DISABLED: '1', DATABASE_URL: db.app, DATABASE_PLATFORM_URL: db.platform };
+  delete appEnv.DATABASE_MIGRATE_URL; delete appEnv.DATABASE_ADMIN_URL;
+  if (!reuseBuild) {
     log('next build (about 15 seconds on a warm cache)');
     const buildLog = join(workspace, 'build.log');
     const fd = openSync(buildLog, 'w');
     try {
-      execFileSync(process.execPath, [nextBin(deps), 'build'], { cwd: app, stdio: ['ignore', fd, fd], env: { ...process.env, NEXT_TELEMETRY_DISABLED: '1', NODE_ENV: 'production', CLIENT_BILLING_STORE: 'sqlite', DATABASE_URL: '', DATABASE_PLATFORM_URL: '', CLIENT_BILLING_DATABASE: join(workspace, 'data', 'build-scratch.sqlite'), CLIENT_BILLING_SEED_MODE: 'demo' } });
+      execFileSync(process.execPath, [nextBin(deps), 'build'], { cwd: app, stdio: ['ignore', fd, fd], env: appEnv });
     } catch {
       closeSync(fd);
       throw new CliError(`next build failed. Last lines of ${buildLog}:\n${tailFile(buildLog, 25)}`, 'Fix the build error in the checkout (the build runs on a copy, so the checkout is untouched), then rerun `up`.');
@@ -466,17 +522,17 @@ async function cmdUp(flags) {
 
   port ??= await freePort();
   const dataDir = join(workspace, 'data', runId);
-  const dbPath = join(dataDir, 'client-billing.sqlite');
+  const mailCaptureFile = join(dataDir, 'mail-capture.json');
   mkdirSync(dataDir, { recursive: true });
   mkdirSync(join(workspace, 'logs'), { recursive: true });
   const logFile = join(workspace, 'logs', `server-${runId}.log`);
   const out = openSync(logFile, 'a');
-  const env = { ...process.env, NODE_ENV: 'production', NEXT_TELEMETRY_DISABLED: '1', CLIENT_BILLING_STORE: 'sqlite', DATABASE_URL: '', DATABASE_PLATFORM_URL: '', CLIENT_BILLING_DATABASE: dbPath, CLIENT_BILLING_SEED_MODE: 'demo', CLIENT_BILLING_MAIL_TRANSPORT: 'capture' };
+  const env = { ...appEnv, CLIENT_BILLING_MAIL_TRANSPORT: 'capture', CLIENT_BILLING_MAIL_CAPTURE_FILE: mailCaptureFile };
   delete env.PORT; delete env.HOSTNAME;
   const child = spawn(process.execPath, [nextBin(deps), 'start', '-H', '127.0.0.1', '-p', String(port)], { cwd: app, env, detached: true, stdio: ['ignore', out, out], windowsHide: true });
   child.unref(); closeSync(out);
   const url = `http://127.0.0.1:${port}`;
-  const state = { name, runId, pid: child.pid, port, url, dbPath, dataDir, workspace, app, logFile, startedAt: new Date().toISOString(), git: gitInfo(), sourceFingerprint: fingerprint, depsDir: deps, currentIdentity: null };
+  const state = { name, runId, pid: child.pid, port, url, db, mailCaptureFile, dataDir, workspace, app, logFile, startedAt: new Date().toISOString(), git: gitInfo(), sourceFingerprint: fingerprint, depsDir: deps, currentIdentity: null };
   writeState(name, state);
   try {
     await waitUntilUsable(state);
@@ -487,8 +543,8 @@ async function cmdUp(flags) {
     throw error;
   }
   const evidence = evidenceDir({}, state);
-  trail(evidence, { command: 'up', port, pid: state.pid, dbPath, git: state.git });
-  return { ok: true, name, url, port, pid: child.pid, dbPath, runId, evidenceDir: evidence, workspace, logFile, builtFrom: state.git, reusedBuild: reuseBuild, ready: 'identities list nexio-admin and /dashboard rendered "Nexio Hyper dashboard"' };
+  trail(evidence, { command: 'up', port, pid: state.pid, database: db.database, git: state.git });
+  return { ok: true, name, url, port, pid: child.pid, database: db.database, mailCaptureFile, runId, evidenceDir: evidence, workspace, logFile, builtFrom: state.git, reusedBuild: reuseBuild, ready: 'identities list nexio-admin and /dashboard rendered "Nexio Hyper dashboard"' };
 }
 
 function tailFile(file, lines) {
@@ -506,7 +562,7 @@ async function waitUntilUsable(state) {
       const { value } = await apiLogin(state.url, 'nexio-admin');
       const page = await fetch(`${state.url}/dashboard`, { headers: { cookie: `${SESSION_COOKIE}=${value}` }, redirect: 'manual', signal: AbortSignal.timeout(20000) });
       const html = await page.text();
-      if (page.status === 200 && html.includes('Nexio Hyper dashboard') && existsSync(state.dbPath)) return;
+      if (page.status === 200 && html.includes('Nexio Hyper dashboard')) return;
       last = `/dashboard answered ${page.status} without the seeded heading`;
     } catch (error) { last = error.message; }
     await sleep(500);
@@ -526,7 +582,7 @@ async function cmdDown(flags) {
   const removals = [];
   if (!flags['keep-data']) removals.push(state.dataDir);
   if (flags.purge) removals.push(state.workspace);
-  const plan = { instance: name, pid: state.pid, alive, killCommand: alive ? killCommand(state.pid) : null, removes: [...removals, statePath(name), ...sessionFiles(name)], keeps: [evidence] };
+  const plan = { instance: name, pid: state.pid, alive, killCommand: alive ? killCommand(state.pid) : null, dropsDatabase: flags['keep-data'] ? null : state.db?.database ?? null, removes: [...removals, statePath(name), ...sessionFiles(name)], keeps: [evidence] };
   if (!looksOurs) throw new CliError(`Pid ${state.pid} no longer looks like the \`next start\` we launched (command line: ${entry?.cmd.slice(0, 160)}). The pid was probably reused.`, `Nothing was killed. Delete ${statePath(name)} by hand once you have confirmed the original server is gone.`);
   if (flags['dry-run']) return { ok: true, dryRun: true, plan };
   if (alive) {
@@ -534,11 +590,12 @@ async function cmdDown(flags) {
     for (let i = 0; i < 40 && (pidAlive(state.pid) || listenerPid(state.port)); i++) await sleep(250);
     if (pidAlive(state.pid)) throw new CliError(`Pid ${state.pid} survived the kill.`, 'Check permissions; the state file was kept so you can retry `down`.');
   }
+  if (plan.dropsDatabase) await dropDatabase(state);
   for (const path of removals) rmSync(path, { recursive: true, force: true });
   for (const file of sessionFiles(name)) rmSync(file, { force: true });
   rmSync(statePath(name), { force: true });
   const evidenceFiles = existsSync(evidence) ? readdirSync(evidence, { recursive: true }).length : 0;
-  return { ok: true, instance: name, stoppedPid: alive ? state.pid : null, portFreed: listenerPid(state.port) === null, removed: removals, evidenceDir: evidence, evidenceEntries: evidenceFiles };
+  return { ok: true, instance: name, stoppedPid: alive ? state.pid : null, portFreed: listenerPid(state.port) === null, droppedDatabase: plan.dropsDatabase, removed: removals, evidenceDir: evidence, evidenceEntries: evidenceFiles };
 }
 function sessionFiles(name) {
   if (!existsSync(STATE_DIR)) return [];
@@ -549,7 +606,7 @@ async function cmdLogin(flags, [identity]) {
   const name = instanceName(flags);
   const state = requireLive(name);
   const identities = await listIdentities(state.url);
-  if (!identity) return { ok: true, instance: name, identities: identities.map((i) => ({ id: i.id, role: i.role, tenant: i.tenantName, email: i.email })), hint: 'Pick one: node control-billing.mjs login <id>. Passwords are all admin123 but the picker needs no password.' };
+  if (!identity) return { ok: true, instance: name, identities: identities.map((i) => ({ id: i.id, role: i.role, tenant: i.tenantName, email: i.email })), hint: 'Pick one: node control-billing.mjs login <id>. The picker needs no password.' };
   if (!identities.some((i) => i.id === identity)) throw new CliError(`"${identity}" is not a demo identity.`, `Valid ids: ${identities.map((i) => i.id).join(', ')}.`);
   const evidence = evidenceDir(flags, state);
   if (flags['no-browser']) {
@@ -697,7 +754,7 @@ async function cmdDb(flags, [sql]) {
   const state = requireState(name);
   if (!sql) throw new CliError('db needs a SQL string.', 'Example: db "SELECT count(*) AS n FROM invoices"');
   const limit = flags.limit ? Number(flags.limit) : 200;
-  const result = { ok: true, dbPath: state.dbPath, sql, ...(await runQuery(state, sql, flags.param ?? [], limit)) };
+  const result = { ok: true, database: state.db.database, sql, ...(await runQuery(state, sql, flags.param ?? [], limit)) };
   const evidence = evidenceDir(flags, state);
   if (flags.out) { const target = inEvidence(evidence, flags.out); writeFileSync(target, `${JSON.stringify(result, null, 2)}\n`); result.savedTo = target; }
   trail(evidence, { command: 'db', sql, count: result.count, savedTo: result.savedTo });

@@ -42,5 +42,5 @@ Preconditions:
 - The disable button is labelled `Archive` and the enable button `Approve`. The confirmation dialog says `Disable tenant`.
 - A disabled tenant's sessions are rejected on the next request, so test that from a tenant identity logged in before the disable.
 - The superadmin has no tenant context. `control-billing api GET /api/customers --as superadmin` returns `401`, which is correct.
-- Creating a tenant writes users with the default password `admin123`. The picker still needs no password.
+- Creating a tenant writes its admin and user rows with no password. The picker needs none.
 - Tenant creation is not undoable except by disabling. Restart the instance for a clean list.
