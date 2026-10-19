@@ -1,0 +1,10 @@
+# The smoke stack's Caddy: the production site blocks (../caddy/cbs.caddy) behind Caddy's own local CA, on a host
+# port in the 8100 to 8199 range. Never 80, 443 or 3000.
+{
+	local_certs
+	skip_install_trust
+	auto_https disable_redirects
+	admin off
+}
+
+import caddy/cbs.caddy

@@ -1,0 +1,22 @@
+# Merge into the server's Authelia configuration (ADR 0002, decision 9). Needs Authelia 4.38 or later, which
+# allows one cookie per domain. Add these two entries to the existing `session.cookies` list; do not replace
+# the cookies other apps use.
+#
+# The two domains are siblings. A cookie for billing.example.com is also sent to staging.billing.example.com,
+# which would hand production sessions to staging, so staging never nests under production.
+# Replace example.com with the real domain. Both cookies are named cbs_session, because deploy/caddy/cbs.caddy
+# hides that name from the app.
+session:
+  cookies:
+    - name: cbs_session
+      domain: billing.example.com
+      authelia_url: https://auth.billing.example.com
+      inactivity: 12h
+      expiration: 7d
+      remember_me: -1
+    - name: cbs_session
+      domain: billing-staging.example.com
+      authelia_url: https://auth.billing-staging.example.com
+      inactivity: 12h
+      expiration: 7d
+      remember_me: -1

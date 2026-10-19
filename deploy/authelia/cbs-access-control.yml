@@ -1,0 +1,23 @@
+# Merge into the server's Authelia configuration (ADR 0002, decision 7). Authelia checks rules in order and the
+# first match wins, so put these before any broader rule for the same domains. The server's default_policy must be
+# deny, or a user from another app reaches CBS (the app checks the member group as well, as a second layer).
+#
+# The superadmin group needs two_factor, so the group that grants the platform power is the group that forces
+# TOTP. Member groups need one_factor. Group names differ per environment, and each must match
+# CBS_AUTH_MEMBER_GROUP and CBS_AUTH_SUPERADMIN_GROUP in that environment's .env file.
+# /api/v1/* never reaches Authelia (deploy/caddy/cbs.caddy), so it needs no rule.
+access_control:
+  default_policy: deny
+  rules:
+    - domain: billing.example.com
+      subject: 'group:cbs-superadmin'
+      policy: two_factor
+    - domain: billing.example.com
+      subject: 'group:cbs-users'
+      policy: one_factor
+    - domain: billing-staging.example.com
+      subject: 'group:cbs-staging-superadmin'
+      policy: two_factor
+    - domain: billing-staging.example.com
+      subject: 'group:cbs-staging-users'
+      policy: one_factor

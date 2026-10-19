@@ -1,9 +1,3 @@
-{$STAGING_DOMAIN} {
-	encode gzip zstd
-	reverse_proxy app-staging:3000
-}
-
-{$PRODUCTION_DOMAIN} {
-	encode gzip zstd
-	reverse_proxy app-production:3000
-}
+# TLS and routing for both environments. The site blocks, the Authelia forward_auth snippet, the Remote-* strip
+# and the proxy secret live in caddy/cbs.caddy (ADR 0002, unit A5), which a server-wide Caddy can import as well.
+import caddy/cbs.caddy

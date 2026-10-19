@@ -3,6 +3,11 @@ name: client-billing
 # Each environment has its own Postgres (ADR 0001, unit D11). The database sits on an internal network that only its
 # own app and migrator join, so Caddy, the other environment and the internet cannot reach it, and it publishes no
 # port. The apps stay on the default network, which Caddy shares.
+#
+# Sign-in (ADR 0002, unit A5): Caddy asks Authelia before every request (caddy/cbs.caddy), and Authelia is not a
+# service here. On a shared host it is the host's Authelia, which Caddy reaches at AUTHELIA_UPSTREAM from
+# proxy.env (default authelia:9091). Join this project's network to it, or move Caddy onto the host's Caddy and drop
+# the `caddy` service, as deploy/README.md describes. deploy/smoke/compose.yml runs a standalone Authelia.
 
 x-app: &app
   build:
@@ -112,6 +117,7 @@ services:
       - "443:443"
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./caddy:/etc/caddy/caddy:ro
       - caddy_data:/data
       - caddy_config:/config
 

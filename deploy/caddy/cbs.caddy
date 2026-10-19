@@ -1,0 +1,66 @@
+# CBS site blocks (ADR 0002, decisions 1, 6 and 8). deploy/Caddyfile imports this file. On a host where another
+# Caddy owns ports 80 and 443, that Caddy imports it instead and CBS drops its own `caddy` service.
+#
+# Environment, read when Caddy loads its configuration:
+#   STAGING_DOMAIN, PRODUCTION_DOMAIN    The two site names. Siblings, never nested (see deploy/README.md).
+#   STAGING_PROXY_SECRET,
+#   PRODUCTION_PROXY_SECRET              The value of CBS_PROXY_SECRET in .env.staging and .env.production.
+#   AUTHELIA_UPSTREAM                    host:port of the Authelia container. Default: authelia:9091.
+#
+# Both Authelia cookies are named cbs_session (deploy/authelia/cbs-session-cookies.yml); the dummy-cookie line below
+# depends on that name.
+#
+# The portal for each site is auth.<site>, proxied to Authelia.
+
+# (cbs_site) <app upstream> <proxy secret>
+(cbs_site) {
+	encode gzip zstd
+
+	# Machine clients cannot use a login portal. They skip Authelia, still lose any Remote-* header they sent,
+	# and still carry the secret. The app accepts only bearer tokens here.
+	@machine path /api/v1/*
+	handle @machine {
+		route {
+			request_header -Remote-*
+			request_header X-CBS-Proxy-Secret {args[1]}
+			reverse_proxy {args[0]}
+		}
+	}
+
+	handle {
+		# route keeps the order below literal: strip, ask Authelia, copy its answer, add the secret.
+		route {
+			request_header -Remote-*
+			forward_auth {$AUTHELIA_UPSTREAM:authelia:9091} {
+				uri /api/authz/forward-auth
+				copy_headers Remote-User Remote-Groups Remote-Email Remote-Name
+			}
+			request_header X-CBS-Proxy-Secret {args[1]}
+			# The app never needs Authelia's session cookie, so it gets a dummy value.
+			reverse_proxy {args[0]} {
+				header_up Cookie cbs_session=[^;]+ cbs_session=_Value_Hidden.
+			}
+		}
+	}
+}
+
+# (cbs_portal) The Authelia sign-in page for a site.
+(cbs_portal) {
+	reverse_proxy {$AUTHELIA_UPSTREAM:authelia:9091}
+}
+
+{$STAGING_DOMAIN} {
+	import cbs_site app-staging:3000 {$STAGING_PROXY_SECRET}
+}
+
+auth.{$STAGING_DOMAIN} {
+	import cbs_portal
+}
+
+{$PRODUCTION_DOMAIN} {
+	import cbs_site app-production:3000 {$PRODUCTION_PROXY_SECRET}
+}
+
+auth.{$PRODUCTION_DOMAIN} {
+	import cbs_portal
+}
