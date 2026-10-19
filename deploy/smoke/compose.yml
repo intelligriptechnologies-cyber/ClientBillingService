@@ -3,10 +3,12 @@
 # file, the Authelia configuration and a copy of deploy/caddy under deploy/smoke/.run, and passes the secrets in
 # through the environment.
 #
-#   edge   Caddy, the app, the probe and the stand-in app. The app's only network besides its database.
-#   auth   Caddy and Authelia.
-#   db     The app, the migrator and Postgres. Internal: no route out.
-#   other  A container that must not reach the app.
+#   production-edge  Caddy, the app and the probe. The app's only network besides its database.
+#   staging-edge     Caddy and the stand-in app that echoes what Caddy forwards. Separate from production-edge,
+#                    as in deploy/docker-compose.yml.
+#   auth             Caddy and Authelia.
+#   db               The app, the migrator and Postgres. Internal: no route out.
+#   other            A container that must not reach the app.
 #
 # The app publishes no port. Only Caddy does, on 127.0.0.1:${SMOKE_PORT}.
 name: cbs-smoke
@@ -63,7 +65,7 @@ services:
     depends_on:
       db:
         condition: service_healthy
-    networks: [edge, db]
+    networks: [production-edge, db]
 
   # Caddy's "staging" upstream: it shows what Caddy forwards.
   app-staging:
@@ -76,7 +78,7 @@ services:
       interval: 2s
       timeout: 3s
       retries: 20
-    networks: [edge]
+    networks: [staging-edge]
 
   authelia:
     image: authelia/authelia:4.39
@@ -119,13 +121,13 @@ services:
         condition: service_healthy
       app-staging:
         condition: service_healthy
-    networks: [edge, auth]
+    networks: [production-edge, staging-edge, auth]
 
-  # Sits on the edge network, as Caddy does, to call the app directly.
+  # Sits on the production edge network, as Caddy does, to call the app directly.
   probe:
     image: curlimages/curl:8.11.1
     entrypoint: ["sleep", "infinity"]
-    networks: [edge]
+    networks: [production-edge]
 
   # Must not reach the app.
   outsider:
@@ -134,7 +136,8 @@ services:
     networks: [other]
 
 networks:
-  edge: {}
+  production-edge: {}
+  staging-edge: {}
   auth: {}
   other: {}
   db:

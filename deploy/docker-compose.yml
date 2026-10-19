@@ -2,7 +2,7 @@ name: client-billing
 
 # Each environment has its own Postgres (ADR 0001, unit D11). The database sits on an internal network that only its
 # own app and migrator join, so Caddy, the other environment and the internet cannot reach it, and it publishes no
-# port. The apps stay on the default network, which Caddy shares.
+# port. Each app also joins its own edge network, shared with Caddy and nothing else.
 #
 # Sign-in (ADR 0002, unit A5): Caddy asks Authelia before every request (caddy/cbs.caddy), and Authelia is not a
 # service here. On a shared host it is the host's Authelia, which Caddy reaches at AUTHELIA_UPSTREAM from
@@ -51,7 +51,7 @@ services:
     volumes:
       - staging_data:/data
     networks:
-      - default
+      - staging-edge
       - staging-db
 
   db-staging:
@@ -83,7 +83,7 @@ services:
     volumes:
       - production_data:/data
     networks:
-      - default
+      - production-edge
       - production-db
 
   db-production:
@@ -120,8 +120,18 @@ services:
       - ./caddy:/etc/caddy/caddy:ro
       - caddy_data:/data
       - caddy_config:/config
+    networks:
+      - default
+      - staging-edge
+      - production-edge
 
 networks:
+  # One edge network per environment, shared with Caddy alone (ADR 0002, decision 6), so staging cannot reach production.
+  # The fixed names let a host-wide Caddy join them later.
+  staging-edge:
+    name: cbs-staging-edge
+  production-edge:
+    name: cbs-production-edge
   staging-db:
     internal: true
   production-db:

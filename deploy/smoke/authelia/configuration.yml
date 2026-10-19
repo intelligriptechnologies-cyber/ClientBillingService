@@ -16,6 +16,7 @@ ntp:
   disable_startup_check: true
 
 authentication_backend:
+  refresh_interval: 1m
   password_reset:
     disable: true
   file:

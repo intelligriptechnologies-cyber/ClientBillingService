@@ -303,7 +303,7 @@ published="$("${C[@]}" port app-production 3000 2> /dev/null || true)"
 if [[ "$published" =~ ^[0-9.]+:[0-9]+$ ]] && [ "${published##*:}" != 0 ]; then fail "docker compose port app-production 3000 reports a host port ($published)"; else pass "docker compose port app-production 3000 reports no host port (prints '${published}')"; fi
 assert_empty "$(docker inspect -f '{{json .NetworkSettings.Ports}}' "$APP_ID" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const p=JSON.parse(s);process.stdout.write(Object.values(p).some(Boolean)?s:"")})')" "the app container publishes no host port"
 assert_eq "$("${C[@]}" port caddy "$PORT")" "127.0.0.1:$PORT" "only Caddy publishes a port, on 127.0.0.1"
-APP_EDGE_IP="$(docker inspect -f '{{range $name, $net := .NetworkSettings.Networks}}{{if eq $name "'"$PROJECT"'_edge"}}{{$net.IPAddress}}{{end}}{{end}}' "$APP_ID")"
+APP_EDGE_IP="$(docker inspect -f '{{range $name, $net := .NetworkSettings.Networks}}{{if eq $name "'"$PROJECT"'_production-edge"}}{{$net.IPAddress}}{{end}}{{end}}' "$APP_ID")"
 assert_match "$APP_EDGE_IP" '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$' "the app has an address on the edge network"
 rc=0; "${C[@]}" exec -T outsider curl -sS --max-time 4 http://app-production:3000/api/health > /dev/null 2>&1 || rc=$?
 assert_nonzero "$rc" "a container on another network cannot resolve the app by name"
@@ -311,6 +311,13 @@ rc=0; "${C[@]}" exec -T outsider curl -sS --max-time 4 "http://$APP_EDGE_IP:3000
 assert_nonzero "$rc" "a container on another network cannot connect to the app's edge address"
 direct http://db:5432/
 assert_eq "$DIRECT_STATUS" 000 "the edge network cannot reach the database"
+reach_from() {
+  "${C[@]}" exec -T "$1" node -e "fetch('http://$2:3000/', { signal: AbortSignal.timeout(3000) }).then(() => process.exit(0), () => process.exit(1))" > /dev/null 2>&1
+}
+rc=0; reach_from app-staging app-production || rc=$?
+assert_eq "$rc" 1 "the staging upstream cannot reach the production app (separate edge networks)"
+rc=0; reach_from app-production app-staging || rc=$?
+assert_eq "$rc" 1 "the production app cannot reach the staging upstream"
 
 step "authorisation by group"
 signin "$AS_CAROL" "$PORTAL" carol "$CAROL_PASSWORD"
@@ -361,6 +368,15 @@ NEW_ERIN_PASSWORD="$("$REPO/deploy/authelia-user.sh" reset erin | sed -n 's/^pas
 wait_for_signin 401 erin "$ERIN_PASSWORD" && pass "reset makes the old password fail" || fail "the old password still works after reset"
 wait_for_signin 200 erin "$NEW_ERIN_PASSWORD" && pass "reset makes the new password work" || fail "the new password does not work"
 assert_match "$("$REPO/deploy/authelia-user.sh" list)" 'alice +alice@smoke.test +active' "list shows the fixture users"
+# Authelia's validate-config does not read the users file, so the script's post-edit hook is the only place a real
+# validator can plug in. Here it fails on purpose, to prove the restore path against the live file.
+cp "$AUTHELIA_USERS_FILE" "$before"
+rc=0; AUTHELIA_VALIDATE_CMD='exit 1' "$REPO/deploy/authelia-user.sh" add frank frank@smoke.test 'Frank Rolled Back' cbs-users > /dev/null 2>&1 || rc=$?
+assert_nonzero "$rc" "an edit that fails validation exits non-zero"
+cmp -s "$before" "$AUTHELIA_USERS_FILE" && pass "the backup was restored: the users file is byte-identical to before the edit" || fail "the users file differs after a failed validation"
+assert_match "$(ls "$AUTHELIA_USERS_FILE".bak-* | wc -l | tr -d ' ')" '^[1-9][0-9]*$' "the dated backups are still on disk"
+signin - "$PORTAL" alice "$ALICE_PASSWORD"
+assert_eq "$HTTP_STATUS" 200 "alice still signs in after the rolled-back edit"
 
 step "result"
 if [ "$failures" -eq 0 ]; then printf '\nsmoke: %s checks passed\n' "$checks"; else printf '\nsmoke: %s of %s checks FAILED\n' "$failures" "$checks"; exit 1; fi
