@@ -45,7 +45,7 @@ jobs:
           node scripts/check-tests-ran.mjs "$RUNNER_TEMP/db-tests.json"
       - name: Store areas ported to Postgres run on it, none skipped
         run: |
-          TEST_DRIVER=pg npx vitest run src/lib/store/tenants.test.ts src/lib/store/users.test.ts src/lib/store/settings.test.ts src/lib/store/customers.test.ts src/lib/store/quotations.test.ts src/lib/store/contracts.test.ts src/lib/store/task-notes.test.ts src/lib/store/additional-services.test.ts src/lib/store/invoices.test.ts src/lib/store/bulk-invoices.test.ts src/lib/store/deliveries.test.ts src/lib/store/invoice-formats.test.ts src/lib/store/gst-setup.test.ts src/lib/store/payments.test.ts src/lib/store/demo-seed.test.ts src/lib/tenant-isolation.test.ts src/lib/session.test.ts src/lib/auth/demo-routes.test.ts --reporter=json --outputFile="$RUNNER_TEMP/pg-store-tests.json"
+          TEST_DRIVER=pg npx vitest run src/lib/store/tenants.test.ts src/lib/store/users.test.ts src/lib/store/settings.test.ts src/lib/store/customers.test.ts src/lib/store/quotations.test.ts src/lib/store/contracts.test.ts src/lib/store/task-notes.test.ts src/lib/store/additional-services.test.ts src/lib/store/invoices.test.ts src/lib/store/bulk-invoices.test.ts src/lib/store/deliveries.test.ts src/lib/store/invoice-formats.test.ts src/lib/store/gst-setup.test.ts src/lib/store/payments.test.ts src/lib/store/demo-seed.test.ts src/lib/tenant-isolation.test.ts src/lib/auth/resolve.test.ts src/lib/auth/demo-routes.test.ts --reporter=json --outputFile="$RUNNER_TEMP/pg-store-tests.json"
           node scripts/check-tests-ran.mjs "$RUNNER_TEMP/pg-store-tests.json"
       - run: npm test
       - run: npm run build
