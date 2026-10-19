@@ -262,6 +262,14 @@ describe.skipIf(!process.env.DATABASE_MIGRATE_URL)(`one person in several tenant
     expect(await arrive(store, { ...person, cookies: { [tenantCookie]: 'evo' } })).toMatchObject({ kind: 'member', context: { tenantId: 'nexio' } });
   });
 
+  it('gives demo mode the same outcomes for one email in two tenants', async () => {
+    const { nexio } = await inBothTenants('demo-two');
+    const pick = (tenantId?: string) => resolvePrincipal(demo, demoRequest({ [demoCookie]: nexio.id, ...(tenantId ? { [tenantCookie]: tenantId } : {}) }), store);
+    expect(await pick()).toMatchObject({ kind: 'member', context: { tenantId: 'nexio' }, tenantIds: ['evo', 'nexio'] });
+    expect(await pick('evo')).toMatchObject({ kind: 'member', context: { tenantId: 'evo' }, role: 'admin' });
+    expect(await pick('maasp')).toMatchObject({ kind: 'chooseTenant', tenantIds: ['evo', 'nexio'] });
+  });
+
   it('drops a tenant whose row is disabled on the next request and keeps the other', async () => {
     const { person, evo } = await inBothTenants('one-disabled');
     await arrive(store, person);
