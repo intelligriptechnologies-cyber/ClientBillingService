@@ -2,7 +2,7 @@ import { expect, it } from 'vitest';
 import { describeStore, memberContext, storeForTest, registerSeller, signIn } from './test-store';
 import { tenantContextOf } from '../auth/principal';
 
-describeStore(['settings', 'customers', 'services', 'contracts', 'additionalServices', 'invoices', 'bulkInvoices'], 'bulk invoice runs', () => {
+describeStore('bulk invoice runs', () => {
   it('previews a period billing run with additional services, explains skips, and issues it only once', async () => {
     const store = await storeForTest();
     const nexio = await signIn(store, 'nexio-admin');
@@ -39,7 +39,7 @@ describeStore(['settings', 'customers', 'services', 'contracts', 'additionalServ
   });
 });
 
-describeStore(['settings', 'customers', 'services', 'contracts', 'invoices', 'bulkInvoices'], 'bulk invoice HSN/SAC codes', () => {
+describeStore('bulk invoice HSN/SAC codes', () => {
   async function registeredNexio() {
     const store = await storeForTest();
     const session = await signIn(store, 'nexio-admin');
@@ -105,7 +105,7 @@ describeStore(['settings', 'customers', 'services', 'contracts', 'invoices', 'bu
   });
 });
 
-describeStore(['settings', 'customers', 'contracts', 'additionalServices', 'invoices', 'bulkInvoices'], 'bulk invoice runs under concurrent requests', () => {
+describeStore('bulk invoice runs under concurrent requests', () => {
   it('creates one run and one invoice per contract when a run for one period is started twice at once', async () => {
     const store = await storeForTest();
     const nexio = await memberContext(store, 'nexio-admin');

@@ -2,7 +2,7 @@ import { expect, it } from 'vitest';
 import { describeStore, memberContext, storeForTest, superadmin, signIn } from './test-store';
 import { platformActorOf } from '../auth/principal';
 
-describeStore(['tenants'], 'tenant lifecycle', () => {
+describeStore('tenant lifecycle', () => {
   it('lets the superadmin create, change, and disable a tenant while retaining lifecycle history', async () => {
     const store = await storeForTest();
 
@@ -88,7 +88,7 @@ describeStore(['tenants'], 'tenant lifecycle', () => {
   });
 });
 
-describeStore(['tenants'], 'tenant identities and records', () => {
+describeStore('tenant identities and records', () => {
   it('seeds five tenants and two tenant-local users for each tenant', async () => {
     const store = await storeForTest();
 
@@ -112,7 +112,7 @@ describeStore(['tenants'], 'tenant identities and records', () => {
   });
 });
 
-describeStore(['tenants'], 'tenant lifecycle under concurrent requests', () => {
+describeStore('tenant lifecycle under concurrent requests', () => {
   it('creates one tenant when two requests race for names that differ only in case', async () => {
     const store = await storeForTest();
     const results = await Promise.allSettled([store.createTenant(superadmin, { name: 'Race Works' }), store.createTenant(superadmin, { name: 'RACE WORKS' })]);

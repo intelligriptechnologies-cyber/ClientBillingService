@@ -91,7 +91,7 @@ export function operationalErrorMessage(operation: string, cause: unknown) {
   return `${operation}: ${detail}`;
 }
 
-/** The largest value an `integer` column holds. SQLite stores more; Postgres refuses it. */
+/** The largest value an `integer` column holds. Postgres refuses more. */
 const INT4_MAX = 2147483647;
 
 export const DUPLICATE_SERVICE_MESSAGE = 'A service with that name already exists in this tenant.';
@@ -157,7 +157,7 @@ export function quotationTotal(lines: readonly QuotationLine[]) {
   return lines.reduce((total, line) => total + line.lineTotalMinor, 0);
 }
 
-/** A real `YYYY-MM-DD` day. Postgres refuses 2026-02-31 in a date column; SQLite would store it. */
+/** A real `YYYY-MM-DD` day. Postgres refuses 2026-02-31 in a date column. */
 export function isCalendarDate(value: unknown): value is string {
   if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
   const date = new Date(`${value}T00:00:00Z`);
@@ -178,7 +178,7 @@ export const FOREIGN_CONTRACT_MESSAGE = 'This contract does not belong to your t
 
 /**
  * The columns a contract save writes. escalation_percent is numeric(6,3), so a rate needs at most three decimals
- * and must stay under 1000; otherwise Postgres would round or refuse what SQLite keeps exactly.
+ * and must stay under 1000; otherwise Postgres would round or refuse it.
  */
 export function contractFields(input: ContractInput) {
   if (!input.name.trim()) throw new Error('Contract name is required.');

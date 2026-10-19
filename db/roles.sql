@@ -1,7 +1,7 @@
 -- The three database roles (ADR 0001, decision 5 and Consequences). Run it as the container superuser against
 -- the application database. It is safe to run again: a second run changes nothing.
 --
---   cbs_owner     owns the schema, runs migrations, the seed and the SQLite import. BYPASSRLS, because FORCE
+--   cbs_owner     owns the schema, runs migrations and the seed. BYPASSRLS, because FORCE
 --                 row-level security applies to the table owner and a copying migration would see no rows.
 --   cbs_app       the runtime role. Owns nothing and has no BYPASSRLS, so row-level security always applies.
 --   cbs_platform  BYPASSRLS, used only from withPlatform.

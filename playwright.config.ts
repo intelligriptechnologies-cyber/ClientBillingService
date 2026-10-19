@@ -5,7 +5,7 @@ import { autheliaOrigin, autheliaPort, demoOrigin, demoPort, e2eDatabaseUrls, me
 // Browser journeys intentionally share one Postgres database (cbs_e2e) within a serial run. Global setup rebuilds
 // it, so a run never inherits mutations from an earlier run or from a developer's own database.
 const database = e2eDatabaseUrls();
-const databaseEnv = { DATABASE_URL: database.app, DATABASE_PLATFORM_URL: database.platform, CLIENT_BILLING_STORE: '' };
+const databaseEnv = { DATABASE_URL: database.app, DATABASE_PLATFORM_URL: database.platform };
 // The demo server writes outgoing mail here instead of sending it, and specs read it back.
 process.env.CLIENT_BILLING_MAIL_CAPTURE_FILE ??= resolve('.data', 'mail-capture.json');
 

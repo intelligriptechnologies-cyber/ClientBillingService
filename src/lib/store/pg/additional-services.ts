@@ -20,7 +20,7 @@ async function find(tx: Tx, tenantId: string, id: string, forUpdate = false): Pr
 
 export function createPgAdditionalServiceMethods(db: Database) {
   return {
-    /** The billing period is a half-open range of days on the date column, where SQLite matches a text prefix. */
+    /** The billing period is a half-open range of days on the date column. */
     async listAdditionalServices(context: TenantContext, query: AdditionalServiceQuery = {}): Promise<AdditionalServiceList> {
       const conditions = ['additional_services.tenant_id = $1'];
       const values: unknown[] = [context.tenantId];

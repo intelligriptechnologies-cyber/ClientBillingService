@@ -8,7 +8,7 @@ import type { Quotation, QuotationInput, QuotationLine, TenantStore } from '../t
 type Row = Record<string, unknown>;
 type QuotationUpdate = Partial<QuotationInput> & { status?: Quotation['status'] };
 
-/** Line ids end in their position, so "C" ordering is SQLite's: line-10 sorts before line-2. */
+/** Line ids end in their position, and "C" ordering is bytewise: line-10 sorts before line-2. */
 async function withLines(tx: Tx, tenantId: string, rows: Row[]): Promise<Quotation[]> {
   if (!rows.length) return [];
   const lines = await tx.query<Row>('SELECT * FROM quotation_lines WHERE tenant_id = $1 AND quotation_id = ANY($2) ORDER BY id COLLATE "C"', [tenantId, rows.map((row) => row.id)]);

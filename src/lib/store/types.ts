@@ -85,7 +85,7 @@ export type GstSalesRow = { section: Gstr1Section; invoiceId: string; invoiceNum
 export type HsnSummaryRow = { hsn: string; description: string; quantity: number; taxableMinor: number; taxMinor: number };
 export type GstSalesReport = { month: string; companyName: string; gstin: string; items: GstSalesRow[]; hsnSummary: HsnSummaryRow[]; totals: { taxableMinor: number; gstMinor: number; totalMinor: number; igstMinor: number; cgstMinor: number; sgstMinor: number; netGstMinor: number } };
 
-/** The store contract. The SQLite store wraps synchronous bodies, so each call settles after its whole body has run. */
+/** The store contract. createPgStore (pg/create-pg-store.ts) implements it on Postgres. */
 export interface TenantStore {
   listIdentities(): Promise<DemoIdentity[]>;
   /** The rows bound to an Authelia username, in active tenants. A withPlatform lookup: it runs before a tenant is chosen. */

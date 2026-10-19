@@ -3,7 +3,7 @@ import { describeStore, memberContext, storeForTest, signIn } from './test-store
 import { settingsInput } from '../test-helpers';
 import { tenantContextOf } from '../auth/principal';
 
-describeStore(['settings'], 'tenant settings and operational logs', () => {
+describeStore('tenant settings and operational logs', () => {
   it('persists complete tenant settings, template previews, and isolated operational logs', async () => {
     const store = await storeForTest(); const nexio = await signIn(store, 'nexio-admin'); const evo = await signIn(store, 'evo-admin');
     if (!nexio || !evo) throw new Error('Expected seeded sessions');
@@ -32,7 +32,7 @@ describeStore(['settings'], 'tenant settings and operational logs', () => {
   });
 });
 
-describeStore(['settings'], 'tenant settings under concurrent requests', () => {
+describeStore('tenant settings under concurrent requests', () => {
   it('keeps the legal name one save sets when another save that leaves it out runs at the same time', async () => {
     const store = await storeForTest();
     const nexio = await memberContext(store, 'nexio-admin');

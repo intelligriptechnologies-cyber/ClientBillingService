@@ -1,7 +1,7 @@
 import { expect, it } from 'vitest';
 import { describeStore, memberContext, storeForTest, registerSeller, unregisterSeller, signIn } from './test-store';
 import { tenantContextOf } from '../auth/principal';
-describeStore(['settings', 'customers', 'services', 'contracts', 'invoices'], 'invoices', () => {
+describeStore('invoices', () => {
   it('persists row-wise GST, billing details and corrected line items', async () => {
     const store = await storeForTest(); const session = await signIn(store, 'nexio-admin');
     if (!session) throw new Error('Expected tenant session');
@@ -76,7 +76,7 @@ describeStore(['settings', 'customers', 'services', 'contracts', 'invoices'], 'i
   });
 });
 
-describeStore(['settings', 'customers', 'invoices'], 'invoices under concurrent requests', () => {
+describeStore('invoices under concurrent requests', () => {
   async function withInvoice() {
     const store = await storeForTest();
     const nexio = await memberContext(store, 'nexio-admin');
@@ -121,7 +121,7 @@ describeStore(['settings', 'customers', 'invoices'], 'invoices under concurrent 
   });
 });
 
-describeStore(['settings', 'customers', 'contracts', 'invoices', 'bulkInvoices'], 'invoice lists and input rules', () => {
+describeStore('invoice lists and input rules', () => {
   it('filters invoices and the GST register by month at the month edges, and refuses values a date or numeric column cannot hold', async () => {
     const store = await storeForTest();
     const nexio = await memberContext(store, 'nexio-admin');
@@ -152,7 +152,7 @@ describeStore(['settings', 'customers', 'contracts', 'invoices', 'bulkInvoices']
   });
 });
 
-describeStore(['settings', 'customers', 'invoices'], 'invoice corrections', () => {
+describeStore('invoice corrections', () => {
   it('leaves the original issued and spends no number when the replacement is refused', async () => {
     const store = await storeForTest();
     const nexio = await memberContext(store, 'nexio-admin');
@@ -167,7 +167,7 @@ describeStore(['settings', 'customers', 'invoices'], 'invoice corrections', () =
   });
 });
 
-describeStore(['settings', 'customers', 'invoices'], 'HSN/SAC on GST invoices', () => {
+describeStore('HSN/SAC on GST invoices', () => {
   async function registeredNexio() {
     const store = await storeForTest();
     const session = await signIn(store, 'nexio-admin');

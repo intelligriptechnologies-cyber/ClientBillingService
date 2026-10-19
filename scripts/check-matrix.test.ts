@@ -25,4 +25,12 @@ describe('checkMatrix', () => {
     const [r] = checkMatrix(parseCsv('id,ours,evidence\nx,built,src/gone.ts:3\n'), () => false);
     expect(r.ok).toBe(false);
   });
+
+  it('checks every path in a semicolon-separated evidence cell', () => {
+    const seen: string[] = [];
+    const exists = (p: string) => (seen.push(p), p !== 'e2e/gone.spec.ts');
+    const [both, one] = checkMatrix(parseCsv('id,ours,evidence\nx,built,e2e/a.spec.ts; e2e/b.spec.ts:4\ny,built,e2e/a.spec.ts; e2e/gone.spec.ts\n'), exists);
+    expect([both.ok, one.ok]).toEqual([true, false]);
+    expect(seen).toEqual(['e2e/a.spec.ts', 'e2e/b.spec.ts', 'e2e/a.spec.ts', 'e2e/gone.spec.ts']);
+  });
 });

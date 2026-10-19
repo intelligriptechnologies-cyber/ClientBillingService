@@ -33,7 +33,7 @@ async function allocate(tx: Tx, tenantId: string, invoice: TenantInvoice | null,
 
 export function createPgPaymentMethods(db: Database) {
   return {
-    /** The month filter is a half-open range of days on payment_date, where SQLite matches a text prefix; a month that is not YYYY-MM is ignored, as there. */
+    /** The month filter is a half-open range of days on payment_date. A month that is not YYYY-MM is ignored. */
     async listPayments(context: TenantContext, query: PaymentQuery = {}): Promise<PaymentList> {
       const conditions = ['payments.tenant_id = $1'];
       const values: unknown[] = [context.tenantId];

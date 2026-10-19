@@ -8,8 +8,8 @@ import net from 'node:net';
 const port = Number(process.argv[2] ?? process.env.CLIENT_BILLING_BOOT_CHECK_PORT ?? 3212);
 if (port === 3000) throw new Error('Refusing to use port 3000.');
 const next = createRequire(import.meta.url).resolve('next/dist/bin/next');
-const postgres = { DATABASE_URL: 'postgres://cbs_app@127.0.0.1:1/cbs', DATABASE_PLATFORM_URL: 'postgres://cbs_platform@127.0.0.1:1/cbs', CLIENT_BILLING_STORE: '' };
-const noDatabase = { DATABASE_URL: '', DATABASE_PLATFORM_URL: '', CLIENT_BILLING_STORE: '' };
+const postgres = { DATABASE_URL: 'postgres://cbs_app@127.0.0.1:1/cbs', DATABASE_PLATFORM_URL: 'postgres://cbs_platform@127.0.0.1:1/cbs' };
+const noDatabase = { DATABASE_URL: '', DATABASE_PLATFORM_URL: '' };
 
 const cases = [
   { name: 'production + demo', env: { ...postgres, CLIENT_BILLING_ENV: 'production', CLIENT_BILLING_AUTH_MODE: 'demo' }, reason: /Refusing to start: .*demo.*production/i },

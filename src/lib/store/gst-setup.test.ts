@@ -1,18 +1,12 @@
-import { mkdtempSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
-import { DatabaseSync } from 'node:sqlite';
-import { describe, expect, it } from 'vitest';
+import { expect, it } from 'vitest';
 import { gstSalesCsv, hsnSummaryCsv } from '../gst-sales-export';
 import { UNREGISTERED_SELLER_TAX_MESSAGE } from '../invoice-gst';
 import { renderInvoiceHtml } from '../invoice-html';
 import type { InvoiceLineInput } from '../invoice-lines';
-import { createTenantStore } from '../tenant-store';
-import { describeStore, memberContext, storeForTest, unregisterSeller, type StoreArea } from './test-store';
+import { describeStore, memberContext, storeForTest, unregisterSeller } from './test-store';
 
 const KARNATAKA = '29AAGCB7383J1Z4';
 const MAHARASHTRA = '27AAPFU0939F1ZV';
-const INVOICING: StoreArea[] = ['settings', 'customers', 'services', 'contracts', 'invoices', 'bulkInvoices'];
 
 async function setup() {
   const store = await storeForTest();
@@ -25,7 +19,7 @@ async function setup() {
   return { store, session, register, unregister, customer, line, invoice };
 }
 
-describeStore(['settings'], 'seller GST setup', () => {
+describeStore('seller GST setup', () => {
   it('rejects an invalid GSTIN with a message that names the problem', async () => {
     const { store, session } = await setup();
     const settings = await store.getTenantSettings(session);
@@ -56,7 +50,7 @@ describeStore(['settings'], 'seller GST setup', () => {
   });
 });
 
-describeStore(['customers'], 'client GST setup', () => {
+describeStore('client GST setup', () => {
   it('rejects an invalid client GSTIN on create and update', async () => {
     const { store, session, customer } = await setup();
     await expect(customer({ gstin: '27AAPFU0939F1ZX' })).rejects.toThrow(/check digit/);
@@ -87,7 +81,7 @@ describeStore(['customers'], 'client GST setup', () => {
   });
 });
 
-describeStore(['services'], 'HSN/SAC on services', () => {
+describeStore('HSN/SAC on services', () => {
   it('validates, stores and updates the code on a service', async () => {
     const { store, session } = await setup();
     const prices = { monthly: 1000, quarterly: 2000, halfYearly: 3000, annual: 4000 };
@@ -100,7 +94,7 @@ describeStore(['services'], 'HSN/SAC on services', () => {
   });
 });
 
-describeStore(INVOICING, 'place of supply and tax split', () => {
+describeStore('place of supply and tax split', () => {
   it('preselects CGST + SGST inside the seller state and IGST outside it', async () => {
     const { store, session, register, customer } = await setup();
     await register();
@@ -173,7 +167,7 @@ describeStore(INVOICING, 'place of supply and tax split', () => {
   });
 });
 
-describeStore(INVOICING, 'document type', () => {
+describeStore('document type', () => {
   it('issues a Bill of Supply when the seller is unregistered or nothing is taxable', async () => {
     const { store, session, register, unregister, customer, line, invoice } = await setup();
     await unregister();
@@ -210,7 +204,7 @@ describeStore(INVOICING, 'document type', () => {
   });
 });
 
-describeStore(INVOICING, 'an unregistered seller cannot charge GST', () => {
+describeStore('an unregistered seller cannot charge GST', () => {
   it.each(['igst', 'cgst_sgst'] as const)('rejects a %s line with the message that says how to fix it and issues nothing', async (taxType) => {
     const { store, session, unregister, customer, line, invoice } = await setup();
     await unregister();
@@ -271,7 +265,7 @@ describeStore(INVOICING, 'an unregistered seller cannot charge GST', () => {
   });
 });
 
-describeStore(INVOICING, 'bulk invoices follow the place of supply', () => {
+describeStore('bulk invoices follow the place of supply', () => {
   it('splits a bulk invoice to a client in the seller state into CGST + SGST', async () => {
     const { store, session, register } = await setup();
     await register();
@@ -288,7 +282,7 @@ describeStore(INVOICING, 'bulk invoices follow the place of supply', () => {
   });
 });
 
-describeStore(INVOICING, 'HSN/SAC on invoice lines', () => {
+describeStore('HSN/SAC on invoice lines', () => {
   it('requires a valid code on taxable lines of a Tax Invoice and keeps it optional elsewhere', async () => {
     const { register, customer, line, invoice } = await setup();
     await register();
@@ -300,7 +294,7 @@ describeStore(INVOICING, 'HSN/SAC on invoice lines', () => {
   });
 });
 
-describeStore(INVOICING, 'GSTR-1 export', () => {
+describeStore('GSTR-1 export', () => {
   it('classifies each invoice into a section and summarises HSN/SAC codes', async () => {
     const { store, session, register, customer, line, invoice } = await setup();
     await register();
@@ -323,43 +317,5 @@ describeStore(INVOICING, 'GSTR-1 export', () => {
     expect(csv.split('\r\n')[3]).toMatch(/"Net GST","Section"$/);
     expect(csv).toContain('"B2CL"');
     expect(hsnSummaryCsv(report).split('\r\n')[3]).toBe('"HSN/SAC","Description","Quantity","Taxable value","Tax"');
-  });
-});
-
-describe('additive migration', () => {
-  it('upgrades the shipped seed database in place without losing a row', async () => {
-    const directory = mkdtempSync(join(tmpdir(), 'client-billing-gst-migration-'));
-    const filename = join(directory, 'legacy.sqlite');
-    const previousSeedMode = process.env.CLIENT_BILLING_SEED_MODE;
-    delete process.env.CLIENT_BILLING_SEED_MODE;
-    try {
-      const legacy = new DatabaseSync(filename);
-      legacy.exec("CREATE TABLE tenants (id TEXT PRIMARY KEY, name TEXT NOT NULL UNIQUE, status TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT '', updated_at TEXT NOT NULL DEFAULT '')");
-      legacy.exec("CREATE TABLE customers (id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL, company_name TEXT NOT NULL, contact_name TEXT NOT NULL, email TEXT NOT NULL, phone TEXT NOT NULL, gstin TEXT NOT NULL, billing_address TEXT NOT NULL, invoice_delivery TEXT NOT NULL, status TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL)");
-      legacy.exec("CREATE TABLE tenant_settings (tenant_id TEXT PRIMARY KEY, company_name TEXT NOT NULL, gstin TEXT NOT NULL DEFAULT '', address TEXT NOT NULL DEFAULT '', invoice_prefix TEXT NOT NULL, payment_terms_days INTEGER NOT NULL, footer TEXT NOT NULL DEFAULT '', invoice_template TEXT NOT NULL, email_subject TEXT NOT NULL, email_body TEXT NOT NULL, smtp_host TEXT NOT NULL DEFAULT '', smtp_port INTEGER NOT NULL DEFAULT 587, smtp_from TEXT NOT NULL DEFAULT '', log_retention_days INTEGER NOT NULL DEFAULT 30, logo_data_url TEXT NOT NULL DEFAULT '', stamp_data_url TEXT NOT NULL DEFAULT '', signature_data_url TEXT NOT NULL DEFAULT '', updated_at TEXT NOT NULL)");
-      legacy.exec("CREATE TABLE services (id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL, name TEXT NOT NULL, description TEXT NOT NULL DEFAULT '', status TEXT NOT NULL, monthly_minor INTEGER NOT NULL, quarterly_minor INTEGER NOT NULL, half_yearly_minor INTEGER NOT NULL, annual_minor INTEGER NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, UNIQUE(tenant_id, name))");
-      legacy.exec("CREATE TABLE users (id TEXT PRIMARY KEY, tenant_id TEXT, name TEXT NOT NULL, email TEXT NOT NULL UNIQUE, role TEXT NOT NULL, password TEXT NOT NULL, status TEXT NOT NULL)");
-      legacy.exec("INSERT INTO tenants (id, name, status) VALUES ('legacy', 'Legacy Co', 'active')");
-      legacy.exec("INSERT INTO users (id, tenant_id, name, email, role, password, status) VALUES ('legacy-admin', 'legacy', 'A', 'a@example.com', 'admin', 'admin123', 'active')");
-      const insertCustomer = legacy.prepare("INSERT INTO customers VALUES (?, 'legacy', ?, 'C', 'c@example.com', '1', ?, 'Addr', 'manual', 'active', 't', 't')");
-      insertCustomer.run('c-valid', 'Valid', MAHARASHTRA); insertCustomer.run('c-junk', 'Junk', 'NA'); insertCustomer.run('c-blank', 'Blank', '');
-      legacy.exec(`INSERT INTO tenant_settings (tenant_id, company_name, gstin, invoice_prefix, payment_terms_days, invoice_template, email_subject, email_body, updated_at) VALUES ('legacy', 'Legacy Co', '${KARNATAKA}', 'LEG', 14, 't', 's', 'b', 't')`);
-      legacy.exec("INSERT INTO services (id, tenant_id, name, status, monthly_minor, quarterly_minor, half_yearly_minor, annual_minor, created_at, updated_at) VALUES ('svc', 'legacy', 'Old service', 'active', 1, 2, 3, 4, 't', 't')");
-      legacy.close();
-
-      for (let open = 0; open < 2; open += 1) {
-        const store = createTenantStore(filename);
-        const session = { tenantId: 'legacy', actor: { kind: 'user' as const, id: 'legacy-admin', username: null } };
-        const customers = (await store.listCustomers(session, {})).items;
-        expect(customers.map((item) => [item.id, item.gstin, item.stateCode]).sort()).toEqual([['c-blank', '', ''], ['c-junk', 'NA', ''], ['c-valid', MAHARASHTRA, '27']]);
-        expect(await store.getTenantSettings(session)).toMatchObject({ gstin: KARNATAKA, stateCode: '29', legalName: '' });
-        expect(await store.listServices(session)).toEqual([expect.objectContaining({ id: 'svc', hsnSac: '' })]);
-        await store.close();
-      }
-    } finally {
-      if (previousSeedMode === undefined) delete process.env.CLIENT_BILLING_SEED_MODE;
-      else process.env.CLIENT_BILLING_SEED_MODE = previousSeedMode;
-      rmSync(directory, { recursive: true, force: true });
-    }
   });
 });

@@ -15,7 +15,7 @@ async function requireOwnInvoice(tx: Tx, tenantId: string, invoiceId: string) {
 
 export function createPgDeliveryMethods(db: Database) {
   return {
-    /** clock_timestamp() rather than now(): attempts made in quick succession still sort in the order made, where SQLite breaks ties on rowid. */
+    /** clock_timestamp() rather than now(): attempts made in quick succession still sort in the order made. */
     async recordDelivery(context: TenantContext, input: DeliveryInput): Promise<DeliveryRecord> {
       return db.withTenant(context.tenantId, async (tx) => {
         await requireOwnInvoice(tx, context.tenantId, input.invoiceId);

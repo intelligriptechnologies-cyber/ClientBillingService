@@ -1,5 +1,5 @@
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { dirname, resolve } from 'node:path';
 import { createTransport } from 'nodemailer';
 
 /**
@@ -116,9 +116,7 @@ function nodemailerTransport(options: Record<string, unknown>): SmtpTransport {
 }
 
 function captureFile(env: Record<string, string | undefined>): string {
-  if (env.CLIENT_BILLING_MAIL_CAPTURE_FILE) return env.CLIENT_BILLING_MAIL_CAPTURE_FILE;
-  const database = env.CLIENT_BILLING_DATABASE;
-  return join(!database || database === ':memory:' ? '.data' : dirname(database), 'mail-capture.json');
+  return env.CLIENT_BILLING_MAIL_CAPTURE_FILE || resolve('.data', 'mail-capture.json');
 }
 
 function appendCaptured(file: string, entry: unknown) {

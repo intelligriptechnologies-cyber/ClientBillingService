@@ -1,8 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { databaseForTest, DATABASE_TESTS_SKIP_REASON } from '@/lib/db/test-database';
-import { createPgStore } from '@/lib/store/pg/create-pg-store';
-import { memberContext, storeForTest } from '@/lib/store/test-store';
+import { describeStore, memberContext, storeForTest } from '@/lib/store/test-store';
 import type { TenantStore } from '@/lib/tenant-store';
 import * as customers from '../../app/api/customers/route';
 import * as selectTenant from '../../app/api/auth/select-tenant/route';
@@ -95,13 +93,9 @@ describe('getPrincipal in authelia mode, before any store read', () => {
   });
 });
 
-// Users.authelia_username exists only in the Postgres schema, and so does one email in two tenants: the legacy
-// SQLite store serves demo mode alone. These run whenever a database is configured, under either TEST_DRIVER.
-describe.skipIf(!process.env.DATABASE_MIGRATE_URL)(`getPrincipal in authelia mode, on Postgres (${DATABASE_TESTS_SKIP_REASON})`, () => {
+describeStore('getPrincipal in authelia mode, on Postgres', () => {
   let store: TenantStore;
-  let drop: () => Promise<void>;
-  beforeEach(async () => { const database = await databaseForTest(); store = createPgStore(database.db); drop = database.drop; world.store = store; });
-  afterEach(async () => { await drop(); });
+  beforeEach(async () => { store = await storeForTest(); world.store = store; });
 
   it('gives a person with one active row that tenant, with no chooser', async () => {
     const person = newPerson('one');
@@ -185,7 +179,7 @@ describe.skipIf(!process.env.DATABASE_MIGRATE_URL)(`getPrincipal in authelia mod
   });
 });
 
-describe('getPrincipal in demo mode', () => {
+describeStore('getPrincipal in demo mode', () => {
   let store: TenantStore;
   beforeEach(async () => { store = await storeForTest(); world.store = store; });
 
@@ -209,12 +203,9 @@ describe('getPrincipal in demo mode', () => {
   });
 });
 
-// Users.email is globally unique in the legacy SQLite schema, so one email in two tenants exists only on Postgres.
-describe.skipIf(!process.env.DATABASE_MIGRATE_URL)(`one person in several tenants, on Postgres (${DATABASE_TESTS_SKIP_REASON})`, () => {
+describeStore('one person in several tenants, on Postgres', () => {
   let store: TenantStore;
-  let drop: () => Promise<void>;
-  beforeEach(async () => { const database = await databaseForTest(); store = createPgStore(database.db); drop = database.drop; world.store = store; });
-  afterEach(async () => { await drop(); });
+  beforeEach(async () => { store = await storeForTest(); world.store = store; });
 
   async function inBothTenants(label: string) {
     const person = newPerson(label);

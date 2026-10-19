@@ -1,6 +1,6 @@
 // node control-billing.mjs run journeys/customer-then-invoice.mjs --as nexio-admin [--args '{"company":"Orbit Labs 1"}']
 // Creates a customer through the Customers page, then an invoice for it through the Invoices dialog,
-// and reads both rows back from the sqlite file. Selectors come from e2e/customers.spec.ts and e2e/invoice-line-items.spec.ts.
+// and reads both rows back from the instance database. Selectors come from e2e/customers.spec.ts and e2e/invoice-line-items.spec.ts.
 export default async function journey({ page, api, db, shot, args }) {
   const company = args.company ?? `Orbit Labs ${Date.now()}`;
   const rate = String(args.rate ?? 250);

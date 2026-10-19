@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { settingsInput } from '@/lib/test-helpers';
-import { storeForTest, testDriver, signIn } from '@/lib/store/test-store';
+import { describeStore, storeForTest, signIn } from '@/lib/store/test-store';
 import type { TenantStore } from '@/lib/tenant-store';
 
 import * as additionalServices from '../app/api/additional-services/route';
@@ -219,35 +219,37 @@ const cases: Case[] = [
   { kind: 'logs', name: 'POST /api/settings/preview renders', owns: () => 'NEX-2026', run: (as) => call(settingsPreview.POST, as, { method: 'POST' }) },
 ];
 
-describe.each(cases)('$kind: $name', (scenario) => {
-  const knownLeak = scenario.leak;
-  const isRead = Boolean(scenario.owns) || scenario.read === true;
+describeStore('tenant routes', () => {
+  describe.each(cases)('$kind: $name', (scenario) => {
+    const knownLeak = scenario.leak;
+    const isRead = Boolean(scenario.owns) || scenario.read === true;
 
-  it('works for the owning tenant (control)', async () => {
-    const fixtures = await seedTenantA(tenantA);
-    const reply = await scenario.run(tenantA, fixtures);
-    expect(reply.status).toBeLessThan(400);
-    if (scenario.owns) expect(reply.text).toContain(scenario.owns(fixtures));
-  });
+    it('works for the owning tenant (control)', async () => {
+      const fixtures = await seedTenantA(tenantA);
+      const reply = await scenario.run(tenantA, fixtures);
+      expect(reply.status).toBeLessThan(400);
+      if (scenario.owns) expect(reply.text).toContain(scenario.owns(fixtures));
+    });
 
-  (knownLeak ? it.fails : it)(`${knownLeak ? `LEAK ${knownLeak}: ` : ''}is not reachable from another tenant`, async () => {
-    const fixtures = await seedTenantA(tenantA);
-    const before = await snapshot(tenantA);
-    const foreignIds = [...collectIds(before)];
+    (knownLeak ? it.fails : it)(`${knownLeak ? `LEAK ${knownLeak}: ` : ''}is not reachable from another tenant`, async () => {
+      const fixtures = await seedTenantA(tenantA);
+      const before = await snapshot(tenantA);
+      const foreignIds = [...collectIds(before)];
 
-    const reply = await scenario.run(tenantB, fixtures);
+      const reply = await scenario.run(tenantB, fixtures);
 
-    if (isRead) expect(reply.status).toBeLessThan(400);
-    else expect(reply.status).toBeGreaterThanOrEqual(400);
-    for (const foreign of foreignIds) expect(reply.text).not.toContain(foreign);
-    expect(reply.text).not.toContain('Nexio');
-    expect(await snapshot(tenantA)).toEqual(before);
-    const bSnapshot = JSON.stringify(await snapshot(tenantB));
-    for (const foreign of foreignIds) expect(bSnapshot).not.toContain(foreign);
+      if (isRead) expect(reply.status).toBeLessThan(400);
+      else expect(reply.status).toBeGreaterThanOrEqual(400);
+      for (const foreign of foreignIds) expect(reply.text).not.toContain(foreign);
+      expect(reply.text).not.toContain('Nexio');
+      expect(await snapshot(tenantA)).toEqual(before);
+      const bSnapshot = JSON.stringify(await snapshot(tenantB));
+      for (const foreign of foreignIds) expect(bSnapshot).not.toContain(foreign);
+    });
   });
 });
 
-describe('superadmin-only routes reject tenant sessions', () => {
+describeStore('superadmin-only routes reject tenant sessions', () => {
   it.each([
     ['GET /api/tenants', () => call(tenants.GET, tenantB)],
     ['POST /api/tenants', () => call(tenants.POST, tenantB, { method: 'POST', body: { name: 'Rogue' } })],
@@ -261,7 +263,7 @@ describe('superadmin-only routes reject tenant sessions', () => {
   });
 });
 
-describe('store functions reached by id without a route', () => {
+describeStore('store functions reached by id without a route', () => {
   it('rejects every id-taking store call made with another tenant session', async () => {
     const f = await seedTenantA(tenantA);
     const before = await snapshot(tenantA);
@@ -283,7 +285,7 @@ describe('store functions reached by id without a route', () => {
   });
 });
 
-describe('the delivery log and mail settings', () => {
+describeStore('the delivery log and mail settings', () => {
   it('lists an invoice\'s deliveries to the owning tenant, with the defaults the send dialog needs', async () => {
     const f = await seedTenantA(tenantA);
     const reply = await call(invoiceDeliveries.GET, tenantA, { params: { invoiceId: f.invoiceId } });
@@ -347,19 +349,16 @@ describe('the delivery log and mail settings', () => {
   });
 });
 
-// The SQLite schema keeps users.email globally UNIQUE. Postgres makes it unique per tenant (ADR 0002, owner decision
-// 2), so there both leaks are closed and the tests run as plain tests.
-const emailLeak = testDriver === 'pg' ? it : it.fails;
-
-describe('global uniqueness constraints do not disclose another tenant', () => {
-  emailLeak('LEAK users.email is globally UNIQUE: POST /api/users with another tenant email is refused, revealing it exists (tenant-store.ts:96,388)', async () => {
+// users.email is unique per tenant (ADR 0002, owner decision 2), so another tenant's email is accepted and reveals nothing.
+describeStore('global uniqueness constraints do not disclose another tenant', () => {
+  it('POST /api/users with another tenant\'s email creates the user, revealing nothing', async () => {
     const f = await seedTenantA(tenantA);
     const taken = must((await store.listTenantUsers(tenantContextOf(tenantA))).find((item) => item.id === f.userId)).email;
     const reply = await call(users.POST, tenantB, { method: 'POST', body: { name: 'Same person, other tenant', email: taken, role: 'user' } });
     expect(reply.status).toBe(201);
   });
 
-  emailLeak('LEAK users.email is globally UNIQUE: PATCH /api/users/[id] to another tenant email is refused, revealing it exists (tenant-store.ts:96,406)', async () => {
+  it('PATCH /api/users/[id] to another tenant\'s email updates the user, revealing nothing', async () => {
     const f = await seedTenantA(tenantA);
     const taken = must((await store.listTenantUsers(tenantContextOf(tenantA))).find((item) => item.id === f.userId)).email;
     const own = must((await store.listTenantUsers(tenantContextOf(tenantB))).find((item) => item.role === 'user'));

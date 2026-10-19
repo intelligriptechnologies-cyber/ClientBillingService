@@ -1,12 +1,11 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { signIn } from '@/lib/store/test-store';
+import { beforeEach, expect, it, vi } from 'vitest';
+import { describeStore, signIn, storeForTest } from '@/lib/store/test-store';
 import { createMailer, type SmtpTransport } from '@/lib/mailer';
 import { getInvoiceEmailDefaults, MailServiceError, sendInvoiceEmail, sendPaymentReminder, testSmtp, type MailDeps } from '@/lib/mail-service';
 import { settingsInput } from '@/lib/test-helpers';
-import { createTenantStore } from '@/lib/tenant-store';
+import type { TenantStore as Store } from '@/lib/tenant-store';
 import { tenantContextOf, type Member, type Resolution } from './auth/principal';
 
-type Store = ReturnType<typeof createTenantStore>;
 const PASSWORD = 'hunter2-secret';
 const INVOICE = 'nexio-invoice-001';
 const pdfBytes = new TextEncoder().encode('%PDF-1.4 rendered');
@@ -21,14 +20,13 @@ async function configure(session: Resolution, extra: Record<string, unknown> = {
 async function rejection(promise: Promise<unknown>) { try { await promise; } catch (cause) { return cause; } throw new Error('Expected a rejection'); }
 
 beforeEach(async () => {
-  store = createTenantStore(':memory:');
+  store = await storeForTest();
   admin = must(await signIn(store, 'nexio-admin')); user = must(await signIn(store, 'nexio-user')); evo = must(await signIn(store, 'evo-admin')); superadmin = { kind: 'platform', actor: { kind: 'platform', username: 'superadmin' }, viewer: { name: 'Demo Superadmin', email: 'superadmin@ledgerly.demo' } };
   sent = []; transportBehaviour = {}; renderPdf = vi.fn(async () => pdfBytes);
   deps = { renderPdf, mailer: createMailer({ env: {}, createTransport: () => ({ sendMail: async (mail) => { sent.push(mail); return { messageId: '<m1@fake>' }; }, verify: async () => true, ...transportBehaviour }) }) };
 });
-afterEach(async () => store.close());
 
-describe('SMTP settings never expose the password', () => {
+describeStore('SMTP settings never expose the password', () => {
   it('stores it, reports only that it is set, and keeps it when a later save omits it', async () => {
     expect(await store.getTenantSettings(tenantContextOf(admin))).toMatchObject({ smtpUser: '', smtpPasswordSet: false });
     const saved = await configure(admin);
@@ -49,7 +47,7 @@ describe('SMTP settings never expose the password', () => {
   });
 });
 
-describe('sending an invoice', () => {
+describeStore('sending an invoice', () => {
   it('attaches the rendered PDF, mails the customer billing address by default and logs a sent delivery', async () => {
     await configure(admin);
     const result = await sendInvoiceEmail(store, admin, INVOICE, {}, deps);
@@ -144,7 +142,7 @@ describe('sending an invoice', () => {
   });
 });
 
-describe('testing the SMTP settings', () => {
+describeStore('testing the SMTP settings', () => {
   it('reports not-configured, verified or failed truthfully and records the outcome in the logs', async () => {
     expect(await testSmtp(store, admin, deps)).toMatchObject({ status: 'not-configured' });
     await configure(admin);
@@ -162,7 +160,7 @@ describe('testing the SMTP settings', () => {
   });
 });
 
-describe('payment reminders', () => {
+describeStore('payment reminders', () => {
   it('sends an email reminder to the customer when SMTP is set up, and logs the delivery against the invoice', async () => {
     await configure(admin);
     const result = await sendPaymentReminder(store, admin, INVOICE, { channel: 'email', note: 'Please pay by Friday.' }, deps);

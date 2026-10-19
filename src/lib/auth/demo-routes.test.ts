@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { storeForTest } from '@/lib/store/test-store';
+import { describeStore, storeForTest } from '@/lib/store/test-store';
 import * as demoLogin from '../../app/api/auth/demo-login/route';
 import * as identities from '../../app/api/auth/identities/route';
 
@@ -26,10 +26,11 @@ function stubEnv(values: Record<string, string>) {
 
 const login = (userId: string) => new Request('http://localhost/api/auth/demo-login', { method: 'POST', body: JSON.stringify({ userId }) });
 
-beforeEach(async () => { world.store = await storeForTest(); });
-afterEach(() => { vi.unstubAllEnvs(); });
+afterEach(() => { vi.unstubAllEnvs(); world.store = undefined; });
 
-describe('demo auth routes', () => {
+describeStore('demo auth routes on the demo seed', () => {
+  beforeEach(async () => { world.store = await storeForTest(); });
+
   it('sign in and list identities in demo mode, the default', async () => {
     stubEnv({});
     const list = await identities.GET();
@@ -46,7 +47,9 @@ describe('demo auth routes', () => {
     expect(member.headers.getSetCookie().join('\n')).not.toContain('client-billing-demo-session');
     expect((await demoLogin.POST(login('no-such-user'))).status).toBe(400);
   });
+});
 
+describe('demo auth routes outside demo mode', () => {
   it.each([
     ['authelia mode', authelia],
     ['production', { CLIENT_BILLING_ENV: 'production' }],

@@ -2,7 +2,7 @@ import { expect, it } from 'vitest';
 import { describeStore, memberContext, storeForTest, signIn } from './test-store';
 import { tenantContextOf } from '../auth/principal';
 
-describeStore(['customers', 'taskNotes'], 'task notes', () => {
+describeStore('task notes', () => {
   it('creates, filters, edits, and deletes task notes within the tenant', async () => {
     const store = await storeForTest();
     const nexio = await signIn(store, 'nexio-admin'); const evo = await signIn(store, 'evo-admin');
@@ -24,7 +24,7 @@ describeStore(['customers', 'taskNotes'], 'task notes', () => {
   });
 });
 
-describeStore(['customers', 'taskNotes'], 'task note lists', () => {
+describeStore('task note lists', () => {
   it('filters notes by customer and orders them by date', async () => {
     const store = await storeForTest();
     const nexio = await memberContext(store, 'nexio-admin');

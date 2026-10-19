@@ -20,13 +20,13 @@ A tenant admin or user sends an issued invoice to the customer by email with the
 
 Preconditions:
 
-- `control-billing doctor` reports `ok: true`. The instance runs with `CLIENT_BILLING_MAIL_TRANSPORT=capture`, so nothing leaves the machine; messages are appended to `mail-capture.json` in the same folder as the sqlite file (the `dbPath` printed by `up`).
+- `control-billing doctor` reports `ok: true`. The instance runs with `CLIENT_BILLING_MAIL_TRANSPORT=capture`, so nothing leaves the machine; messages are appended to the `mailCaptureFile` printed by `up` (and by `doctor`).
 - You ran `control-billing login nexio-admin`. Invoice `NEX-2026-001` is issued. No SMTP host is saved yet.
 
 - **Not configured.** Run `control-billing api POST /api/invoices/nexio-invoice-001/send '{}'`. The status is `409` and the body has `status: "not-configured"` and the text `Email is not set up`. `db "SELECT status,error FROM delivery_log WHERE invoice_id='nexio-invoice-001'"` shows one `not-configured` row.
 - **Configure.** Run `control-billing api GET /api/settings`, then `PUT /api/settings` with that settings object plus `smtpHost` `smtp.nexio.test`, `smtpFrom` `billing@nexio.test`, `smtpUser` `billing` and `smtpPassword` `secret` (use `--body-file`). The response has `smtpPasswordSet: true` and never the password.
 - **Send through the UI.** Run `control-billing snapshot /invoices/nexio-invoice-001`, then in a `run` script choose `Send by email`. In the dialog `Send invoice by email` the `To` textbox holds `billing@nexio.example`. Fill the `Message` textbox and choose `Send email`. The element with role `status` reads `NEX-2026-001 was emailed to billing@nexio.example.` and the `Deliveries` panel gains a row with status `sent`.
-- **Read the captured message.** Open `mail-capture.json` next to the sqlite file. The last entry has `to`, `from` `billing@nexio.test`, the subject `Invoice NEX-2026-001 from Nexio Hyper (...)` and one attachment `NEX-2026-001.pdf` whose `contentBase64` starts `JVBERi0` (`%PDF-`).
+- **Read the captured message.** Open the `mailCaptureFile`. The last entry has `to`, `from` `billing@nexio.test`, the subject `Invoice NEX-2026-001 from Nexio Hyper (...)` and one attachment `NEX-2026-001.pdf` whose `contentBase64` starts `JVBERi0` (`%PDF-`).
 - **Delivery log.** `control-billing api GET /api/invoices/nexio-invoice-001/deliveries` returns `deliveries` newest first and `defaults` (`to`, `subject`, `message`, `configured`). Second view: `db "SELECT status,to_address,subject,attempted_by FROM delivery_log WHERE invoice_id='nexio-invoice-001'"`.
 - **Refusals.** `POST .../send '{"to":"nope"}'` answers `400` with a message that starts `To:`. After voiding an invoice, `POST .../send` answers `409`. `--as evo-admin` on either route answers `404`.
 - **Reminder.** `control-billing api POST /api/pending-payments/nexio-invoice-001/reminders '{"channel":"email"}'` returns the reminder with `delivery: "sent"` and `message` `Email reminder sent to ...`. With `{"channel":"whatsapp"}` it returns `delivery: "recorded"` and a message that says `recorded, not sent`.

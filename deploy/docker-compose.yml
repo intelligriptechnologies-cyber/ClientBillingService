@@ -45,8 +45,6 @@ services:
     env_file:
       - path: ../.env.staging
         required: false
-    volumes:
-      - staging_data:/data
     networks:
       - staging-edge
       - staging-db
@@ -77,8 +75,6 @@ services:
     env_file:
       - path: ../.env.production
         required: false
-    volumes:
-      - production_data:/data
     networks:
       - production-edge
       - production-db
@@ -116,7 +112,5 @@ networks:
     internal: true
 
 volumes:
-  staging_data:
-  production_data:
   staging_pgdata:
   production_pgdata:

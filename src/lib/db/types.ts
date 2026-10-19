@@ -1,7 +1,7 @@
 import pg, { type CustomTypesConfig } from 'pg';
 
 // The type mapping from ADR 0001 (Consequences). Every pool and test client passes `pgTypes`, so the store reads
-// the same JS shapes the SQLite store returns today: numbers for money and rates, strings for dates and times.
+// numbers for money and rates, and strings for dates and times.
 
 export function parseBigint(text: string): number {
   const value = Number(text);

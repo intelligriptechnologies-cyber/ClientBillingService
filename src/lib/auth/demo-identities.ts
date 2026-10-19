@@ -6,7 +6,7 @@ import type { DemoIdentity, TenantStore } from '../store/types';
  */
 export const DEMO_SUPERADMIN: DemoIdentity = { id: 'superadmin', name: 'Demo Superadmin', email: 'superadmin@ledgerly.demo', role: 'superadmin', tenantId: null, tenantName: null };
 
-/** The superadmin, then the store's active members. The legacy SQLite store still has a superadmin row, left out so the entry appears once. */
+/** The superadmin, then the store's active members. */
 export async function listDemoIdentities(store: TenantStore): Promise<DemoIdentity[]> {
-  return [DEMO_SUPERADMIN, ...(await store.listIdentities()).filter((identity) => identity.role !== 'superadmin')];
+  return [DEMO_SUPERADMIN, ...(await store.listIdentities())];
 }

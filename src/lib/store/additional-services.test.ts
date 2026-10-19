@@ -2,7 +2,7 @@ import { expect, it } from 'vitest';
 import { describeStore, memberContext, storeForTest, signIn } from './test-store';
 import { tenantContextOf } from '../auth/principal';
 
-describeStore(['customers', 'services', 'contracts', 'additionalServices'], 'additional services', () => {
+describeStore('additional services', () => {
   it('records a dated additional service only against its customer contract and exposes it for that billing period', async () => {
     const store = await storeForTest();
     const nexio = await signIn(store, 'nexio-admin');
@@ -26,7 +26,7 @@ describeStore(['customers', 'services', 'contracts', 'additionalServices'], 'add
   });
 });
 
-describeStore(['customers', 'services', 'contracts', 'additionalServices'], 'additional services under concurrent requests', () => {
+describeStore('additional services under concurrent requests', () => {
   it('keeps both changes when a description change and a price change of one additional service run at once', async () => {
     const store = await storeForTest();
     const nexio = await memberContext(store, 'nexio-admin');
@@ -41,7 +41,7 @@ describeStore(['customers', 'services', 'contracts', 'additionalServices'], 'add
   });
 });
 
-describeStore(['customers', 'services', 'contracts', 'additionalServices'], 'additional service lists', () => {
+describeStore('additional service lists', () => {
   it('bills a service in the month of its date, filters by search, status, customer and contract, and refuses a day that does not exist', async () => {
     const store = await storeForTest();
     const nexio = await memberContext(store, 'nexio-admin');

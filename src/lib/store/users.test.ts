@@ -2,7 +2,7 @@ import { expect, it } from 'vitest';
 import { describeStore, memberContext, storeForTest, superadmin, signIn } from './test-store';
 import { tenantContextOf } from '../auth/principal';
 
-describeStore(['tenants', 'users'], 'tenant users', () => {
+describeStore('tenant users', () => {
   it('refuses to leave a tenant without an active admin', async () => {
     const store = await storeForTest();
     const created = await store.createTenant(superadmin, { name: 'Solo Admin' });
@@ -55,7 +55,7 @@ describeStore(['tenants', 'users'], 'tenant users', () => {
   });
 });
 
-describeStore(['tenants', 'users'], 'tenant users under concurrent requests', () => {
+describeStore('tenant users under concurrent requests', () => {
   it('keeps one active admin when two admins demote each other at once', async () => {
     const store = await storeForTest();
     const first = await memberContext(store, 'nexio-admin');

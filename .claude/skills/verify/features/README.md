@@ -4,7 +4,7 @@ This directory is the maintained source for verifying the user-facing behavior o
 
 ## Baseline preconditions
 
-- Launch an isolated instance with `control-billing up`. It serves `http://127.0.0.1:<port>` (the port is in the `up` output) with `CLIENT_BILLING_SEED_MODE=demo` and a fresh sqlite file.
+- Launch an isolated instance with `control-billing up`. It serves `http://127.0.0.1:<port>` (the port is in the `up` output) on a fresh Postgres database, `cbs_verify_<name>`, migrated and loaded with the demo seed.
 - `control-billing` below means `node .claude/skills/verify/control-billing.mjs`.
 - Run `control-billing doctor` and require `ok: true`, the printed port and database path, and a `builtFrom.commit` that matches the checkout.
 - Seed state per tenant, using Nexio Hyper (`nexio`) as the reference: customer `Nexio Hyper Customer` (GSTIN `29AAGCB7383J1Z4`, state 29), service `Managed billing service`, contract `Nexio Hyper managed billing contract` (2026-01-01 to 2026-12-31, monthly, deposit of 250.00), invoice `NEX-2026-001` (issued, 1,180.00, dated 2026-10-01, due 2026-10-15), invoice `NEX-2026-000` (paid, with payment reference `SEED-PAID`), and one held security deposit. Other tenants are `maasp`, `evo`, `gripdata`, `od`, with the same shape and a three-letter invoice prefix taken from the tenant name.

@@ -1,20 +1,11 @@
-import { mkdtempSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
-import { DatabaseSync } from 'node:sqlite';
-import { afterEach, describe, expect, it } from 'vitest';
+import { expect, it } from 'vitest';
 import { BUILTIN_DEFINITION } from '../invoice-format';
 import { renderInvoiceHtml } from '../invoice-html';
-import { createTenantStore, type TenantStore } from '../tenant-store';
+import type { TenantStore } from '../tenant-store';
 import type { TenantContext } from '../auth/principal';
-import { tenantContextOf } from '../auth/principal';
-import { describeStore, memberContext, storeForTest, type StoreArea, signIn } from './test-store';
+import { describeStore, memberContext, storeForTest } from './test-store';
 
 const SELLER_GSTIN = '29AAGCB7383J1Z4';
-const AREAS: StoreArea[] = ['settings', 'customers', 'contracts', 'invoices', 'bulkInvoices'];
-const stores: TenantStore[] = [];
-const folders: string[] = [];
-afterEach(async () => { for (const store of stores.splice(0)) await store.close(); for (const folder of folders.splice(0)) rmSync(folder, { recursive: true, force: true }); });
 
 async function setup() {
   const store = await storeForTest();
@@ -28,7 +19,7 @@ async function setup() {
   return { store, admin, member, other, customerId, definition, issue };
 }
 
-describeStore(AREAS, 'tenant invoice formats', () => {
+describeStore('tenant invoice formats', () => {
   it('gives every tenant a Standard default that matches what invoices printed before formats', async () => {
     const { store, admin, other } = await setup();
     const formats = await store.listInvoiceFormats(admin);
@@ -91,7 +82,7 @@ describeStore(AREAS, 'tenant invoice formats', () => {
   });
 });
 
-describeStore(AREAS, 'issuing with a format', () => {
+describeStore('issuing with a format', () => {
   it('snapshots the tenant default when no format is chosen', async () => {
     const { store, admin, issue } = await setup();
     const standard = (await store.listInvoiceFormats(admin))[0];
@@ -164,7 +155,7 @@ async function buyerWith(store: TenantStore, session: TenantContext, invoiceForm
   return store.createCustomer(session, { companyName: `Buyer ${crypto.randomUUID()}`, contactName: 'Buyer', email: 'buyer@example.com', phone: '9000000000', gstin: '', billingAddress: 'Bengaluru', invoiceDelivery: 'manual', invoiceFormatId });
 }
 
-describeStore(AREAS, 'default format per customer', () => {
+describeStore('default format per customer', () => {
   it('prefers the customer default over the tenant default, and a format chosen for the invoice over both', async () => {
     const { store, admin, definition, issue } = await setup();
     const lean = await store.createInvoiceFormat(admin, { name: 'Lean', definition: definition({ layout: 'compact' }) });
@@ -218,7 +209,7 @@ describeStore(AREAS, 'default format per customer', () => {
   });
 });
 
-describeStore(AREAS, 'invoice formats under concurrent requests', () => {
+describeStore('invoice formats under concurrent requests', () => {
   async function racing() {
     const { store, admin, definition } = await setup();
     // Open two pooled connections first, so the racing requests start together instead of one waiting to connect.
@@ -254,26 +245,5 @@ describeStore(AREAS, 'invoice formats under concurrent requests', () => {
     await Promise.all([store.setDefaultInvoiceFormat(admin, lean.id), store.setDefaultInvoiceFormat(admin, retainer.id)]);
 
     expect((await store.listInvoiceFormats(admin)).filter((format) => format.isDefault)).toHaveLength(1);
-  });
-});
-
-describe('migration', () => {
-  it('adds the formats table to a database that predates it and leaves existing invoices without a format', async () => {
-    const folder = mkdtempSync(join(tmpdir(), 'formats-'));
-    folders.push(folder);
-    const filename = join(folder, 'old.sqlite');
-    const first = createTenantStore(filename);
-    const admin = tenantContextOf((await signIn(first, 'nexio-admin'))!);
-    const legacy = await first.createIssuedInvoice(admin, { customerId: (await first.listCustomers(admin)).items[0].id, invoiceDate: '2026-11-02', dueDate: '2026-11-16', taxableMinor: 100_000, gstRate: 0 });
-    await first.close();
-    const raw = new DatabaseSync(filename);
-    raw.exec("DROP TABLE invoice_formats; ALTER TABLE customers DROP COLUMN invoice_format_id; UPDATE invoices SET snapshot = json_remove(snapshot, '$.format')");
-    raw.close();
-
-    const reopened = createTenantStore(filename);
-    stores.push(reopened);
-    expect((await reopened.listInvoiceFormats(admin))[0].name).toBe('Standard');
-    expect((await reopened.getInvoice(admin, legacy.id))!.snapshot.format).toBeUndefined();
-    expect((await reopened.listCustomers(admin)).items[0].invoiceFormatId).toBeNull();
   });
 });

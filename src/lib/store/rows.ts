@@ -7,8 +7,8 @@ import type {
 } from './types';
 import { paymentMethods } from './rules';
 
-// One parser per table, at the store boundary (ADR 0001, the graft from candidate C). SQLite and Postgres rows
-// with the same columns parse the same way. A column with the wrong type throws here instead of leaking a bad value.
+// One parser per table, at the store boundary (ADR 0001, the graft from candidate C). A column with the wrong type
+// throws here instead of leaking a bad value.
 
 type Row = Record<string, unknown>;
 
@@ -49,9 +49,9 @@ export function parseTenantRecordRow(row: Row): TenantRecord {
   return { id: text(row, 'id'), tenantId: text(row, 'tenant_id'), label: text(row, 'label') };
 }
 
-/** A users row joined with its tenant's name. The SQLite superadmin row has no tenant. */
+/** A users row joined with its tenant's name. Every row is a member: the superadmin has no users row. */
 export function parseIdentityRow(row: Row): DemoIdentity {
-  return { id: text(row, 'id'), name: text(row, 'name'), email: text(row, 'email'), role: oneOf(row, 'role', ['superadmin', ...memberRoles]), tenantId: nullableText(row, 'tenant_id'), tenantName: nullableText(row, 'tenant_name') };
+  return { id: text(row, 'id'), name: text(row, 'name'), email: text(row, 'email'), role: oneOf(row, 'role', memberRoles), tenantId: text(row, 'tenant_id'), tenantName: text(row, 'tenant_name') };
 }
 
 export function parseMembershipRow(row: Row): Membership {
@@ -116,11 +116,10 @@ function finite(row: Row, column: string): number {
   return value;
 }
 
-/** A JSON array of whole numbers: text from SQLite, already parsed from a Postgres jsonb column. */
+/** A JSON array of whole numbers from a jsonb column, which pg has already parsed. */
 function integers(row: Row, column: string): number[] {
-  const raw = row[column];
-  const value: unknown = typeof raw === 'string' ? JSON.parse(raw) : raw;
-  if (!Array.isArray(value) || !value.every((item) => Number.isSafeInteger(item))) throw new TypeError(`Column ${column} holds ${String(raw)}, not a list of whole numbers.`);
+  const value = row[column];
+  if (!Array.isArray(value) || !value.every((item) => Number.isSafeInteger(item))) throw new TypeError(`Column ${column} holds ${String(value)}, not a list of whole numbers.`);
   return value as number[];
 }
 
@@ -171,11 +170,10 @@ export function parseAdditionalServiceRow(row: Row): AdditionalService {
   };
 }
 
-/** A JSON object: text from SQLite, already parsed from a Postgres jsonb column. */
+/** A JSON object from a jsonb column, which pg has already parsed. */
 function object(row: Row, column: string): Record<string, unknown> {
-  const raw = row[column];
-  const value: unknown = typeof raw === 'string' ? JSON.parse(raw) : raw;
-  if (value === null || typeof value !== 'object' || Array.isArray(value)) throw new TypeError(`Column ${column} holds ${String(raw)}, not a JSON object.`);
+  const value = row[column];
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) throw new TypeError(`Column ${column} holds ${String(value)}, not a JSON object.`);
   return value as Record<string, unknown>;
 }
 

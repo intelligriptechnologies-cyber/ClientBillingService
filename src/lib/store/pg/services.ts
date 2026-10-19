@@ -18,7 +18,7 @@ export async function findService(tx: Tx, tenantId: string, serviceId: string, f
 
 export function createPgServiceMethods(db: Database) {
   return {
-    /** ESCAPE '' keeps LIKE's wildcards and no escape character, as SQLite's LIKE does. */
+    /** ESCAPE '' keeps LIKE's wildcards and no escape character. */
     async listServices(context: TenantContext, query = ''): Promise<TenantService[]> {
       const search = `%${query.trim().toLowerCase()}%`;
       return db.withTenant(context.tenantId, async (tx) => (await tx.query<Row>(`SELECT * FROM services WHERE tenant_id = $1 AND (lower(name) LIKE $2 ESCAPE '' OR lower(description) LIKE $2 ESCAPE '') ORDER BY lower(name), id COLLATE "C"`, [context.tenantId, search])).rows.map(parseServiceRow));
