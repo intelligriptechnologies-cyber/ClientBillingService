@@ -1,6 +1,6 @@
 import { expect, it } from 'vitest';
-import { describeStore, storeForTest } from './test-store';
-import { tenantContextOf } from '../auth/session-context';
+import { describeStore, memberContext, storeForTest, signIn } from './test-store';
+import { tenantContextOf } from '../auth/principal';
 import { validateGstin, validateHsnSac } from '../gst';
 import { resolveSupply } from '../invoice-gst';
 import { renderInvoiceHtml } from '../invoice-html';
@@ -13,7 +13,7 @@ describeStore(['settings', 'customers', 'services', 'invoices'], 'demo sellers a
     const gstins = new Set<string>();
 
     for (const tenantId of SELLERS) {
-      const settings = await store.getTenantSettings(tenantContextOf((await store.authenticate(`${tenantId}-admin`))!));
+      const settings = await store.getTenantSettings(await memberContext(store, `${tenantId}-admin`));
       const check = validateGstin(settings.gstin);
       expect(check, tenantId).toMatchObject({ ok: true, registered: true });
       expect(settings.stateCode, tenantId).toBe(settings.gstin.slice(0, 2));
@@ -27,7 +27,7 @@ describeStore(['settings', 'customers', 'services', 'invoices'], 'demo sellers a
     const store = await storeForTest();
 
     for (const tenantId of SELLERS) {
-      const context = tenantContextOf((await store.authenticate(`${tenantId}-admin`))!);
+      const context = await memberContext(store, `${tenantId}-admin`);
       const settings = await store.getTenantSettings(context);
       const customer = (await store.listCustomers(context)).items[0];
       const supply = resolveSupply(settings.stateCode, { gstin: customer.gstin, stateCode: customer.stateCode });
@@ -57,7 +57,7 @@ describeStore(['settings', 'customers', 'services', 'invoices'], 'demo sellers a
     const store = await storeForTest();
 
     for (const tenantId of SELLERS) {
-      const services = await store.listServices(tenantContextOf((await store.authenticate(`${tenantId}-admin`))!));
+      const services = await store.listServices(await memberContext(store, `${tenantId}-admin`));
       expect(services.length, tenantId).toBeGreaterThan(0);
       for (const service of services) expect(validateHsnSac(service.hsnSac), `${tenantId} ${service.name}`).toMatchObject({ ok: true });
     }
@@ -69,7 +69,7 @@ describeStore(['customers', 'contracts', 'deposits', 'invoices', 'payments'], 'd
     const store = await storeForTest();
 
     for (const tenantId of ['nexio', 'maasp', 'evo', 'gripdata', 'od']) {
-      const session = await store.authenticate(`${tenantId}-admin`);
+      const session = await signIn(store, `${tenantId}-admin`);
       if (!session) throw new Error(`Expected ${tenantId} admin session`);
 
       const customer = (await store.listCustomers(tenantContextOf(session), {})).items[0];

@@ -1,12 +1,14 @@
 import type { DatabaseSync } from 'node:sqlite';
-import type { PlatformActor, TenantContext } from '../auth/principal';
+import type { Membership, PlatformActor, TenantContext } from '../auth/principal';
 import { now, requireAdminRole, requirePlatform } from './shared';
 import { seedSettings } from './schema';
-import { parseIdentityRow, parseTenantHistoryRow, parseTenantRecordRow, parseTenantRow, parseTenantUserRow } from './rows';
+import { parseIdentityRow, parseTenantHistoryRow, parseTenantNameRow, parseTenantRecordRow, parseTenantRow, parseTenantUserRow } from './rows';
 import { cleanTenantName, DUPLICATE_EMAIL_MESSAGE, DUPLICATE_TENANT_MESSAGE, LAST_ADMIN_MESSAGE, newTenantUser, tenantIdBase, updatedTenantUser } from './rules';
-import type { DemoIdentity, AppSession, TenantRecord, Tenant, TenantHistoryEvent, TenantList, TenantUser, TenantUserInput, TenantUserUpdate, TenantFilters, TenantInput, TenantUpdate } from './types';
+import type { DemoIdentity, TenantRecord, Tenant, TenantHistoryEvent, TenantList, TenantName, TenantUser, TenantUserInput, TenantUserUpdate, TenantFilters, TenantInput, TenantUpdate } from './types';
 
 type Row = Record<string, unknown>;
+
+const AUTHELIA_NEEDS_POSTGRES = 'Authelia sign-in needs the Postgres store (ADR 0001, D11).';
 
 /** The acting user's role from its active users row in the context's tenant, or null. */
 export function actorRole(database: DatabaseSync, context: TenantContext): string | null {
@@ -29,9 +31,12 @@ export function createTenantMethods(database: DatabaseSync) {
     listIdentities(): DemoIdentity[] {
       return (database.prepare(`${withIdentity} ORDER BY CASE users.role WHEN 'superadmin' THEN 0 WHEN 'admin' THEN 1 ELSE 2 END, tenants.name`).all() as Row[]).map(parseIdentityRow);
     },
-    authenticate(userId: string): AppSession | null {
-      const row = database.prepare(`${withIdentity} AND users.id = ?`).get(userId) as Row | undefined;
-      return row ? parseIdentityRow(row) : null;
+    // Authelia sign-in reads users.authelia_username, which only the Postgres schema has. SQLite serves demo mode alone until D12 deletes it.
+    listMemberships(): Membership[] { throw new Error(AUTHELIA_NEEDS_POSTGRES); },
+    bindMemberships(): Membership[] { throw new Error(AUTHELIA_NEEDS_POSTGRES); },
+    listTenantNames(tenantIds: readonly string[]): TenantName[] {
+      if (tenantIds.length === 0) return [];
+      return (database.prepare(`SELECT id, name FROM tenants WHERE id IN (${tenantIds.map(() => '?').join(', ')}) AND status = 'active' ORDER BY name COLLATE NOCASE, id`).all(...tenantIds) as Row[]).map(parseTenantNameRow);
     },
     listTenantRecords(context: TenantContext): TenantRecord[] {
       return (database.prepare('SELECT id, tenant_id, label FROM tenant_records WHERE tenant_id = ? ORDER BY id').all(context.tenantId) as Row[]).map(parseTenantRecordRow);

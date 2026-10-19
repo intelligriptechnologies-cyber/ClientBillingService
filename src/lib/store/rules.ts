@@ -63,6 +63,8 @@ export function updatedTenantUser(existing: Membership, update: TenantUserUpdate
 
 export const LAST_ADMIN_MESSAGE = 'A tenant must keep at least one active admin.';
 export const DUPLICATE_EMAIL_MESSAGE = 'A user with that email already exists.';
+/** The tenant log row written for each users row that first-arrival binding gives an Authelia username. */
+export function bindingLogMessage(username: string, userId: string) { return `First arrival bound Authelia user ${username} to user ${userId}.`; }
 export const DUPLICATE_TENANT_MESSAGE = 'A tenant with that name already exists.';
 
 export function validateSettings(input: TenantSettingsInput) {

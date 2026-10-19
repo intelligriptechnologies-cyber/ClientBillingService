@@ -1,8 +1,8 @@
 import { renderInvoiceHtml } from './invoice-html';
 import { mailer, parseAddressList, type MailMessage, type Mailer } from './mailer';
 import { renderHtmlToPdf } from './pdf-renderer';
-import type { AppSession, DeliveryRecord, DeliveryStatus, PaymentReminder, TenantInvoice, TenantStore as Store } from './tenant-store';
-import { tenantContextOf } from './auth/session-context';
+import type { DeliveryRecord, DeliveryStatus, PaymentReminder, TenantInvoice, TenantStore as Store } from './tenant-store';
+import { tenantContextOf, type Resolution } from './auth/principal';
 
 /** What a caller can do wrong or is not allowed to do, with the HTTP status a route should answer. */
 export class MailServiceError extends Error {
@@ -18,15 +18,15 @@ const escapeHtml = (text: string) => text.replaceAll('&', '&amp;').replaceAll('<
 const htmlFor = (text: string) => text.split(/\n{2,}/).map((paragraph) => `<p>${escapeHtml(paragraph).replaceAll('\n', '<br>')}</p>`).join('\n');
 const fileSafe = (name: string) => name.replace(/[^A-Za-z0-9._-]+/g, '_');
 
-async function loadInvoice(store: Store, session: AppSession, invoiceId: string): Promise<TenantInvoice> {
+async function loadInvoice(store: Store, principal: Resolution, invoiceId: string): Promise<TenantInvoice> {
   let invoice: TenantInvoice | null = null;
-  try { invoice = await store.getInvoice(tenantContextOf(session), invoiceId); } catch { /* Another tenant's invoice answers the same as a missing one. */ }
+  try { invoice = await store.getInvoice(tenantContextOf(principal), invoiceId); } catch { /* Another tenant's invoice answers the same as a missing one. */ }
   if (!invoice) throw new MailServiceError('Invoice not found.', 404);
   return invoice;
 }
 
-async function billingEmail(store: Store, session: AppSession, invoice: TenantInvoice): Promise<string> {
-  return (await store.getCustomer(tenantContextOf(session), invoice.customerId))?.email.trim() || invoice.snapshot.customerEmail.trim();
+async function billingEmail(store: Store, principal: Resolution, invoice: TenantInvoice): Promise<string> {
+  return (await store.getCustomer(tenantContextOf(principal), invoice.customerId))?.email.trim() || invoice.snapshot.customerEmail.trim();
 }
 
 function invoiceSubject(invoice: TenantInvoice) { return `Invoice ${invoice.invoiceNumber} from ${invoice.snapshot.companyName} (${money(invoice.totalMinor)})`; }
@@ -38,9 +38,9 @@ function invoiceMessage(invoice: TenantInvoice) {
 export type InvoiceEmailDefaults = { to: string; subject: string; message: string; configured: boolean };
 
 /** What the send dialog starts from. `configured` is false while the tenant has no usable SMTP settings. */
-export async function getInvoiceEmailDefaults(store: Store, session: AppSession, invoiceId: string, deps: MailDeps = defaultMailDeps): Promise<InvoiceEmailDefaults> {
-  const invoice = await loadInvoice(store, session, invoiceId);
-  return { to: await billingEmail(store, session, invoice), subject: invoiceSubject(invoice), message: invoiceMessage(invoice), configured: deps.mailer.isConfigured(await store.getSmtpSettings(tenantContextOf(session))) };
+export async function getInvoiceEmailDefaults(store: Store, principal: Resolution, invoiceId: string, deps: MailDeps = defaultMailDeps): Promise<InvoiceEmailDefaults> {
+  const invoice = await loadInvoice(store, principal, invoiceId);
+  return { to: await billingEmail(store, principal, invoice), subject: invoiceSubject(invoice), message: invoiceMessage(invoice), configured: deps.mailer.isConfigured(await store.getSmtpSettings(tenantContextOf(principal))) };
 }
 
 function parseSendInput(input: unknown, fallbackTo: string) {
@@ -62,16 +62,16 @@ function parseSendInput(input: unknown, fallbackTo: string) {
 
 export type SendInvoiceResult = { status: DeliveryStatus; message: string; delivery: DeliveryRecord };
 
-export async function sendInvoiceEmail(store: Store, session: AppSession, invoiceId: string, input: unknown, deps: MailDeps = defaultMailDeps): Promise<SendInvoiceResult> {
-  const invoice = await loadInvoice(store, session, invoiceId);
+export async function sendInvoiceEmail(store: Store, principal: Resolution, invoiceId: string, input: unknown, deps: MailDeps = defaultMailDeps): Promise<SendInvoiceResult> {
+  const invoice = await loadInvoice(store, principal, invoiceId);
   if (invoice.status === 'void') throw new MailServiceError('A void invoice cannot be emailed.', 409);
-  const { to, cc, message } = parseSendInput(input, await billingEmail(store, session, invoice));
-  const smtp = await store.getSmtpSettings(tenantContextOf(session));
+  const { to, cc, message } = parseSendInput(input, await billingEmail(store, principal, invoice));
+  const smtp = await store.getSmtpSettings(tenantContextOf(principal));
   const subject = invoiceSubject(invoice); const text = message || invoiceMessage(invoice);
-  const record = (status: DeliveryStatus, error: string) => store.recordDelivery(tenantContextOf(session), { invoiceId, to, cc, subject, status, error });
+  const record = (status: DeliveryStatus, error: string) => store.recordDelivery(tenantContextOf(principal), { invoiceId, to, cc, subject, status, error });
   const finish = async (status: DeliveryStatus, reason: string, summary: string): Promise<SendInvoiceResult> => {
     const delivery = await record(status, reason);
-    await store.logFeatureFlow(tenantContextOf(session), `Invoice ${invoice.invoiceNumber} email to ${to.join(', ')}: ${status}${reason ? ` (${reason})` : ''}`);
+    await store.logFeatureFlow(tenantContextOf(principal), `Invoice ${invoice.invoiceNumber} email to ${to.join(', ')}: ${status}${reason ? ` (${reason})` : ''}`);
     return { status, message: summary, delivery };
   };
 
@@ -91,28 +91,28 @@ export async function sendInvoiceEmail(store: Store, session: AppSession, invoic
 
 export type SmtpTestResult = { status: 'verified' | 'failed' | 'not-configured'; message: string };
 
-export async function testSmtp(store: Store, session: AppSession, deps: MailDeps = defaultMailDeps): Promise<SmtpTestResult> {
-  if (session.role !== 'admin' || !session.tenantId) throw new MailServiceError('Only a tenant admin can test SMTP.', 403);
-  const result = await deps.mailer.verify(await store.getSmtpSettings(tenantContextOf(session)));
+export async function testSmtp(store: Store, principal: Resolution, deps: MailDeps = defaultMailDeps): Promise<SmtpTestResult> {
+  if (principal.kind !== 'member' || principal.role !== 'admin') throw new MailServiceError('Only a tenant admin can test SMTP.', 403);
+  const result = await deps.mailer.verify(await store.getSmtpSettings(tenantContextOf(principal)));
   const outcome: SmtpTestResult = result.status === 'verified' ? { status: 'verified', message: `SMTP test passed. ${result.detail}` } : result.status === 'failed' ? { status: 'failed', message: `SMTP test failed. ${result.reason}` } : { status: 'not-configured', message: result.reason };
-  await store.logFeatureFlow(tenantContextOf(session), outcome.message);
+  await store.logFeatureFlow(tenantContextOf(principal), outcome.message);
   return outcome;
 }
 
 export type ReminderResult = { reminder: PaymentReminder; status: DeliveryStatus | 'recorded'; message: string };
 
 /** Records the reminder, then emails it when the channel is email and SMTP works. The message always says whether anything left the building. */
-export async function sendPaymentReminder(store: Store, session: AppSession, invoiceId: string, input: { channel: PaymentReminder['channel']; note?: string }, deps: MailDeps = defaultMailDeps): Promise<ReminderResult> {
-  const reminder = await store.recordPaymentReminder(tenantContextOf(session), invoiceId, input);
+export async function sendPaymentReminder(store: Store, principal: Resolution, invoiceId: string, input: { channel: PaymentReminder['channel']; note?: string }, deps: MailDeps = defaultMailDeps): Promise<ReminderResult> {
+  const reminder = await store.recordPaymentReminder(tenantContextOf(principal), invoiceId, input);
   if (input.channel !== 'email') return { reminder, status: 'recorded', message: 'WhatsApp reminder recorded, not sent. Sending over WhatsApp is not available yet.' };
-  const invoice = await loadInvoice(store, session, invoiceId);
-  const to = [await billingEmail(store, session, invoice)]; const smtp = await store.getSmtpSettings(tenantContextOf(session));
+  const invoice = await loadInvoice(store, principal, invoiceId);
+  const to = [await billingEmail(store, principal, invoice)]; const smtp = await store.getSmtpSettings(tenantContextOf(principal));
   const outstanding = invoice.totalMinor - invoice.paidMinor; const note = input.note?.trim();
   const subject = `Payment reminder: invoice ${invoice.invoiceNumber} from ${invoice.snapshot.companyName}`;
   const text = `Hello ${invoice.customerName},\n\nThis is a reminder that invoice ${invoice.invoiceNumber} from ${invoice.snapshot.companyName} (${money(invoice.totalMinor)}, ${money(outstanding)} outstanding) was due on ${invoice.dueDate}.${note ? `\n\n${note}` : ''}\n\nThank you,\n${invoice.snapshot.companyName}`;
   const result = await deps.mailer.sendMail({ from: smtp.from.trim(), to, cc: [], subject, text, html: htmlFor(text) }, smtp);
   const status: DeliveryStatus = result.status;
-  await store.recordDelivery(tenantContextOf(session), { invoiceId, to, cc: [], subject, status, error: result.status === 'sent' ? '' : result.reason });
-  await store.logFeatureFlow(tenantContextOf(session), `Payment reminder email for ${invoice.invoiceNumber}: ${status}${result.status === 'sent' ? '' : ` (${result.reason})`}`);
+  await store.recordDelivery(tenantContextOf(principal), { invoiceId, to, cc: [], subject, status, error: result.status === 'sent' ? '' : result.reason });
+  await store.logFeatureFlow(tenantContextOf(principal), `Payment reminder email for ${invoice.invoiceNumber}: ${status}${result.status === 'sent' ? '' : ` (${result.reason})`}`);
   return { reminder, status, message: result.status === 'sent' ? `Email reminder sent to ${to.join(', ')}.` : `Reminder recorded, not sent. ${result.reason}` };
 }

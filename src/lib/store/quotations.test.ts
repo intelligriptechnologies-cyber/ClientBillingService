@@ -1,10 +1,10 @@
 import { expect, it } from 'vitest';
-import { describeStore, memberContext, storeForTest } from './test-store';
-import { tenantContextOf } from '../auth/session-context';
+import { describeStore, memberContext, storeForTest, signIn } from './test-store';
+import { tenantContextOf } from '../auth/principal';
 
 describeStore(['services', 'quotations'], 'services and quotations', () => {
   it('edits and archives a draft quotation without changing another tenant', async () => {
-    const store = await storeForTest(); const nexio = await store.authenticate('nexio-admin'); const evo = await store.authenticate('evo-admin');
+    const store = await storeForTest(); const nexio = await signIn(store, 'nexio-admin'); const evo = await signIn(store, 'evo-admin');
     if (!nexio || !evo) throw new Error('Expected tenant sessions');
     const service = (await store.listServices(tenantContextOf(nexio))).find((item) => item.status === 'active');
     if (!service) throw new Error('Expected active service');
@@ -17,8 +17,8 @@ describeStore(['services', 'quotations'], 'services and quotations', () => {
 
   it('persists frequency-aware services and tenant-scoped quotations', async () => {
     const store = await storeForTest();
-    const nexio = await store.authenticate('nexio-admin');
-    const evo = await store.authenticate('evo-admin');
+    const nexio = await signIn(store, 'nexio-admin');
+    const evo = await signIn(store, 'evo-admin');
     if (!nexio || !evo) throw new Error('Expected seeded sessions');
 
     const service = await store.createService(tenantContextOf(nexio), {
@@ -40,8 +40,8 @@ describeStore(['services', 'quotations'], 'services and quotations', () => {
 
   it('rejects invalid service prices and quotation lines from another tenant', async () => {
     const store = await storeForTest();
-    const nexio = await store.authenticate('nexio-admin');
-    const evo = await store.authenticate('evo-admin');
+    const nexio = await signIn(store, 'nexio-admin');
+    const evo = await signIn(store, 'evo-admin');
     if (!nexio || !evo) throw new Error('Expected seeded sessions');
     const service = await store.createService(tenantContextOf(nexio), { name: 'Reporting', prices: { monthly: 1000, quarterly: 0, halfYearly: 0, annual: 0 } });
 

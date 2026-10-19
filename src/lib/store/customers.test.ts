@@ -1,10 +1,10 @@
 import { expect, it } from 'vitest';
-import { describeStore, memberContext, storeForTest } from './test-store';
-import { tenantContextOf } from '../auth/session-context';
+import { describeStore, memberContext, storeForTest, signIn } from './test-store';
+import { tenantContextOf } from '../auth/principal';
 
 describeStore(['customers'], 'customers', () => {
   it('creates, filters, changes status, and scopes customers to the active tenant', async () => {
-    const store = await storeForTest(); const nexio = await store.authenticate('nexio-admin'); const evo = await store.authenticate('evo-admin');
+    const store = await storeForTest(); const nexio = await signIn(store, 'nexio-admin'); const evo = await signIn(store, 'evo-admin');
     if (!nexio || !evo) throw new Error('Expected seeded sessions');
     const created = await store.createCustomer(tenantContextOf(nexio), { companyName: 'Meridian Labs', contactName: 'Aarav Mehta', email: 'aarav@meridian.example', phone: '+91 98765 43210', gstin: '29AAGCB7383J1Z4', billingAddress: '18 Meridian Road', invoiceDelivery: 'monthly' });
     expect((await store.listCustomers(tenantContextOf(nexio), { search: 'meridian' })).items).toEqual([expect.objectContaining({ id: created.id })]);
@@ -15,7 +15,7 @@ describeStore(['customers'], 'customers', () => {
   });
 
   it('rejects incomplete or invalid customer profiles', async () => {
-    const store = await storeForTest(); const nexio = await store.authenticate('nexio-admin'); if (!nexio) throw new Error('Expected seeded session');
+    const store = await storeForTest(); const nexio = await signIn(store, 'nexio-admin'); if (!nexio) throw new Error('Expected seeded session');
     await expect(store.createCustomer(tenantContextOf(nexio), { companyName: '', contactName: '', email: 'not-email', phone: '', gstin: '', billingAddress: '', invoiceDelivery: 'monthly' })).rejects.toThrow('Company name');
   });
 });

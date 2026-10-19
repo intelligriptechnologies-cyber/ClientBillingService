@@ -1,27 +1,28 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { signIn } from '@/lib/store/test-store';
 import { createMailer, type SmtpTransport } from '@/lib/mailer';
 import { getInvoiceEmailDefaults, MailServiceError, sendInvoiceEmail, sendPaymentReminder, testSmtp, type MailDeps } from '@/lib/mail-service';
 import { settingsInput } from '@/lib/test-helpers';
-import { createTenantStore, type AppSession } from '@/lib/tenant-store';
-import { tenantContextOf } from './auth/session-context';
+import { createTenantStore } from '@/lib/tenant-store';
+import { tenantContextOf, type Member, type Resolution } from './auth/principal';
 
 type Store = ReturnType<typeof createTenantStore>;
 const PASSWORD = 'hunter2-secret';
 const INVOICE = 'nexio-invoice-001';
 const pdfBytes = new TextEncoder().encode('%PDF-1.4 rendered');
 
-let store: Store; let admin: AppSession; let user: AppSession; let evo: AppSession; let superadmin: AppSession;
+let store: Store; let admin: Member; let user: Member; let evo: Member; let superadmin: Resolution;
 let sent: Array<Parameters<SmtpTransport['sendMail']>[0]>; let transportBehaviour: Partial<SmtpTransport>; let renderPdf: ReturnType<typeof vi.fn>; let deps: MailDeps;
 
 function must<T>(value: T | null | undefined): T { if (value === null || value === undefined) throw new Error('Expected fixture'); return value; }
-async function configure(session: AppSession, extra: Record<string, unknown> = {}) {
+async function configure(session: Resolution, extra: Record<string, unknown> = {}) {
   return store.updateTenantSettings(tenantContextOf(session), { ...settingsInput(await store.getTenantSettings(tenantContextOf(session))), smtpHost: 'smtp.nexio.example', smtpPort: 587, smtpFrom: 'billing@nexio.example', smtpUser: 'billing', smtpPassword: PASSWORD, ...extra });
 }
 async function rejection(promise: Promise<unknown>) { try { await promise; } catch (cause) { return cause; } throw new Error('Expected a rejection'); }
 
 beforeEach(async () => {
   store = createTenantStore(':memory:');
-  admin = must(await store.authenticate('nexio-admin')); user = must(await store.authenticate('nexio-user')); evo = must(await store.authenticate('evo-admin')); superadmin = must(await store.authenticate('superadmin'));
+  admin = must(await signIn(store, 'nexio-admin')); user = must(await signIn(store, 'nexio-user')); evo = must(await signIn(store, 'evo-admin')); superadmin = { kind: 'platform', actor: { kind: 'platform', username: 'superadmin' }, viewer: { name: 'Demo Superadmin', email: 'superadmin@ledgerly.demo' } };
   sent = []; transportBehaviour = {}; renderPdf = vi.fn(async () => pdfBytes);
   deps = { renderPdf, mailer: createMailer({ env: {}, createTransport: () => ({ sendMail: async (mail) => { sent.push(mail); return { messageId: '<m1@fake>' }; }, verify: async () => true, ...transportBehaviour }) }) };
 });
@@ -61,7 +62,7 @@ describe('sending an invoice', () => {
     expect(sent[0].attachments![0]).toMatchObject({ filename: 'NEX-2026-001.pdf', contentType: 'application/pdf' });
     expect(Buffer.from(sent[0].attachments![0].content).subarray(0, 4).toString()).toBe('%PDF');
     const [row] = await store.listDeliveries(tenantContextOf(admin), INVOICE);
-    expect(row).toMatchObject({ invoiceId: INVOICE, channel: 'email', to: ['billing@nexio.example'], cc: [], status: 'sent', error: '', attemptedBy: admin.id, attemptedByName: admin.name });
+    expect(row).toMatchObject({ invoiceId: INVOICE, channel: 'email', to: ['billing@nexio.example'], cc: [], status: 'sent', error: '', attemptedBy: 'nexio-admin', attemptedByName: admin.viewer.name });
     expect(row.subject).toBe(sent[0].subject); expect(Date.parse(row.attemptedAt)).not.toBeNaN();
     expect(result.delivery).toEqual(row);
   });

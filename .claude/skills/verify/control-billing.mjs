@@ -20,7 +20,7 @@ const STATE_DIR = join(SKILL_DIR, '.state');
 const EVIDENCE_ROOT = join(SKILL_DIR, 'evidence');
 const CACHE_ROOT = process.env.CLIENT_BILLING_VERIFY_HOME ?? join(tmpdir(), 'client-billing-verify');
 const NEVER_TOUCH_PORTS = [3000, 3100];
-const SESSION_COOKIE = 'client-billing-demo-session';
+const SESSION_COOKIE = '__Host-cbs_demo';
 const SOURCE_ITEMS = ['src', 'public', 'seed', 'next.config.ts', 'package.json', 'tsconfig.json', 'next-env.d.ts'];
 const IS_WIN = process.platform === 'win32';
 
@@ -324,7 +324,7 @@ async function apiLogin(base, identity) {
   const raw = response.headers.getSetCookie?.().find((c) => c.startsWith(`${SESSION_COOKIE}=`)) ?? '';
   const value = raw.split(';')[0].slice(SESSION_COOKIE.length + 1);
   if (!value) throw new CliError('Login succeeded but no session cookie was set.', 'The app contract changed. Read src/app/api/auth/demo-login/route.ts and update control-billing.mjs.');
-  return { value, session: body.session };
+  return { value, session: body.identity };
 }
 async function listIdentities(base) {
   const { response, body } = await httpJson(base, '/api/auth/identities');
@@ -345,7 +345,7 @@ async function sessionFor(name, state, identity) {
     if (saved.baseUrl === undefined || saved.baseUrl === state.url) return saved;
   }
   const { value } = await apiLogin(state.url, identity);
-  const storageState = { cookies: [{ name: SESSION_COOKIE, value, domain: '127.0.0.1', path: '/', expires: -1, httpOnly: true, secure: false, sameSite: 'Lax' }], origins: [] };
+  const storageState = { cookies: [{ name: SESSION_COOKIE, value, domain: '127.0.0.1', path: '/', expires: -1, httpOnly: true, secure: true, sameSite: 'Lax' }], origins: [] };
   saveSession(name, identity, value, storageState);
   return JSON.parse(readFileSync(file, 'utf8'));
 }
@@ -554,7 +554,7 @@ async function cmdLogin(flags, [identity]) {
   const evidence = evidenceDir(flags, state);
   if (flags['no-browser']) {
     const { value, session } = await apiLogin(state.url, identity);
-    const storageState = { cookies: [{ name: SESSION_COOKIE, value, domain: '127.0.0.1', path: '/', expires: -1, httpOnly: true, secure: false, sameSite: 'Lax' }], origins: [] };
+    const storageState = { cookies: [{ name: SESSION_COOKIE, value, domain: '127.0.0.1', path: '/', expires: -1, httpOnly: true, secure: true, sameSite: 'Lax' }], origins: [] };
     saveSession(name, identity, value, storageState, true);
     trail(evidence, { command: 'login', identity, via: 'api' });
     return { ok: true, via: 'api', identity, session, cookie: SESSION_COOKIE };

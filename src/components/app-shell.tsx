@@ -5,7 +5,14 @@ import { reportClientError } from '@/lib/client-error';
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
-import type { AppSession } from '@/lib/tenant-store';
+import { selectTenant } from '@/components/tenant-chooser';
+import type { MemberRole } from '@/lib/auth/principal';
+import type { TenantName } from '@/lib/tenant-store';
+
+/** What the menu shows about who is signed in. Nothing is authorized from it. */
+export type ShellIdentity =
+  | { kind: 'platform'; email: string }
+  | { kind: 'member'; email: string; role: MemberRole; tenantId: string; tenants: TenantName[] };
 
 const tenantGroups = [
   { label: 'Master Data', links: [{ href: '/customers', label: 'Customers' }, { href: '/services', label: 'Services' }, { href: '/contracts', label: 'Contracts' }, { href: '/renewals', label: 'Renewal Tracker' }] },
@@ -21,7 +28,7 @@ function groupFor(pathname: string) {
   return tenantGroups.find((group) => group.links.some((link) => active(pathname, link.href)))?.label ?? null;
 }
 
-export function AppShell({ session, children }: { session: AppSession; children: React.ReactNode }) {
+export function AppShell({ identity, children }: { identity: ShellIdentity; children: React.ReactNode }) {
   const router = useRouter();
   useEffect(() => {
     const onError = (event: ErrorEvent) => reportClientError(event.message || 'Uncaught client error', event.error instanceof Error ? event.error.stack : undefined);
@@ -33,11 +40,23 @@ export function AppShell({ session, children }: { session: AppSession; children:
   const pathname = usePathname();
   const currentGroup = groupFor(pathname);
   const [openGroups, setOpenGroups] = useState<string[]>(() => currentGroup ? [currentGroup] : []);
-  const groups = session.role === 'admin' ? tenantGroups : tenantGroups.filter((group) => group.label !== 'Admin Console');
+  const groups = identity.kind === 'member' && identity.role === 'admin' ? tenantGroups : tenantGroups.filter((group) => group.label !== 'Admin Console');
+  const tenantName = identity.kind === 'member' ? identity.tenants.find((tenant) => tenant.id === identity.tenantId)?.name ?? identity.tenantId : null;
   const allGroupsOpen = groups.every((group) => openGroups.includes(group.label));
   function toggleGroup(label: string) {
     setOpenGroups((previous) => previous.includes(label) ? previous.filter((group) => group !== label) : [...previous, label]);
   }
-  async function signOut() { await apiFetch('/api/auth/logout', { method: 'POST' }); router.replace('/'); router.refresh(); }
-  return <div className="app-shell"><aside className="sidebar"><Link href="/dashboard" className="brand">ledger<span>ly</span></Link><p className="session-identity"><strong>{session.role === 'superadmin' ? 'Platform access' : session.tenantName}</strong><span>{session.email}</span></p>{session.role !== 'superadmin' && <button className="nav-expand-toggle" type="button" onClick={() => setOpenGroups(allGroupsOpen ? [] : groups.map((group) => group.label))}>{allGroupsOpen ? 'Collapse all' : 'Expand all'}</button>}<nav className="nav" aria-label="Main navigation">{session.role === 'superadmin' ? <><Link href="/dashboard" aria-current={active(pathname, '/dashboard') ? 'page' : undefined}>Platform dashboard</Link><Link href="/tenants" aria-current={active(pathname, '/tenants') ? 'page' : undefined}>Tenants</Link></> : <><Link href="/dashboard" aria-current={active(pathname, '/dashboard') ? 'page' : undefined}>Dashboard</Link>{groups.map((group) => <div className="nav-group" key={group.label}><button type="button" className="nav-parent" aria-expanded={openGroups.includes(group.label)} aria-current={currentGroup === group.label ? 'location' : undefined} aria-controls={`nav-${group.label.replaceAll(' ', '-').toLowerCase()}`} onClick={() => toggleGroup(group.label)}>{group.label}<span aria-hidden="true">⌄</span></button><div className="nav-children" id={`nav-${group.label.replaceAll(' ', '-').toLowerCase()}`} hidden={!openGroups.includes(group.label)}>{group.links.map((link) => <Link key={link.href} href={link.href} aria-current={active(pathname, link.href) ? 'page' : undefined}>{link.label}</Link>)}</div></div>)}</>}</nav><button className="button button-secondary sign-out" type="button" onClick={signOut}>Sign out</button></aside><main className="main">{children}</main></div>;
+  // In authelia mode the logout URL ends the Authelia session as well (ADR 0002, decision 10).
+  async function signOut() {
+    const { logoutUrl } = await (await apiFetch('/api/auth/logout', { method: 'POST' })).json() as { logoutUrl: string | null };
+    if (logoutUrl) { window.location.assign(logoutUrl); return; }
+    router.replace('/'); router.refresh();
+  }
+  // A record open on the current page may not exist in the other tenant, so a switch lands on the dashboard.
+  async function switchTenant(tenantId: string) {
+    const response = await selectTenant(tenantId);
+    if (!response.ok) { reportClientError(`Switching to tenant ${tenantId} failed with ${response.status}`); return; }
+    router.replace('/dashboard'); router.refresh();
+  }
+  return <div className="app-shell"><aside className="sidebar"><Link href="/dashboard" className="brand">ledger<span>ly</span></Link><p className="session-identity"><strong>{identity.kind === 'platform' ? 'Platform access' : tenantName}</strong><span>{identity.email}</span></p>{identity.kind === 'member' && identity.tenants.length > 1 && <label className="tenant-switcher"><span>Tenant</span><select className="select" aria-label="Switch tenant" value={identity.tenantId} onChange={(event) => switchTenant(event.target.value)}>{identity.tenants.map((tenant) => <option key={tenant.id} value={tenant.id}>{tenant.name}</option>)}</select></label>}{identity.kind === 'member' && <button className="nav-expand-toggle" type="button" onClick={() => setOpenGroups(allGroupsOpen ? [] : groups.map((group) => group.label))}>{allGroupsOpen ? 'Collapse all' : 'Expand all'}</button>}<nav className="nav" aria-label="Main navigation">{identity.kind === 'platform' ? <><Link href="/dashboard" aria-current={active(pathname, '/dashboard') ? 'page' : undefined}>Platform dashboard</Link><Link href="/tenants" aria-current={active(pathname, '/tenants') ? 'page' : undefined}>Tenants</Link></> : <><Link href="/dashboard" aria-current={active(pathname, '/dashboard') ? 'page' : undefined}>Dashboard</Link>{groups.map((group) => <div className="nav-group" key={group.label}><button type="button" className="nav-parent" aria-expanded={openGroups.includes(group.label)} aria-current={currentGroup === group.label ? 'location' : undefined} aria-controls={`nav-${group.label.replaceAll(' ', '-').toLowerCase()}`} onClick={() => toggleGroup(group.label)}>{group.label}<span aria-hidden="true">⌄</span></button><div className="nav-children" id={`nav-${group.label.replaceAll(' ', '-').toLowerCase()}`} hidden={!openGroups.includes(group.label)}>{group.links.map((link) => <Link key={link.href} href={link.href} aria-current={active(pathname, link.href) ? 'page' : undefined}>{link.label}</Link>)}</div></div>)}</>}</nav><button className="button button-secondary sign-out" type="button" onClick={signOut}>Sign out</button></aside><main className="main">{children}</main></div>;
 }

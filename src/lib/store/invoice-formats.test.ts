@@ -7,8 +7,8 @@ import { BUILTIN_DEFINITION } from '../invoice-format';
 import { renderInvoiceHtml } from '../invoice-html';
 import { createTenantStore, type TenantStore } from '../tenant-store';
 import type { TenantContext } from '../auth/principal';
-import { tenantContextOf } from '../auth/session-context';
-import { describeStore, memberContext, storeForTest, type StoreArea } from './test-store';
+import { tenantContextOf } from '../auth/principal';
+import { describeStore, memberContext, storeForTest, type StoreArea, signIn } from './test-store';
 
 const SELLER_GSTIN = '29AAGCB7383J1Z4';
 const AREAS: StoreArea[] = ['settings', 'customers', 'contracts', 'invoices', 'bulkInvoices'];
@@ -263,7 +263,7 @@ describe('migration', () => {
     folders.push(folder);
     const filename = join(folder, 'old.sqlite');
     const first = createTenantStore(filename);
-    const admin = tenantContextOf((await first.authenticate('nexio-admin'))!);
+    const admin = tenantContextOf((await signIn(first, 'nexio-admin'))!);
     const legacy = await first.createIssuedInvoice(admin, { customerId: (await first.listCustomers(admin)).items[0].id, invoiceDate: '2026-11-02', dueDate: '2026-11-16', taxableMinor: 100_000, gstRate: 0 });
     await first.close();
     const raw = new DatabaseSync(filename);

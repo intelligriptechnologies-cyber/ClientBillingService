@@ -1,12 +1,12 @@
 import { expect, it } from 'vitest';
-import { describeStore, memberContext, storeForTest } from './test-store';
-import { tenantContextOf } from '../auth/session-context';
+import { describeStore, memberContext, storeForTest, signIn } from './test-store';
+import { tenantContextOf } from '../auth/principal';
 
 describeStore(['customers', 'services', 'contracts', 'additionalServices'], 'additional services', () => {
   it('records a dated additional service only against its customer contract and exposes it for that billing period', async () => {
     const store = await storeForTest();
-    const nexio = await store.authenticate('nexio-admin');
-    const evo = await store.authenticate('evo-admin');
+    const nexio = await signIn(store, 'nexio-admin');
+    const evo = await signIn(store, 'evo-admin');
     if (!nexio || !evo) throw new Error('Expected seeded sessions');
     const customer = (await store.listCustomers(tenantContextOf(nexio), {})).items[0];
     const service = (await store.listServices(tenantContextOf(nexio)))[0];

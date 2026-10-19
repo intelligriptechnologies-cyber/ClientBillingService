@@ -3,8 +3,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { settingsInput } from '@/lib/test-helpers';
-import { storeForTest, testDriver } from '@/lib/store/test-store';
-import type { AppSession, TenantStore } from '@/lib/tenant-store';
+import { storeForTest, testDriver, signIn } from '@/lib/store/test-store';
+import type { TenantStore } from '@/lib/tenant-store';
 
 import * as additionalServices from '../app/api/additional-services/route';
 import * as additionalService from '../app/api/additional-services/[additionalServiceId]/route';
@@ -49,15 +49,15 @@ import * as tenant from '../app/api/tenants/[tenantId]/route';
 import * as tenantHistory from '../app/api/tenants/[tenantId]/history/route';
 import * as users from '../app/api/users/route';
 import * as user from '../app/api/users/[userId]/route';
-import { tenantContextOf } from './auth/session-context';
+import { tenantContextOf, type Member } from './auth/principal';
 
 type Store = TenantStore;
 
 const formatDefinition = { layout: 'compact', blocks: { hsnSac: false, bankDetails: true, upiQr: false, signature: true, stamp: true, terms: true, amountInWords: true }, accent: '#1f3a5f', logo: 'show', bankDetails: '', terms: '' };
 
-const world = vi.hoisted(() => ({ store: undefined as unknown, session: null as unknown }));
+const world = vi.hoisted(() => ({ store: undefined as unknown, principal: null as unknown }));
 
-vi.mock('@/lib/session', () => ({ sessionCookie: 'test', getCurrentSession: async () => world.session }));
+vi.mock('@/lib/auth/resolve', async (importOriginal) => ({ ...(await importOriginal<typeof import('@/lib/auth/resolve')>()), getPrincipal: async () => world.principal }));
 vi.mock('@/lib/operational-error', () => ({ recordOperationException: () => undefined }));
 vi.mock('@/lib/tenant-store', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/lib/tenant-store')>()),
@@ -69,8 +69,8 @@ type Handler = (request: Request, context: never) => Promise<Response> | Respons
 type Fixtures = Awaited<ReturnType<typeof seedTenantA>>;
 
 let store: Store;
-let tenantA: AppSession;
-let tenantB: AppSession;
+let tenantA: Member;
+let tenantB: Member;
 
 function must<T>(value: T | null | undefined): T {
   if (value === null || value === undefined) throw new Error('Expected fixture');
@@ -79,7 +79,7 @@ function must<T>(value: T | null | undefined): T {
 
 const SMTP_SECRET = 'nexio-smtp-secret-9f3a';
 
-async function seedTenantA(session: AppSession) {
+async function seedTenantA(session: Member) {
   await store.updateTenantSettings(tenantContextOf(session), { ...settingsInput(await store.getTenantSettings(tenantContextOf(session))), smtpHost: 'smtp.nexio-secret.example', smtpFrom: 'billing@nexio-secret.example', smtpUser: 'nexio-smtp-user', smtpPassword: SMTP_SECRET });
   const customerId = must((await store.listCustomers(tenantContextOf(session))).items[0]).id;
   const contractId = must((await store.listContracts(tenantContextOf(session))).items[0]).id;
@@ -101,7 +101,7 @@ async function seedTenantA(session: AppSession) {
   };
 }
 
-async function snapshot(session: AppSession) {
+async function snapshot(session: Member) {
   const query = { pageSize: 1000 };
   const contractItems = (await store.listContracts(tenantContextOf(session), query)).items;
   return {
@@ -127,8 +127,8 @@ function collectIds(value: unknown, found = new Set<string>()): Set<string> {
   return found;
 }
 
-async function call(handler: Handler, as: AppSession, init: { url?: string; method?: string; body?: unknown; params?: Record<string, string> } = {}): Promise<Reply> {
-  world.session = as;
+async function call(handler: Handler, as: Member, init: { url?: string; method?: string; body?: unknown; params?: Record<string, string> } = {}): Promise<Reply> {
+  world.principal = as;
   const request = new Request(`http://localhost${init.url ?? '/'}`, { method: init.method ?? 'GET', body: init.body === undefined ? undefined : JSON.stringify(init.body), headers: { 'content-type': 'application/json' } });
   const response = await (handler as (request: Request, context: unknown) => Promise<Response> | Response)(request, { params: Promise.resolve(init.params ?? {}) });
   return { status: response.status, text: await response.text() };
@@ -139,8 +139,8 @@ let captureDirectory: string; let captureFile: string;
 beforeEach(async () => {
   store = await storeForTest();
   world.store = store;
-  tenantA = must(await store.authenticate('nexio-admin'));
-  tenantB = must(await store.authenticate('evo-admin'));
+  tenantA = must(await signIn(store, 'nexio-admin'));
+  tenantB = must(await signIn(store, 'evo-admin'));
   captureDirectory = mkdtempSync(join(tmpdir(), 'isolation-mail-')); captureFile = join(captureDirectory, 'mail-capture.json');
   vi.stubEnv('CLIENT_BILLING_MAIL_TRANSPORT', 'capture'); vi.stubEnv('CLIENT_BILLING_MAIL_CAPTURE_FILE', captureFile);
 });
@@ -151,7 +151,7 @@ const customerBody = { companyName: 'Hijacked Co', contactName: 'Mallory', email
 const contractBody = (f: Fixtures) => ({ name: 'Cross-tenant contract', customerId: f.customerId, serviceIds: [f.serviceId], startDate: '2026-01-01', endDate: '2026-12-31', valueMinor: 1000, paymentTermsDays: 14, billingFrequency: 'monthly', invoiceMonths: [], cycleDay: 1, escalationPercent: 0, escalationReviewDate: '', renewalNoticeDays: 30, securityDepositMinor: 0 });
 
 type Kind = 'deliveries' | 'invoice formats' | 'customers' | 'contracts' | 'invoices' | 'payments' | 'deposits' | 'renewals' | 'services' | 'additional services' | 'quotations' | 'task notes' | 'users' | 'logs';
-type Case = { kind: Kind; name: string; run: (as: AppSession, f: Fixtures) => Promise<Reply>; owns?: (f: Fixtures) => string; read?: boolean; leak?: string };
+type Case = { kind: Kind; name: string; run: (as: Member, f: Fixtures) => Promise<Reply>; owns?: (f: Fixtures) => string; read?: boolean; leak?: string };
 
 const id = (key: keyof Fixtures) => (f: Fixtures) => String(f[key]);
 const cases: Case[] = [
@@ -256,7 +256,7 @@ describe('superadmin-only routes reject tenant sessions', () => {
   ])('%s', async (_name, run) => {
     const before = await snapshot(tenantA);
     expect((await run()).status).toBe(403);
-    expect(await store.authenticate('nexio-admin')).not.toBeNull();
+    expect(await signIn(store, 'nexio-admin')).not.toBeNull();
     expect(await snapshot(tenantA)).toEqual(before);
   });
 });
@@ -304,7 +304,7 @@ describe('the delivery log and mail settings', () => {
 
   it('answers 400 and sends nothing when the request body is not valid JSON, and uses the defaults for an empty body', async () => {
     const f = await seedTenantA(tenantA);
-    world.session = tenantA;
+    world.principal = tenantA;
     const send = (body: string) => invoiceSend.POST(new Request('http://localhost/', { method: 'POST', body }), { params: Promise.resolve({ invoiceId: f.invoiceId }) });
     expect((await send('{"to":"ap@acme.example"')).status).toBe(400);
     expect(existsSync(captureFile)).toBe(false);
@@ -340,7 +340,7 @@ describe('the delivery log and mail settings', () => {
 
   it('refuses a tenant user who tries to change SMTP settings', async () => {
     await seedTenantA(tenantA);
-    const user = must(await store.authenticate('nexio-user'));
+    const user = must(await signIn(store, 'nexio-user'));
     const input = settingsInput(await store.getTenantSettings(tenantContextOf(tenantA)));
     expect((await call(settings.PUT, user, { method: 'PUT', body: { ...input, smtpPassword: 'planted' } })).status).toBeGreaterThanOrEqual(400);
     expect((await store.getSmtpSettings(tenantContextOf(tenantA))).password).toBe(SMTP_SECRET);

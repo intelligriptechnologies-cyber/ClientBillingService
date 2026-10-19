@@ -48,7 +48,7 @@ It reports: recorded pid alive, whether the port's listener is inside the proces
 
 ## Drive
 
-Demo login has no password. The picker at `/` offers every seeded identity, and the app stores the chosen id in the httpOnly cookie `client-billing-demo-session`.
+Demo login has no password. The picker at `/` offers every seeded identity, and the app stores the chosen id in the httpOnly, Secure cookie `__Host-cbs_demo` (`platform` for the superadmin entry) and the tenant in `__Host-cbs_tenant`.
 
 ```
 cb login                         # lists identities

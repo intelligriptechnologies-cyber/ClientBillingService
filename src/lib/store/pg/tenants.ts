@@ -1,9 +1,9 @@
-import type { PlatformActor, TenantContext } from '../../auth/principal';
+import type { Membership, PlatformActor, TenantContext } from '../../auth/principal';
 import type { Database, Tx } from '../../db/database';
-import { parseIdentityRow, parseTenantHistoryRow, parseTenantRecordRow, parseTenantRow, parseTenantUserRow } from '../rows';
-import { cleanTenantName, defaultSettingsColumns, DUPLICATE_EMAIL_MESSAGE, DUPLICATE_TENANT_MESSAGE, LAST_ADMIN_MESSAGE, monthRange, newTenantUser, tenantIdBase, updatedTenantUser } from '../rules';
+import { parseIdentityRow, parseMembershipRow, parseTenantHistoryRow, parseTenantNameRow, parseTenantRecordRow, parseTenantRow, parseTenantUserRow } from '../rows';
+import { bindingLogMessage, cleanTenantName, defaultSettingsColumns, DUPLICATE_EMAIL_MESSAGE, DUPLICATE_TENANT_MESSAGE, LAST_ADMIN_MESSAGE, monthRange, newTenantUser, tenantIdBase, updatedTenantUser } from '../rules';
 import { now, requireAdminRole, requirePlatform } from '../shared';
-import type { AppSession, DemoIdentity, Tenant, TenantFilters, TenantHistoryEvent, TenantInput, TenantList, TenantRecord, TenantStore, TenantUpdate, TenantUser, TenantUserInput, TenantUserUpdate } from '../types';
+import type { DemoIdentity, Tenant, TenantFilters, TenantHistoryEvent, TenantInput, TenantList, TenantName, TenantRecord, TenantStore, TenantUpdate, TenantUser, TenantUserInput, TenantUserUpdate } from '../types';
 import { actorRole, renameUniqueViolation } from './shared';
 
 type Row = Record<string, unknown>;
@@ -11,10 +11,16 @@ type Row = Record<string, unknown>;
 const duplicateTenantName = renameUniqueViolation(['tenants_name_key', 'tenants_lower_name'], DUPLICATE_TENANT_MESSAGE);
 const duplicateEmail = renameUniqueViolation(['users_tenant_email'], DUPLICATE_EMAIL_MESSAGE);
 
-// Sign-in lookups cross tenants before one is chosen, so they run through withPlatform (ADR 0001, Consequences).
+// The demo picker lists members of every tenant before one is chosen, so it runs through withPlatform.
 const identities = `SELECT users.id, users.name, users.email, users.role, users.tenant_id, tenants.name AS tenant_name
   FROM users JOIN tenants ON tenants.id = users.tenant_id
   WHERE users.status = 'active' AND tenants.status = 'active'`;
+// Under READ COMMITTED a second arrival that races the first blocks on the row lock, then rechecks
+// `authelia_username IS NULL` against the committed row and skips it. So each row is bound, and logged, once.
+const bindByEmail = `UPDATE users SET authelia_username = $1
+  WHERE authelia_username IS NULL AND status = 'active' AND lower(email) = lower($2)
+    AND NOT EXISTS (SELECT 1 FROM users claimed WHERE lower(claimed.email) = lower($2) AND claimed.authelia_username <> $1)
+  RETURNING tenant_id, id, role, status`;
 const tenantColumns = `tenants.id, tenants.name, tenants.status, tenants.created_at, tenants.updated_at,
   (SELECT count(*) FROM users WHERE users.tenant_id = tenants.id) AS user_count`;
 const userColumns = 'id, name, email, role, status, created_at';
@@ -45,11 +51,22 @@ export function createPgTenantMethods(db: Database) {
     async listIdentities(): Promise<DemoIdentity[]> {
       return db.withPlatform(async (tx) => (await tx.query<Row>(`${identities} ORDER BY CASE users.role WHEN 'admin' THEN 1 ELSE 2 END, tenants.name COLLATE "C", users.id`)).rows.map(parseIdentityRow));
     },
-    async authenticate(userId: string): Promise<AppSession | null> {
+    async listMemberships(username: string): Promise<Membership[]> {
+      return db.withPlatform(async (tx) => (await tx.query<Row>(`SELECT users.tenant_id, users.id, users.role, users.status FROM users JOIN tenants ON tenants.id = users.tenant_id
+        WHERE users.authelia_username = $1 AND tenants.status = 'active' ORDER BY users.tenant_id COLLATE "C"`, [username])).rows.map(parseMembershipRow));
+    },
+    async bindMemberships(username: string, email: string): Promise<Membership[]> {
+      const address = email.trim();
+      if (!address) return [];
       return db.withPlatform(async (tx) => {
-        const { rows } = await tx.query<Row>(`${identities} AND users.id = $1`, [userId]);
-        return rows[0] ? parseIdentityRow(rows[0]) : null;
+        const bound = (await tx.query<Row>(bindByEmail, [username, address])).rows.map(parseMembershipRow);
+        for (const row of bound) await tx.query(`INSERT INTO operational_logs (id, tenant_id, kind, message, created_at) VALUES ($1, $2, 'feature-flow', $3, clock_timestamp())`, [crypto.randomUUID(), row.tenantId, bindingLogMessage(username, row.id)]);
+        return bound.sort((a, b) => (a.tenantId < b.tenantId ? -1 : 1));
       });
+    },
+    async listTenantNames(tenantIds: readonly string[]): Promise<TenantName[]> {
+      if (tenantIds.length === 0) return [];
+      return db.withPlatform(async (tx) => (await tx.query<Row>(`SELECT id, name FROM tenants WHERE id = ANY($1::text[]) AND status = 'active' ORDER BY lower(name), id`, [tenantIds])).rows.map(parseTenantNameRow));
     },
     async listTenantRecords(context: TenantContext): Promise<TenantRecord[]> {
       return db.withTenant(context.tenantId, async (tx) => (await tx.query<Row>('SELECT id, tenant_id, label FROM tenant_records WHERE tenant_id = $1 ORDER BY id', [context.tenantId])).rows.map(parseTenantRecordRow));

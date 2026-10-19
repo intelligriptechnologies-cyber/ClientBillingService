@@ -1,6 +1,6 @@
 import { expect, it } from 'vitest';
-import { describeStore, memberContext, storeForTest, superadmin } from './test-store';
-import { platformActorOf } from '../auth/session-context';
+import { describeStore, memberContext, storeForTest, superadmin, signIn } from './test-store';
+import { platformActorOf } from '../auth/principal';
 
 describeStore(['tenants'], 'tenant lifecycle', () => {
   it('lets the superadmin create, change, and disable a tenant while retaining lifecycle history', async () => {
@@ -16,13 +16,13 @@ describeStore(['tenants'], 'tenant lifecycle', () => {
 
     const updated = await store.updateTenant(superadmin, created.id, { name: 'Northstar Creative', status: 'disabled' });
     expect(updated).toMatchObject({ id: created.id, name: 'Northstar Creative', status: 'disabled' });
-    expect(await store.authenticate(`${created.id}-admin`)).toBeNull();
+    expect(await signIn(store, `${created.id}-admin`)).toBeNull();
     expect((await store.listTenantHistory(superadmin, created.id)).map((event) => event.action)).toEqual(['created', 'updated', 'disabled']);
   });
 
   it('does not expose tenant lifecycle operations to a tenant session', async () => {
     const store = await storeForTest();
-    const tenantAdmin = await store.authenticate('nexio-admin');
+    const tenantAdmin = await signIn(store, 'nexio-admin');
     if (!tenantAdmin) throw new Error('Expected tenant admin session');
 
     expect(() => platformActorOf(tenantAdmin)).toThrow('superadmin');
@@ -79,10 +79,10 @@ describeStore(['tenants'], 'tenant lifecycle', () => {
     const adminId = `${created.id}-admin`;
 
     await store.updateTenant(superadmin, created.id, { status: 'disabled' });
-    expect(await store.authenticate(adminId)).toBeNull();
+    expect(await signIn(store, adminId)).toBeNull();
     await store.updateTenant(superadmin, created.id, { status: 'disabled' });
     await store.updateTenant(superadmin, created.id, { status: 'active' });
-    expect(await store.authenticate(adminId)).toMatchObject({ tenantId: created.id, role: 'admin' });
+    expect(await signIn(store, adminId)).toMatchObject({ context: { tenantId: created.id }, role: 'admin' });
     await expect(store.updateTenant(superadmin, created.id, { status: 'archived' as never })).rejects.toThrow('status is invalid');
     expect((await store.listTenantHistory(superadmin, created.id)).map((event) => event.action)).toEqual(['created', 'disabled', 'enabled']);
   });

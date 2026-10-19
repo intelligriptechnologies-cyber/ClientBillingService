@@ -3,10 +3,9 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { createTenantStore, type AppSession, type DeliveryInput, type TenantStore } from '@/lib/tenant-store';
-import type { TenantContext } from '../auth/principal';
-import { tenantContextOf } from '../auth/session-context';
-import { describeStore, memberContext, storeForTest } from './test-store';
+import { createTenantStore, type DeliveryInput, type TenantStore } from '@/lib/tenant-store';
+import { tenantContextOf, type Resolution, type TenantContext } from '../auth/principal';
+import { describeStore, memberContext, storeForTest, signIn } from './test-store';
 
 const INVOICE = 'nexio-invoice-001';
 
@@ -34,7 +33,7 @@ describeStore(['users', 'invoices'], 'delivery log', () => {
   });
 
   it('is for tenant members only and rejects a status the log does not know', async () => {
-    const superadmin: AppSession = { id: 'superadmin', name: 'Demo Superadmin', email: 'superadmin@ledgerly.demo', role: 'superadmin', tenantId: null, tenantName: null };
+    const superadmin: Resolution = { kind: 'platform', actor: { kind: 'platform', username: 'superadmin' }, viewer: { name: 'Demo Superadmin', email: 'superadmin@ledgerly.demo' } };
     expect(() => tenantContextOf(superadmin)).toThrow('tenant');
     await expect(store.recordDelivery(admin, attempt({ status: 'queued' as never }))).rejects.toThrow('Unknown delivery status.');
     expect(await store.listDeliveries(admin, INVOICE)).toEqual([]);
@@ -55,7 +54,7 @@ describe('additive migration', () => {
     legacy.close();
     const upgraded = createTenantStore(file);
     try {
-      const session = must(await upgraded.authenticate('nexio-admin'));
+      const session = must(await signIn(upgraded, 'nexio-admin'));
       expect(await upgraded.getTenantSettings(tenantContextOf(session))).toMatchObject({ smtpHost: 'smtp.old.example', smtpFrom: 'old@nexio.example', smtpUser: '', smtpPasswordSet: false });
       expect((await upgraded.recordDelivery(tenantContextOf(session), attempt())).status).toBe('sent');
     } finally { await upgraded.close(); }

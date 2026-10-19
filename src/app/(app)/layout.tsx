@@ -1,9 +1,10 @@
-import { redirect } from 'next/navigation';
-import { AppShell } from '@/components/app-shell';
-import { getCurrentSession } from '@/lib/session';
+import { AppShell, type ShellIdentity } from '@/components/app-shell';
+import { currentTenants, signedInPage } from '@/lib/auth/page-principal';
 
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
-  const session = await getCurrentSession();
-  if (!session) redirect('/');
-  return <AppShell session={session}>{children}</AppShell>;
+  const principal = await signedInPage();
+  const identity: ShellIdentity = principal.kind === 'platform'
+    ? { kind: 'platform', email: principal.viewer.email }
+    : { kind: 'member', email: principal.viewer.email, role: principal.role, tenantId: principal.context.tenantId, tenants: await currentTenants() };
+  return <AppShell identity={identity}>{children}</AppShell>;
 }
