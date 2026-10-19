@@ -72,6 +72,8 @@ test('invoice dialog creates a customer from the customer source selector', asyn
   await page.getByLabel('Demo identity').selectOption('nexio-admin');
   await page.getByRole('button', { name: 'Enter demo' }).click();
   await expect(page).toHaveURL(/\/dashboard$/);
+  originalSettings = (await (await page.request.get('/api/settings')).json() as { settings: Record<string, unknown> }).settings;
+  expect((await page.request.put('/api/settings', { data: { ...originalSettings, gstin: '' } })).ok()).toBeTruthy();
   await page.goto('/invoices');
   await page.getByRole('button', { name: 'Add invoice' }).click();
   const dialog = page.getByRole('dialog', { name: 'Create invoice' });

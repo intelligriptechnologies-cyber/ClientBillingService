@@ -49,7 +49,7 @@ export function InvoiceEditorDialog({ invoice, onClose, onSaved }: Props) {
   const [notes, setNotes] = useState(invoice?.snapshot.notes ?? '');
   const [lines, setLines] = useState<DraftLine[]>(() => invoice?.snapshot.lines?.length
     ? invoice.snapshot.lines.map((line) => ({ id: crypto.randomUUID(), description: line.description, quantity: String(line.quantity), rate: String(line.rateMinor / 100), taxType: line.taxType, gstRate: String(line.gstRate), hsnSac: line.hsnSac ?? '', serviceId: '', touched: true }))
-    : invoice ? [{ ...newLine(), description: 'Invoice charges', rate: String(invoice.taxableMinor / 100), taxType: invoice.gstRate ? legacyTaxType(invoice.snapshot) : 'none', gstRate: String(invoice.gstRate), touched: !invoice.gstRate }] : [newLine()]);
+    : invoice ? [{ ...newLine(), description: 'Invoice charges', hsnSac: invoice.snapshot.hsnSac ?? '', rate: String(invoice.taxableMinor / 100), taxType: invoice.gstRate ? legacyTaxType(invoice.snapshot) : 'none', gstRate: String(invoice.gstRate), touched: !invoice.gstRate }] : [newLine()]);
   const [formats, setFormats] = useState<InvoiceFormat[]>([]);
   const [chosenFormatId, setChosenFormatId] = useState('');
   const [reason, setReason] = useState('');

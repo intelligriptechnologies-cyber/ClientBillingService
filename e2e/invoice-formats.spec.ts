@@ -83,8 +83,11 @@ test.describe.serial('named invoice formats', () => {
     await expect(preview.locator('main')).not.toHaveClass(/compact/);
 
     await page.getByLabel('Format name').fill('Lean no HSN');
-    await page.getByRole('checkbox', { name: 'HSN/SAC column' }).uncheck();
-    await expect(preview.getByRole('columnheader', { name: 'HSN/SAC' })).toHaveCount(0);
+    const hsnSwitch = page.getByRole('checkbox', { name: 'HSN/SAC column' });
+    await expect(hsnSwitch).toHaveAccessibleDescription(/always prints the HSN\/SAC column/);
+    await hsnSwitch.uncheck();
+    await expect(hsnSwitch).not.toBeChecked();
+    await expect(preview.getByRole('columnheader', { name: 'HSN/SAC' })).toBeVisible();
     await page.getByRole('checkbox', { name: 'Amount in words' }).uncheck();
     await expect(preview.getByText('Indian Rupees')).toHaveCount(0);
     await page.getByRole('checkbox', { name: 'UPI QR slot' }).check();
@@ -143,13 +146,13 @@ test.describe.serial('named invoice formats', () => {
     standardInvoice = await issue(page.request, customerId, 'standard by default');
   });
 
-  test('the PDF drops the HSN column for the format that hides it and keeps it for the other', async ({ page }) => {
+  test('the PDF of a Tax Invoice prints the HSN column even for the format that hides it', async ({ page }) => {
     const leanPdf = await pdfOf(page.request, lean);
     expect(leanPdf.pages).toBe(1);
     expect(leanPdf.squashed).toContain('TaxInvoice');
     expect(leanPdf.squashed).toContain('Hallrental');
-    expect(leanPdf.squashed).not.toContain('HSN/SAC');
-    expect(leanPdf.squashed).not.toContain('998311');
+    expect(leanPdf.squashed).toContain('HSN/SAC');
+    expect(leanPdf.squashed).toContain('998311');
     expect(leanPdf.squashed).not.toContain('IndianRupees');
     expect(leanPdf.squashed).toContain('UPIQR');
     expect(leanPdf.squashed).toContain('A/C5020000123');
@@ -172,7 +175,7 @@ test.describe.serial('named invoice formats', () => {
     const edited = await page.request.put(`/api/invoice-formats/${leanFormat.id}`, { data: { name: 'Lean no HSN', definition: { ...leanFormat.definition, layout: 'classic', accent: MAROON, blocks: { ...(leanFormat.definition.blocks as object), hsnSac: true, amountInWords: true } } } });
     expect(edited.ok(), await edited.text()).toBeTruthy();
     const afterEdit = await pdfOf(page.request, lean);
-    expect(afterEdit.squashed).not.toContain('HSN/SAC');
+    expect(afterEdit.squashed).toContain('HSN/SAC');
     expect(afterEdit.squashed).not.toContain('IndianRupees');
     expect(await htmlOf(page.request, lean)).toBe(beforeHtml);
     expect(beforeHtml).not.toContain(MAROON);
@@ -185,7 +188,7 @@ test.describe.serial('named invoice formats', () => {
     const removed = await page.request.delete(`/api/invoice-formats/${leanFormat.id}`);
     expect(removed.ok(), await removed.text()).toBeTruthy();
     expect(await htmlOf(page.request, lean)).toBe(beforeHtml);
-    expect((await pdfOf(page.request, lean)).squashed).not.toContain('HSN/SAC');
+    expect((await pdfOf(page.request, lean)).squashed).toContain('HSN/SAC');
     expect((await page.request.post('/api/invoices', { data: { customerId, formatId: leanFormat.id, invoiceDate: '2026-01-05', dueDate: '2026-01-19', taxableMinor: 100 } })).status()).toBe(400);
   });
 

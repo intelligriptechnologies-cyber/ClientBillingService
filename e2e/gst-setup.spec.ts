@@ -37,6 +37,8 @@ async function issuedInvoice(page: Page, customerName: string) {
 
 test('an unregistered seller issues a Bill of Supply without GST columns', async ({ page }) => {
   await enterOd(page);
+  const settings = (await (await page.request.get('/api/settings')).json() as { settings: Record<string, unknown> }).settings;
+  expect((await page.request.put('/api/settings', { data: { ...settings, gstin: '' } })).ok()).toBeTruthy();
   const name = `Unregistered seller buyer ${run}`;
   const customerId = await createCustomer(page, name, { stateCode: '29' });
   const dialog = await openInvoiceDialog(page, customerId);
@@ -159,7 +161,7 @@ test('correcting an invoice issued without line items keeps the split it was iss
   await enterOd(page);
   const name = `Correction buyer ${run}`;
   const customerId = await createCustomer(page, name, { stateCode: '29' });
-  const issued = await page.request.post('/api/invoices', { data: { customerId, invoiceDate: '2026-11-02', dueDate: '2026-11-16', taxableMinor: 100_000, gstRate: 18 } });
+  const issued = await page.request.post('/api/invoices', { data: { customerId, invoiceDate: '2026-11-02', dueDate: '2026-11-16', taxableMinor: 100_000, gstRate: 18, hsnSac: '997212' } });
   expect(issued.ok(), await issued.text()).toBeTruthy();
   const invoice = (await issued.json() as { invoice: { invoiceNumber: string } }).invoice;
   await page.goto('/invoices');
@@ -168,6 +170,7 @@ test('correcting an invoice issued without line items keeps the split it was iss
   const dialog = page.getByRole('dialog', { name: 'Correct invoice' });
   await expect(dialog.getByLabel('Tax type 1')).toHaveValue('cgst_sgst');
   await expect(dialog.getByLabel('GST percent 1')).toHaveValue('18');
+  await expect(dialog.getByLabel('HSN/SAC 1')).toHaveValue('997212');
   await expect(dialog.getByLabel('Tax split override reason')).toHaveCount(0);
 });
 
