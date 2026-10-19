@@ -1,6 +1,7 @@
-// Fails when a Vitest JSON report holds no passed test or any skipped one. CI runs it on the database tests,
-// because they skip on purpose when DATABASE_MIGRATE_URL is unset and a skip in CI would hide a missing service.
-//   npx vitest run <file> --reporter=json --outputFile=report.json && node scripts/check-tests-ran.mjs report.json
+// Fails when a Vitest JSON report holds no passed test or any skipped one. CI runs it on the whole suite, because
+// every test that needs Postgres skips on purpose when DATABASE_MIGRATE_URL is unset and a skip in CI would hide a
+// missing service.
+//   npx vitest run --reporter=json --outputFile=report.json && node scripts/check-tests-ran.mjs report.json
 import { readFileSync } from 'node:fs';
 
 const file = process.argv[2];

@@ -1,50 +1,16 @@
 import { afterEach, describe } from 'vitest';
-import { databaseForTest } from '../db/test-database';
+import { databaseForTest, DATABASE_TESTS_SKIP_REASON } from '../db/test-database';
 import { createPgStore } from './pg/create-pg-store';
-import { createTenantStore, type TenantStore } from '../tenant-store';
+import type { TenantStore } from '../tenant-store';
 import { tenantContextOf, type Member, type PlatformActor, type Resolution, type TenantContext } from '../auth/principal';
 import { demoCookie, resolvePrincipal } from '../auth/resolve';
 
-// The store tests run on one driver per run: TEST_DRIVER=sqlite (the default) or TEST_DRIVER=pg (ADR 0001, D4).
-// Under pg every storeForTest() call clones the seeded template, so tests stay as independent as :memory: stores.
+// Every storeForTest() call clones the seeded Postgres template, so tests stay independent of each other.
 
-type Driver = 'sqlite' | 'pg';
-type PortUnit = 'D5' | 'D6' | 'D7' | 'D8' | 'D9';
-
-function driverFrom(value: string | undefined): Driver {
-  if (!value || value === 'sqlite') return 'sqlite';
-  if (value === 'pg') return 'pg';
-  throw new Error(`TEST_DRIVER must be sqlite or pg, not ${value}.`);
-}
-
-export const testDriver = driverFrom(process.env.TEST_DRIVER);
-
-/** The ADR 0001 unit that ports each store area to Postgres, and whether it has landed. */
-const pgPorts = {
-  tenants: { unit: 'D5', ported: true },
-  users: { unit: 'D5', ported: true },
-  settings: { unit: 'D5', ported: true },
-  services: { unit: 'D6', ported: true },
-  customers: { unit: 'D6', ported: true },
-  quotations: { unit: 'D6', ported: true },
-  contracts: { unit: 'D7', ported: true },
-  deposits: { unit: 'D7', ported: true },
-  taskNotes: { unit: 'D7', ported: true },
-  additionalServices: { unit: 'D7', ported: true },
-  invoices: { unit: 'D8', ported: true },
-  bulkInvoices: { unit: 'D8', ported: true },
-  payments: { unit: 'D9', ported: true },
-  reminders: { unit: 'D9', ported: true },
-} satisfies Record<string, { unit: PortUnit; ported: boolean }>;
-
-export type StoreArea = keyof typeof pgPorts;
-
-/** A describe block over the store areas its tests touch. Under pg it skips until every one of them has a port. */
-export function describeStore(areas: StoreArea[], name: string, body: () => void) {
-  const waiting = testDriver === 'pg' ? areas.filter((area) => !pgPorts[area].ported) : [];
-  if (waiting.length === 0) return describe(name, body);
-  const unit = waiting.map((area) => pgPorts[area].unit).sort().at(-1);
-  describe.skip(`${name} (skipped under TEST_DRIVER=pg until ${unit} ports ${waiting.join(', ')})`, body);
+/** A describe block whose tests need a store. Without DATABASE_MIGRATE_URL it skips, and its name says why. */
+export function describeStore(name: string, body: () => void) {
+  if (process.env.DATABASE_MIGRATE_URL) return describe(name, body);
+  describe.skip(`${name} (${DATABASE_TESTS_SKIP_REASON})`, body);
 }
 
 const cleanups: Array<() => Promise<void>> = [];
@@ -52,13 +18,8 @@ afterEach(async () => {
   for (const cleanup of cleanups.splice(0)) await cleanup();
 });
 
-/** A seeded store for one test, closed after it. */
+/** A seeded store for one test, dropped after it. */
 export async function storeForTest(): Promise<TenantStore> {
-  if (testDriver === 'sqlite') {
-    const store = createTenantStore(':memory:');
-    cleanups.push(async () => { await store.close(); });
-    return store;
-  }
   const database = await databaseForTest();
   let dropped: Promise<void> | undefined;
   const close = () => (dropped ??= database.drop());
@@ -66,7 +27,7 @@ export async function storeForTest(): Promise<TenantStore> {
   return { ...createPgStore(database.db), close };
 }
 
-/** The superadmin, built directly: under Postgres it is an Authelia group with no users row (ADR 0002, decision 3). */
+/** The superadmin, built directly: it is an Authelia group with no users row (ADR 0002, decision 3). */
 export const superadmin: PlatformActor = { kind: 'platform', username: 'superadmin' };
 
 /** The member a demo sign-in as `userId` resolves to, through the real resolver, or null when that id is not an active member. */

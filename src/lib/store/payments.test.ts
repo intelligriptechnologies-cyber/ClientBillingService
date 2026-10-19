@@ -3,7 +3,7 @@ import { describeStore, memberContext, storeForTest, registerSeller, signIn } fr
 import type { PaymentInput, PaymentQuery, TenantInvoice } from './types';
 import { tenantContextOf } from '../auth/principal';
 
-describeStore(['settings', 'customers', 'invoices', 'payments'], 'payments', () => {
+describeStore('payments', () => {
   it('corrects an unpaid invoice by replacing it and edits payment details without changing allocations', async () => {
     const store = await storeForTest(); const nexio = await signIn(store, 'nexio-admin');
     if (!nexio) throw new Error('Expected tenant session');
@@ -47,7 +47,7 @@ describeStore(['settings', 'customers', 'invoices', 'payments'], 'payments', () 
   });
 });
 
-describeStore(['invoices', 'payments'], 'payment register and input rules', () => {
+describeStore('payment register and input rules', () => {
   it('filters payments by month at the month edges and by search, totals what they apply, and refuses values a date column or the method list cannot hold', async () => {
     const store = await storeForTest();
     const nexio = await memberContext(store, 'nexio-admin');
@@ -70,7 +70,7 @@ describeStore(['invoices', 'payments'], 'payment register and input rules', () =
   });
 });
 
-describeStore(['invoices', 'payments'], 'payments under concurrent requests', () => {
+describeStore('payments under concurrent requests', () => {
   const INVOICE = 'nexio-invoice-001';
   async function racing() {
     const store = await storeForTest();
@@ -120,7 +120,7 @@ describeStore(['invoices', 'payments'], 'payments under concurrent requests', ()
   });
 });
 
-describeStore(['invoices', 'payments', 'reminders'], 'payment reminders', () => {
+describeStore('payment reminders', () => {
   it('lists aging pending invoices and records demo-only reminder history', async () => {
     const store = await storeForTest(); const nexio = await signIn(store, 'nexio-admin');
     if (!nexio) throw new Error('Expected seeded session');

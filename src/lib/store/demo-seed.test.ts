@@ -7,7 +7,7 @@ import { renderInvoiceHtml } from '../invoice-html';
 
 const SELLERS = ['nexio', 'maasp', 'evo', 'gripdata', 'od'];
 
-describeStore(['settings', 'customers', 'services', 'invoices'], 'demo sellers and their invoices', () => {
+describeStore('demo sellers and their invoices', () => {
   it('registers every seller with a checksum-valid GSTIN that is its own and starts with its state code', async () => {
     const store = await storeForTest();
     const gstins = new Set<string>();
@@ -64,7 +64,7 @@ describeStore(['settings', 'customers', 'services', 'invoices'], 'demo sellers a
   });
 });
 
-describeStore(['customers', 'contracts', 'deposits', 'invoices', 'payments'], 'demo seed', () => {
+describeStore('demo seed', () => {
   it('seeds a complete billing scenario for every tenant', async () => {
     const store = await storeForTest();
 

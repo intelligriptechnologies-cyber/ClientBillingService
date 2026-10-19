@@ -2,7 +2,7 @@ import { expect, it } from 'vitest';
 import { describeStore, memberContext, storeForTest, signIn } from './test-store';
 import { tenantContextOf } from '../auth/principal';
 
-describeStore(['customers', 'services', 'contracts', 'deposits'], 'contracts and security deposits', () => {
+describeStore('contracts and security deposits', () => {
   it('creates a tenant-scoped quarterly contract with its opening security deposit', async () => {
     const store = await storeForTest();
     const nexio = await signIn(store, 'nexio-admin');
@@ -65,7 +65,7 @@ describeStore(['customers', 'services', 'contracts', 'deposits'], 'contracts and
   });
 });
 
-describeStore(['customers', 'services', 'contracts', 'deposits'], 'contracts and security deposits under concurrent requests', () => {
+describeStore('contracts and security deposits under concurrent requests', () => {
   async function withContract(securityDepositMinor = 0) {
     const store = await storeForTest();
     const nexio = await memberContext(store, 'nexio-admin');
@@ -110,7 +110,7 @@ describeStore(['customers', 'services', 'contracts', 'deposits'], 'contracts and
   });
 });
 
-describeStore(['customers', 'services', 'contracts', 'deposits'], 'contract lists and input rules', () => {
+describeStore('contract lists and input rules', () => {
   it('filters contracts by month, search and customer, searches renewals, and refuses values a date or numeric column cannot hold', async () => {
     const store = await storeForTest();
     const nexio = await memberContext(store, 'nexio-admin');

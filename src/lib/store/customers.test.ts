@@ -2,7 +2,7 @@ import { expect, it } from 'vitest';
 import { describeStore, memberContext, storeForTest, signIn } from './test-store';
 import { tenantContextOf } from '../auth/principal';
 
-describeStore(['customers'], 'customers', () => {
+describeStore('customers', () => {
   it('creates, filters, changes status, and scopes customers to the active tenant', async () => {
     const store = await storeForTest(); const nexio = await signIn(store, 'nexio-admin'); const evo = await signIn(store, 'evo-admin');
     if (!nexio || !evo) throw new Error('Expected seeded sessions');
@@ -20,7 +20,7 @@ describeStore(['customers'], 'customers', () => {
   });
 });
 
-describeStore(['customers'], 'customer lists', () => {
+describeStore('customer lists', () => {
   it('filters by month and delivery, pages, searches LIKE patterns literally, and orders company names bytewise', async () => {
     const store = await storeForTest();
     const nexio = await memberContext(store, 'nexio-admin');

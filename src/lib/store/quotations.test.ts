@@ -2,7 +2,7 @@ import { expect, it } from 'vitest';
 import { describeStore, memberContext, storeForTest, signIn } from './test-store';
 import { tenantContextOf } from '../auth/principal';
 
-describeStore(['services', 'quotations'], 'services and quotations', () => {
+describeStore('services and quotations', () => {
   it('edits and archives a draft quotation without changing another tenant', async () => {
     const store = await storeForTest(); const nexio = await signIn(store, 'nexio-admin'); const evo = await signIn(store, 'evo-admin');
     if (!nexio || !evo) throw new Error('Expected tenant sessions');
@@ -52,7 +52,7 @@ describeStore(['services', 'quotations'], 'services and quotations', () => {
   });
 });
 
-describeStore(['services', 'quotations'], 'services and quotations under concurrent requests', () => {
+describeStore('services and quotations under concurrent requests', () => {
   async function warmed() {
     const store = await storeForTest();
     const nexio = await memberContext(store, 'nexio-admin');
