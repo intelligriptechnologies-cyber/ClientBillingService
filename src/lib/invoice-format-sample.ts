@@ -27,7 +27,7 @@ export function sampleInvoice(branding: Branding, format: SnapshotFormat): Tenan
       companyName: branding.companyName, gstin: branding.gstin || SAMPLE_GSTIN, address: branding.address || 'Your registered address\nBengaluru, Karnataka',
       logoDataUrl: branding.logoDataUrl || PLACEHOLDERS.logo, stampDataUrl: branding.stampDataUrl || PLACEHOLDERS.stamp, signatureDataUrl: branding.signatureDataUrl || PLACEHOLDERS.signature,
       customerName: 'Acme Industries', customerEmail: 'accounts@acme.example', customerAddress: '12 Residency Road\nBengaluru, Karnataka', customerGstin: '29AAPFU0939F1ZV',
-      gstRate: 18, footer: branding.footer || 'Thank you for your business.', documentType: 'Tax Invoice', sellerLegalName: branding.legalName || branding.companyName, sellerStateCode: '29', placeOfSupplyStateCode: '29', taxSplit: 'intra',
+      gstRate: 18, footer: branding.footer || 'Thank you for your business.', documentType: 'Tax Invoice', sellerLegalName: branding.legalName || branding.companyName, sellerStateCode: '29', placeOfSupplyStateCode: '29', taxSplit: 'intra', hsnRequired: true,
       lines: totals.lines, notes: 'Sample data. Nothing here is an issued invoice.', format,
     },
   };

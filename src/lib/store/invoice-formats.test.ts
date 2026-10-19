@@ -111,7 +111,7 @@ describeStore(AREAS, 'issuing with a format', () => {
     const noHsn = await store.createInvoiceFormat(admin, { name: 'No HSN', definition: definition({ accent: '#1f3a5f', blocks: { ...BUILTIN_DEFINITION.blocks, hsnSac: false } }) });
     const invoice = await issue(noHsn.id);
     const before = renderInvoiceHtml((await store.getInvoice(admin, invoice.id))!);
-    expect(before).not.toContain('HSN/SAC');
+    expect(before).toContain('HSN/SAC');
     expect(before).toContain('#1f3a5f');
 
     await store.updateInvoiceFormat(admin, noHsn.id, { name: 'No HSN', definition: definition({ accent: '#7a1f1f' }) });

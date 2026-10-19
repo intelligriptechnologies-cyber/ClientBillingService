@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { renderBulkPreviewHtml } from './bulk-preview-html';
 
-const proposal = { contractId: 'c', contractName: 'Retainer <b>', customerId: 'u', customerName: 'Acme & Sons', billingPeriod: '2026-10', invoiceDate: '2026-10-01', dueDate: '2026-10-15', taxableMinor: 100_000, gstRate: 18, gstMinor: 18_000, totalMinor: 118_000, additionalLines: [] };
+const proposal = { contractId: 'c', contractName: 'Retainer <b>', customerId: 'u', customerName: 'Acme & Sons', billingPeriod: '2026-10', invoiceDate: '2026-10-01', dueDate: '2026-10-15', taxableMinor: 100_000, gstRate: 18, gstMinor: 18_000, totalMinor: 118_000, hsnSac: '998311', additionalLines: [] };
 
 describe('renderBulkPreviewHtml', () => {
   it('lists proposed and skipped contracts with rupee amounts and escaped names', () => {

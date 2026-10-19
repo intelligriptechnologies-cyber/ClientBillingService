@@ -3,7 +3,7 @@ import { documentShell, escapeHtml, imageHtml } from './document-html';
 import { formatDate, formatMoney } from './format';
 import { printedFormat, type FormatDefinition } from './invoice-format';
 import { stateName } from './gst';
-import { documentTitle, lineTaxLabel, printsGstColumns } from './invoice-document';
+import { documentTitle, lineTaxLabel, printsGstColumns, printsHsnColumn } from './invoice-document';
 import type { InvoiceLine } from './invoice-lines';
 import type { TenantInvoice } from './tenant-store';
 
@@ -18,7 +18,7 @@ function lineRows(invoice: TenantInvoice): PrintedLine[] {
   const { snapshot } = invoice;
   if (snapshot.lines?.length) return snapshot.lines.map((line: InvoiceLine) => ({ description: line.description, hsnSac: line.hsnSac ?? '', quantity: line.quantity, rateMinor: line.rateMinor, taxLabel: lineTaxLabel(line), amountMinor: line.amountMinor, gstMinor: line.gstMinor, totalMinor: line.totalMinor }));
   const taxName = snapshot.taxSplit ? SPLIT_NAMES[snapshot.taxSplit] : 'GST';
-  return [{ description: 'Services billed', hsnSac: '', quantity: 1, rateMinor: invoice.taxableMinor, taxLabel: invoice.gstMinor > 0 ? `${taxName} ${invoice.gstRate}%` : 'No GST', amountMinor: invoice.taxableMinor, gstMinor: invoice.gstMinor, totalMinor: invoice.taxableMinor + invoice.gstMinor }];
+  return [{ description: 'Services billed', hsnSac: snapshot.hsnSac ?? '', quantity: 1, rateMinor: invoice.taxableMinor, taxLabel: invoice.gstMinor > 0 ? `${taxName} ${invoice.gstRate}%` : 'No GST', amountMinor: invoice.taxableMinor, gstMinor: invoice.gstMinor, totalMinor: invoice.taxableMinor + invoice.gstMinor }];
 }
 
 /** The tax rows under the line items, split the way the issued lines were taxed. */
@@ -138,7 +138,7 @@ export function renderInvoiceHtml(invoice: TenantInvoice): string {
     `<header class="masthead"><div class="seller">${definition.logo === 'show' ? imageHtml(snapshot.logoDataUrl, 'Logo', 'logo') : ''}<div>\n${sellerHtml(invoice, taxed)}\n</div></div><div class="doc"><h1>${e(title)}</h1><dl><dt>Invoice no.</dt><dd>${e(invoice.invoiceNumber)}</dd><dt>Issue date</dt><dd>${e(formatDate(invoice.invoiceDate))}</dd><dt>Due date</dt><dd>${e(formatDate(invoice.dueDate))}</dd></dl></div></header>`,
     heading ? `<p class="heading">${e(heading)}</p>` : '',
     partiesHtml(invoice),
-    linesHtml(lineRows(invoice), taxed, definition.blocks.hsnSac),
+    linesHtml(lineRows(invoice), taxed, printsHsnColumn(snapshot, definition.blocks.hsnSac)),
     summaryHtml(invoice, taxed, definition.blocks.amountInWords),
     payment,
     snapshot.notes ? `<section class="notes"><h3>Notes</h3><p class="multiline">${e(snapshot.notes)}</p></section>` : '',
@@ -246,7 +246,7 @@ function renderPanelHtml(invoice: TenantInvoice, definition: FormatDefinition, t
     `<header class="pn-head"><div>${definition.logo === 'show' ? imageHtml(snapshot.logoDataUrl, 'Logo', 'logo') : ''}</div><div class="pn-title"><h1>${e(title)}</h1><p>Invoice No: ${e(invoice.invoiceNumber)}</p><p>Date: ${e(formatDate(invoice.invoiceDate))}</p><p>Due Date: ${e(formatDate(invoice.dueDate))}</p></div></header>`,
     heading ? `<p class="heading">${e(heading)}</p>` : '',
     `<section class="pn-band"><div>\n<h3>BILL TO</h3>\n${billToLines(snapshot).join('\n')}\n</div><div>\n<h3>ISSUED BY</h3>\n${sellerHtml(invoice, taxed)}\n${supplyDetailLines(snapshot).join('\n')}\n</div></section>`,
-    panelLinesHtml(lineRows(invoice), taxed, definition.blocks.hsnSac),
+    panelLinesHtml(lineRows(invoice), taxed, printsHsnColumn(snapshot, definition.blocks.hsnSac)),
     `<section class="pn-lower">${panelBankHtml(definition)}<div class="pn-right">\n${panelTotalsHtml(invoice, taxed)}\n${definition.blocks.amountInWords ? `<p class="pn-words">Amount in words: ${e(amountInWords(invoice.totalMinor))}</p>` : ''}\n</div></section>`,
     panelFootHtml(snapshot, definition),
   ].filter(Boolean).join('\n');
