@@ -223,6 +223,9 @@ describe.skipIf(!process.env.DATABASE_MIGRATE_URL)(`one person in several tenant
     return { person, nexio, evo };
   }
 
+  /** Opens two pooled platform connections, so two racing arrivals start together instead of one waiting on connection setup. */
+  const warmPool = () => Promise.all([store.listMemberships('warm-a'), store.listMemberships('warm-b')]);
+
   const choose = (arrival: Arrival, tenantId: string) => {
     stubEnv(autheliaEnv);
     const headers = headersFor(arrival);
@@ -268,6 +271,7 @@ describe.skipIf(!process.env.DATABASE_MIGRATE_URL)(`one person in several tenant
 
   it('binds once when two first arrivals of one person race', async () => {
     const { person } = await inBothTenants('race');
+    await warmPool();
     const outcomes = await Promise.all([arrive(store, person), arrive(store, person)]);
     expect(outcomes.map((outcome) => outcome?.kind)).toEqual(['chooseTenant', 'chooseTenant']);
     expect(await bindingLogs(store, 'nexio-admin', person.username)).toHaveLength(1);
@@ -277,6 +281,7 @@ describe.skipIf(!process.env.DATABASE_MIGRATE_URL)(`one person in several tenant
   it('lets exactly one of two usernames racing for one email bind, and binds all of its rows', async () => {
     const { person } = await inBothTenants('contest');
     const rival = { username: `${person.username}-rival`, email: person.email };
+    await warmPool();
     const outcomes = await Promise.all([arrive(store, person), arrive(store, rival)]);
     const owners = [(await store.listMemberships(person.username)).length, (await store.listMemberships(rival.username)).length];
     expect(owners.sort()).toEqual([0, 2]);
