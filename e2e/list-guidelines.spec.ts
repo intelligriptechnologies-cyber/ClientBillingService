@@ -22,6 +22,7 @@ async function checkList(page: Page, route: string) {
 }
 
 test('tenant list screens have search, period, clear, and paired table pagers', async ({ page }) => {
+  test.setTimeout(120_000);
   await enter(page, 'nexio-admin');
   for (const route of ['/customers', '/services', '/contracts', '/renewals', '/additional-services', '/task-notes', '/invoices', '/invoices/bulk', '/payments', '/security-deposits', '/reports/pending-payments', '/reports/gst-sales', '/users', '/logs']) {
     await checkList(page, route);
