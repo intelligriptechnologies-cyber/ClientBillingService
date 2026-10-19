@@ -1,0 +1,57 @@
+# Client Billing routes for the existing host-wide Caddy (Barstock on the Hetzner server).
+# Import this file from /opt/barstock/deploy/Caddyfile.production. The importing Caddy container must join both
+# cbs-staging-edge and cbs-production-edge Docker networks. Do not run the `caddy` service in this project: Barstock
+# already owns the host's ports 80 and 443.
+#
+# Required environment on Barstock's `proxy` service:
+#   CBS_STAGING_PROXY_SECRET, CBS_PRODUCTION_PROXY_SECRET  Values of CBS_PROXY_SECRET in the matching CBS .env files.
+#   CBS_AUTHELIA_UPSTREAM                                Reachable Authelia host:port (currently host gateway:19091).
+#
+# The two domain pairs are intentionally siblings: a cookie for billing.nexiohyper.com must never be sent to staging.
+
+(cbs_shared_site) {
+	encode gzip zstd
+
+	@machine path /api/v1/*
+	handle @machine {
+		route {
+			request_header -Remote-*
+			request_header X-CBS-Proxy-Secret {args[1]}
+			reverse_proxy {args[0]}
+		}
+	}
+
+	handle {
+		route {
+			request_header -Remote-*
+			forward_auth {$CBS_AUTHELIA_UPSTREAM} {
+				uri /api/authz/forward-auth
+				copy_headers Remote-User Remote-Groups Remote-Email Remote-Name
+			}
+			request_header X-CBS-Proxy-Secret {args[1]}
+			reverse_proxy {args[0]} {
+				header_up Cookie cbs_session=[^;]+ cbs_session=_Value_Hidden.
+			}
+		}
+	}
+}
+
+(cbs_shared_portal) {
+	reverse_proxy {$CBS_AUTHELIA_UPSTREAM}
+}
+
+billing-staging.nexiohyper.com {
+	import cbs_shared_site app-staging:3000 {$CBS_STAGING_PROXY_SECRET}
+}
+
+auth.billing-staging.nexiohyper.com {
+	import cbs_shared_portal
+}
+
+billing.nexiohyper.com {
+	import cbs_shared_site app-production:3000 {$CBS_PRODUCTION_PROXY_SECRET}
+}
+
+auth.billing.nexiohyper.com {
+	import cbs_shared_portal
+}

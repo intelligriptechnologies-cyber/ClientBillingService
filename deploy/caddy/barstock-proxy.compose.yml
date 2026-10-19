@@ -1,0 +1,18 @@
+# Compose overlay for /opt/barstock/deploy/compose.production.yaml on the shared Hetzner host.
+# Apply it only to Barstock's existing `proxy` service. It adds no published ports and preserves the existing Caddy
+# data/config volumes. The two edge networks are created by the first CBS deploy, then become external here.
+services:
+  proxy:
+    env_file:
+      - /opt/client-billing/deploy/caddy/barstock-proxy.env
+    volumes:
+      - /opt/client-billing/deploy/caddy/cbs.shared-host.caddy:/etc/caddy/cbs.shared-host.caddy:ro
+    networks:
+      cbs-staging-edge:
+      cbs-production-edge:
+
+networks:
+  cbs-staging-edge:
+    external: true
+  cbs-production-edge:
+    external: true
