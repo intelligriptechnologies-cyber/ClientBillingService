@@ -1,4 +1,4 @@
-import { expect, test, type APIRequestContext, type Playwright } from '@playwright/test';
+import { expect, test, type APIRequestContext, type Browser, type Playwright } from '@playwright/test';
 import { autheliaOrigin, demoOrigin, memberGroup, proxySecret, superadminGroup } from './test-ports';
 
 // A context with no config-level headers, so each request carries exactly what the test gives it.
@@ -105,6 +105,140 @@ test.describe('authelia mode', () => {
       await page.goto('/');
       await expect(page.getByRole('heading', { name: 'No billing access yet' })).toBeVisible();
       await expect(page.getByRole('heading', { name: 'Choose a demo identity' })).toHaveCount(0);
+    });
+  });
+
+  // Both e2e servers share cbs_e2e, so a tenant admin on the demo server adds the rows an Authelia arrival binds to.
+  test.describe('memberships behind the proxy', () => {
+    type Person = { username: string; email: string; headers: Record<string, string> };
+
+    function newPerson(label: string, groups = memberGroup): Person {
+      const suffix = `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
+      const username = `a7-${label}-${suffix}`;
+      const email = `${label}-${suffix}@a7.example`;
+      return { username, email, headers: { 'x-cbs-proxy-secret': proxySecret, 'remote-user': username, 'remote-groups': groups, 'remote-email': email, 'remote-name': `A7 ${label}` } };
+    }
+
+    async function asDemoAdmin(playwright: Playwright, adminId: string) {
+      const admin = await playwright.request.newContext({ baseURL: demoOrigin, extraHTTPHeaders: { origin: demoOrigin } });
+      expect((await admin.post('/api/auth/demo-login', { data: { userId: adminId } })).status()).toBe(200);
+      return admin;
+    }
+
+    async function addMember(playwright: Playwright, adminId: string, person: Person) {
+      const admin = await asDemoAdmin(playwright, adminId);
+      const created = await admin.post('/api/users', { data: { name: `A7 ${person.username}`, email: person.email, role: 'user' } });
+      expect(created.status()).toBe(201);
+      const { user } = await created.json() as { user: { id: string } };
+      await admin.dispose();
+      return user.id;
+    }
+
+    async function bindingLogs(playwright: Playwright, adminId: string, person: Person) {
+      const admin = await asDemoAdmin(playwright, adminId);
+      const { logs } = await (await admin.get('/api/logs')).json() as { logs: Array<{ message: string }> };
+      await admin.dispose();
+      return logs.filter((log) => log.message.includes(person.username) && log.message.startsWith('First arrival bound'));
+    }
+
+    async function browse(browser: Browser, person: Person) {
+      const context = await browser.newContext({ baseURL: autheliaOrigin, extraHTTPHeaders: person.headers });
+      return { context, page: await context.newPage() };
+    }
+
+    test('binds a first arrival once, asks a person in two tenants to choose, and switches tenant from the menu', async ({ browser, playwright }) => {
+      const person = newPerson('two');
+      await addMember(playwright, 'nexio-admin', person);
+      await addMember(playwright, 'evo-admin', person);
+      const { context, page } = await browse(browser, person);
+
+      await page.goto('/dashboard');
+      await expect(page).toHaveURL(/\/select-tenant$/);
+      await expect(page.getByRole('heading', { name: 'Choose a tenant' })).toBeVisible();
+      await expect(page.getByRole('button', { name: /^(Evo Fitness|Nexio Hyper)$/ })).toHaveCount(2);
+      await page.getByRole('button', { name: 'Nexio Hyper' }).click();
+      await expect(page.getByRole('heading', { name: 'Nexio Hyper dashboard' })).toBeVisible();
+
+      const switcher = page.getByRole('combobox', { name: 'Switch tenant' });
+      await expect(switcher).toHaveValue('nexio');
+      await switcher.selectOption('evo');
+      await expect(page.getByRole('heading', { name: 'Evo Fitness dashboard' })).toBeVisible();
+      await page.reload();
+      await expect(page.getByRole('heading', { name: 'Evo Fitness dashboard' })).toBeVisible();
+
+      expect(await bindingLogs(playwright, 'nexio-admin', person)).toHaveLength(1);
+      expect(await bindingLogs(playwright, 'evo-admin', person)).toHaveLength(1);
+      await context.close();
+    });
+
+    test('keeps a user bound to one tenant out of another, with no switcher', async ({ browser, playwright }) => {
+      const person = newPerson('one');
+      await addMember(playwright, 'nexio-admin', person);
+      const { context, page } = await browse(browser, person);
+
+      await page.goto('/');
+      await expect(page.getByRole('heading', { name: 'Nexio Hyper dashboard' })).toBeVisible();
+      await expect(page.getByRole('combobox', { name: 'Switch tenant' })).toHaveCount(0);
+      const select = (tenantId: string) => page.request.post('/api/auth/select-tenant', { data: { tenantId }, headers: { origin: autheliaOrigin } });
+      const other = await select('evo');
+      const missing = await select('no-such-tenant');
+      expect(other.status()).toBe(400);
+      expect(await other.text()).toBe(await missing.text());
+      const forged = await page.request.get('/dashboard', { headers: { cookie: '__Host-cbs_tenant=evo' } });
+      const html = await forged.text();
+      expect(html).toContain('Nexio Hyper dashboard');
+      expect(html).not.toContain('Evo Fitness');
+      await context.close();
+    });
+
+    test('refuses a disabled user on the next request', async ({ browser, playwright }) => {
+      const person = newPerson('disabled');
+      const userId = await addMember(playwright, 'nexio-admin', person);
+      const { context, page } = await browse(browser, person);
+      await page.goto('/dashboard');
+      await expect(page.getByRole('heading', { name: 'Nexio Hyper dashboard' })).toBeVisible();
+
+      const admin = await asDemoAdmin(playwright, 'nexio-admin');
+      expect((await admin.patch(`/api/users/${userId}`, { data: { status: 'disabled' } })).status()).toBe(200);
+      await admin.dispose();
+
+      await page.goto('/dashboard');
+      await expect(page).toHaveURL(`${autheliaOrigin}/`);
+      await expect(page.getByRole('heading', { name: 'No billing access yet' })).toBeVisible();
+      expect((await page.request.get('/api/customers')).status()).toBe(401);
+      await context.close();
+    });
+
+    test('signs out through the Authelia logout URL and clears the tenant choice', async ({ browser, playwright }) => {
+      const person = newPerson('logout');
+      await addMember(playwright, 'nexio-admin', person);
+      await addMember(playwright, 'evo-admin', person);
+      const { context, page } = await browse(browser, person);
+      await page.route('https://auth.example.test/**', (route) => route.fulfill({ contentType: 'text/html', body: '<h1>Signed out of Authelia</h1>' }));
+
+      await page.goto('/select-tenant');
+      await page.getByRole('button', { name: 'Evo Fitness' }).click();
+      await expect(page.getByRole('heading', { name: 'Evo Fitness dashboard' })).toBeVisible();
+      expect((await context.cookies(autheliaOrigin)).map((cookie) => cookie.name)).toContain('__Host-cbs_tenant');
+
+      await page.getByRole('button', { name: 'Sign out' }).click();
+      await expect(page).toHaveURL('https://auth.example.test/logout');
+      await expect(page.getByRole('heading', { name: 'Signed out of Authelia' })).toBeVisible();
+      expect((await context.cookies(autheliaOrigin)).map((cookie) => cookie.name)).not.toContain('__Host-cbs_tenant');
+      await context.close();
+    });
+
+    test('gives the superadmin group the platform console from the group alone, and no tenant data', async ({ browser }) => {
+      const person = newPerson('root', superadminGroup);
+      const { context, page } = await browse(browser, person);
+      await page.goto('/');
+      await expect(page.getByRole('heading', { name: 'Platform dashboard' })).toBeVisible();
+      await page.getByRole('link', { name: 'Tenants' }).click();
+      await expect(page.getByRole('heading', { name: 'Tenants' })).toBeVisible();
+      expect((await page.request.get('/api/customers')).status()).toBe(401);
+      await page.goto('/users');
+      await expect(page).toHaveURL(/\/dashboard$/);
+      await context.close();
     });
   });
 });
