@@ -6,7 +6,7 @@
 # environment's database, apply db/roles.sql, write a pg_dump into the host backup dir, migrate in a one-off
 # container, check the app's two roles can sign in, and only then swap the app container and wait for health.
 # Any failed step exits (set -e) before the swap, so the running app is left untouched. The other environment
-# is never touched, and Caddy is only started if absent.
+# is never touched. Barstock's host-wide Caddy remains outside this Compose project.
 set -euo pipefail
 
 ENV_NAME="${1:?usage: deploy-remote.sh <production|staging>}"
@@ -20,7 +20,7 @@ C=(docker compose -f deploy/docker-compose.yml)
 BACKUP_DIR="${BACKUP_DIR:-/opt/client-billing/backups/$ENV_NAME}"
 KEEP_BACKUPS=14
 
-for f in ".env.$ENV_NAME" ".env.$ENV_NAME.db" deploy/proxy.env; do
+for f in ".env.$ENV_NAME" ".env.$ENV_NAME.db"; do
   [ -f "$f" ] || { echo "missing $f on the server; see deploy/README.md" >&2; exit 1; }
 done
 
@@ -81,7 +81,6 @@ ls -1t "$BACKUP_DIR"/pre-deploy-*.dump | tail -n +$((KEEP_BACKUPS + 1)) | xargs 
 "
 
 "${C[@]}" up -d --no-deps "$SERVICE"
-"${C[@]}" up -d --no-deps caddy
 
 for _ in $(seq 1 30); do
   STATUS="$(docker inspect -f '{{.State.Health.Status}}' "$("${C[@]}" ps -q "$SERVICE")")"

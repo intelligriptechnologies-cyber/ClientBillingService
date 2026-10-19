@@ -5,8 +5,8 @@ This mirrors the nexio_stock flow: a manually dispatched GitHub Actions workflow
 ## Layout
 
 - `Dockerfile` is a multi-stage Next.js `standalone` build on `node:22-bookworm-slim`. The runner stage also installs headless Chromium (see PDF rendering). The `migrator` stage carries `node-pg-migrate`, `db/migrations`, the demo seed and the SQLite import, because the standalone output trims `node_modules`.
-- `deploy/docker-compose.yml` has, per environment, `app-<env>`, `db-<env>` (`postgres:16-alpine` with its own volume `<env>_pgdata`) and `migrator-<env>` (profile `migrate`, run once per deploy), plus one `caddy`. Each database sits on an internal network, `<env>-db`, that only its own app and migrator join. It publishes no port. Each app also sits on its own edge network, `cbs-<env>-edge`, shared with Caddy alone, so staging cannot reach production. Caddy keeps the default network too, for Authelia and for its published ports.
-- `deploy/Caddyfile` imports `deploy/caddy/cbs.caddy`, which holds the site blocks. Caddy terminates TLS (automatic certificates), asks Authelia about every request, and proxies each domain to its app on port 3000 (see Sign-in through Authelia).
+- `deploy/docker-compose.yml` has, per environment, `app-<env>`, `db-<env>` (`postgres:16-alpine` with its own volume `<env>_pgdata`) and `migrator-<env>` (profile `migrate`, run once per deploy). Each database sits on an internal network, `<env>-db`, that only its own app and migrator join. It publishes no port. Each app also sits on an edge network, `cbs-<env>-edge`. Barstock's host-wide Caddy joins those networks; this Compose project never binds ports 80 or 443.
+- `deploy/caddy/cbs.shared-host.caddy` is imported by Barstock's production Caddy. It terminates TLS, asks the host Authelia about browser requests, and proxies each domain to its app on port 3000 (see Sign-in through Authelia). `deploy/Caddyfile` and `deploy/caddy/cbs.caddy` remain for the isolated local smoke stack.
 - `deploy/authelia/` holds two snippets for the server's Authelia configuration. `deploy/authelia-user.sh` provisions sign-ins. `deploy/smoke/` is the local smoke stack.
 - `deploy/deploy-remote.sh <staging|production>` runs on the server.
 - `.github/workflows/deploy.yml` is `workflow_dispatch` with an environment choice.
@@ -15,16 +15,24 @@ This mirrors the nexio_stock flow: a manually dispatched GitHub Actions workflow
 
 1. Install Docker with the Compose plugin. Clone this repo to `/opt/client-billing` and give the deploy user read access to the repo.
 2. Create `/opt/client-billing/.env.staging` and `.env.production` from `.env.example`, with `DATABASE_URL` and `DATABASE_PLATFORM_URL` pointing at `db-<env>:5432/cbs`. Create `.env.staging.db` and `.env.production.db` with `POSTGRES_PASSWORD`, `CBS_OWNER_PASSWORD`, `CBS_APP_PASSWORD`, `CBS_PLATFORM_PASSWORD` and `DATABASE_MIGRATE_URL`, as the end of `.env.example` describes. Pick new passwords per environment. These files are untracked.
-3. Create `/opt/client-billing/deploy/proxy.env` from `deploy/proxy.env.example` with the two domains, one proxy secret per environment and, if Authelia is not at `authelia:9091`, `AUTHELIA_UPSTREAM`. Each secret must equal `CBS_PROXY_SECRET` in that environment's `.env` file. Point both DNS records at the server, and the `auth.` name of each domain too.
-4. In the GitHub repo, create environments `staging` and `production` and add the secrets `HETZNER_DEPLOY_KEY`, `HETZNER_HOST` and `HETZNER_USER`. Add required reviewers to `production` if you want a gate.
+3. First deploy Client Billing once so Docker creates `cbs-staging-edge` and `cbs-production-edge`. Copy `deploy/caddy/barstock-proxy.env.example` to `/opt/client-billing/deploy/caddy/barstock-proxy.env`, put the two matching `CBS_PROXY_SECRET` values in it and run `chmod 600` on it. On Barstock, use the supplied overlay so its existing `proxy` service joins those external networks and mounts the CBS route file:
+
+   ```sh
+   cd /opt/barstock/deploy
+   docker compose -f compose.production.yaml -f /opt/client-billing/deploy/caddy/barstock-proxy.compose.yml up -d proxy
+   ```
+
+   Add `import /etc/caddy/cbs.shared-host.caddy` to `/opt/barstock/deploy/Caddyfile.production`, then validate and reload with `docker compose -f compose.production.yaml exec -w /etc/caddy proxy caddy validate --config /etc/caddy/Caddyfile` and `docker compose -f compose.production.yaml exec -w /etc/caddy proxy caddy reload --config /etc/caddy/Caddyfile`. The shared proxy already owns ports 80 and 443; Client Billing must not start another proxy.
+4. Point `billing.nexiohyper.com`, `billing-staging.nexiohyper.com`, `auth.billing.nexiohyper.com` and `auth.billing-staging.nexiohyper.com` at the server. The first two A records already exist; add the two `auth.` records before reload so Caddy can issue certificates.
+5. In the GitHub repo, create environments `staging` and `production` and add the secrets `HETZNER_DEPLOY_KEY`, `HETZNER_HOST` and `HETZNER_USER`. Add required reviewers to `production` if you want a gate.
 
 ## Sign-in through Authelia
 
 ADR 0002 puts Authelia in front of the app. Caddy calls Authelia's forward-auth endpoint before each request, copies `Remote-User`, `Remote-Groups`, `Remote-Email` and `Remote-Name` onto the request when Authelia says yes, and adds `X-CBS-Proxy-Secret`. In `authelia` mode the app trusts those headers only when the secret matches.
 
-- `deploy/caddy/cbs.caddy` is the one place that does this. Each site deletes any `Remote-*` header the client sent before it calls Authelia. `/api/v1/*` skips Authelia, still loses `Remote-*`, and still carries the secret. The app sees Authelia's session cookie as a dummy value. `auth.<domain>` proxies to Authelia.
+- `deploy/caddy/cbs.shared-host.caddy` is the server route source of truth. Each site deletes any `Remote-*` header the client sent before it calls Authelia. `/api/v1/*` skips Authelia, still loses `Remote-*`, and still carries the secret. The app sees Authelia's session cookie as a dummy value. `auth.<domain>` proxies to Authelia. The local smoke stack retains `cbs.caddy` so it can run without the host proxy.
 - `deploy/authelia/cbs-session-cookies.yml` and `cbs-access-control.yml` are merged by hand into the server's Authelia configuration. The two domains are siblings, never nested, because an Authelia cookie for `billing.example.com` is also sent to `staging.billing.example.com`. Both cookies are named `cbs_session`, which `cbs.caddy` relies on. The access rules deny by default, require TOTP for the superadmin group and one factor for the member group.
-- This Compose file does not run Authelia. Caddy reaches it at `AUTHELIA_UPSTREAM`. Until that name resolves from the `caddy` container, every request to the app fails with 502. Two ways to supply it are open (ADR 0002, owner question 2). Join the host's Authelia network to the `caddy` service, or move to the host's own Caddy, import `deploy/caddy/cbs.caddy` there and drop the `caddy` service here. `deploy/smoke/compose.yml` shows a complete standalone Authelia (SQLite storage, filesystem notifier) that becomes the production configuration if CBS gets an instance of its own.
+- This Compose file does not run Authelia. The host proxy reaches it at `CBS_AUTHELIA_UPSTREAM`; use the endpoint that already serves Cowork's `auth.test-erp.coworkvenue.in`, not an unverified container name. Until it is reachable from Barstock's proxy container, every browser request fails with 502. `deploy/smoke/compose.yml` shows a complete standalone Authelia (SQLite storage, filesystem notifier) for local verification.
 - Set `CLIENT_BILLING_AUTH_MODE=authelia`, `CBS_PROXY_SECRET`, both group names and `CBS_AUTHELIA_LOGOUT_URL` in each `.env.<env>` (see `.env.example`).
 
 ### Creating sign-ins
@@ -62,7 +70,7 @@ Run the Deploy workflow from the Actions tab and pick the environment. The workf
 4. Write `pg_dump -Fc` of the database, as the container superuser, to `/opt/client-billing/backups/<env>/pre-deploy-<timestamp>.dump`, and keep the last 14. An empty dump aborts the deploy.
 5. Run the migrator once. It applies pending files in `db/migrations` as `cbs_owner` and records them in `pgmigrations`.
 6. Sign in as `DATABASE_URL` and `DATABASE_PLATFORM_URL` from the migrator image. The app's health check reads no data, so a wrong password would otherwise show only on the first real request.
-7. Replace only that environment's app container, start Caddy if it is not running, and fail unless `/api/health` reports healthy.
+7. Replace only that environment's app container and fail unless `/api/health` reports healthy. Barstock's Caddy stays running throughout.
 
 The first deploy of an environment migrates an empty database and seeds nothing. To load the initial data once, run the SQLite import from the migrator image (see `seed/README.md`):
 
@@ -97,6 +105,6 @@ Backups:
 
 ## Not verified here
 
-The workflow, the server script and TLS issuance have not run against a real server or real secrets. `deploy-remote.sh` itself has not run end to end anywhere, because it tags global images and binds ports 80 and 443. Its database steps (database up, roles, dump, migrator, role sign-in) ran twice on Docker Desktop under a separate Compose project, with the migrator image built from this `Dockerfile`. The second run's dump held the schema and the migrator had nothing to do. The SQLite import also ran twice from the migrator image. The app build, the app swap and Caddy did not run. The first staging deploy is the real test.
+The workflow, the server script, shared-host Caddy integration and TLS issuance have not run against a real server or real secrets. `deploy-remote.sh` itself has not run end to end anywhere. Its database steps (database up, roles, dump, migrator, role sign-in) ran twice on Docker Desktop under a separate Compose project, with the migrator image built from this `Dockerfile`. The second run's dump held the schema and the migrator had nothing to do. The SQLite import also ran twice from the migrator image. The app build and app swap did not run. The first staging deploy is the real test.
 
 The Authelia edge has run only on the local smoke stack (Docker Desktop on Windows), never against a real host. Not verified there: Caddy obtaining a certificate from a public CA (the smoke stack uses Caddy's local CA), a real DNS name for the portal, Authelia's email notifier or password reset (disabled; the filesystem notifier is not read by any check), TOTP registration and a real two-factor sign-in, the shared host's own Caddy and Authelia, and the reload nudge on a native Linux host (CI runs it there; the same write event was checked from inside the container).

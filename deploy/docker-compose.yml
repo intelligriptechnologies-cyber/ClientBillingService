@@ -1,13 +1,10 @@
 name: client-billing
 
 # Each environment has its own Postgres (ADR 0001, unit D11). The database sits on an internal network that only its
-# own app and migrator join, so Caddy, the other environment and the internet cannot reach it, and it publishes no
-# port. Each app also joins its own edge network, shared with Caddy and nothing else.
-#
-# Sign-in (ADR 0002, unit A5): Caddy asks Authelia before every request (caddy/cbs.caddy), and Authelia is not a
-# service here. On a shared host it is the host's Authelia, which Caddy reaches at AUTHELIA_UPSTREAM from
-# proxy.env (default authelia:9091). Join this project's network to it, or move Caddy onto the host's Caddy and drop
-# the `caddy` service, as deploy/README.md describes. deploy/smoke/compose.yml runs a standalone Authelia.
+# own app and migrator join, so the public proxy, the other environment and the internet cannot reach it, and it
+# publishes no port. Each app also joins its own edge network. Barstock's host-wide Caddy joins those two networks
+# and imports caddy/cbs.shared-host.caddy; this stack never binds ports 80 or 443. deploy/smoke/compose.yml runs its
+# own standalone Caddy and Authelia for local verification.
 
 x-app: &app
   build:
@@ -106,28 +103,9 @@ services:
     networks:
       - production-db
 
-  caddy:
-    image: caddy:2-alpine
-    restart: unless-stopped
-    env_file:
-      - path: ./proxy.env
-        required: false
-    ports:
-      - "80:80"
-      - "443:443"
-    volumes:
-      - ./Caddyfile:/etc/caddy/Caddyfile:ro
-      - ./caddy:/etc/caddy/caddy:ro
-      - caddy_data:/data
-      - caddy_config:/config
-    networks:
-      - default
-      - staging-edge
-      - production-edge
-
 networks:
-  # One edge network per environment, shared with Caddy alone (ADR 0002, decision 6), so staging cannot reach production.
-  # The fixed names let a host-wide Caddy join them later.
+  # One edge network per environment. The fixed names let Barstock's host-wide Caddy join both while staging stays
+  # isolated from production (ADR 0002, decision 6).
   staging-edge:
     name: cbs-staging-edge
   production-edge:
@@ -142,5 +120,3 @@ volumes:
   production_data:
   staging_pgdata:
   production_pgdata:
-  caddy_data:
-  caddy_config:
