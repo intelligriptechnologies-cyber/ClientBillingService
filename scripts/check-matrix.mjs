@@ -39,8 +39,8 @@ export function checkMatrix(rows, exists) {
   return rows
     .filter((r) => r.ours === 'built')
     .map((r) => {
-      const path = r.evidence.trim().replace(/:\d+(-\d+)?$/, '');
-      return { id: r.id, evidence: r.evidence, ok: path !== '' && exists(path) };
+      const paths = r.evidence.split(';').map((item) => item.trim().replace(/:\d+(-\d+)?$/, ''));
+      return { id: r.id, evidence: r.evidence, ok: paths.every((path) => path !== '' && exists(path)) };
     });
 }
 
