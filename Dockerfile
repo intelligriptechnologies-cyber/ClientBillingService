@@ -4,13 +4,11 @@ COPY package.json package-lock.json ./
 RUN npm ci
 
 # The one-off migrator (ADR 0001, unit D11). Next's standalone output trims node_modules, so node-pg-migrate runs
-# from this stage instead. It also carries the demo seed and the one-shot SQLite import, which run as cbs_owner too.
+# from this stage instead. It also carries the demo seed (db/seed/demo.ts), which runs as cbs_owner too.
 # deploy/deploy-remote.sh runs it with DATABASE_MIGRATE_URL before it swaps the app container.
 FROM deps AS migrator
 ENV NODE_ENV=production
 COPY db ./db
-COPY scripts/import-sqlite.ts ./scripts/import-sqlite.ts
-COPY seed ./seed
 USER node
 CMD ["node", "node_modules/node-pg-migrate/bin/node-pg-migrate.js", "up", "-m", "db/migrations", "-d", "DATABASE_MIGRATE_URL"]
 
@@ -27,18 +25,14 @@ ENV NODE_ENV=production \
     NEXT_TELEMETRY_DISABLED=1 \
     PORT=3000 \
     HOSTNAME=0.0.0.0 \
-    CLIENT_BILLING_DATABASE=/data/client-billing.sqlite \
     PLAYWRIGHT_BROWSERS_PATH=/ms-playwright \
     CLIENT_BILLING_CHROMIUM_NO_SANDBOX=1
 # Invoice PDFs are printed by headless Chromium. This installs the browser and the system libraries and fonts it needs.
 COPY --from=deps /app/node_modules/playwright-core /opt/playwright-core
 RUN node /opt/playwright-core/cli.js install --with-deps chromium-headless-shell \
     && rm -rf /opt/playwright-core /var/lib/apt/lists/*
-RUN mkdir -p /data && chown node:node /data
 COPY --from=build --chown=node:node /app/.next/standalone ./
 COPY --from=build --chown=node:node /app/.next/static ./.next/static
-COPY --from=build --chown=node:node /app/seed ./seed
 USER node
-VOLUME /data
 EXPOSE 3000
 CMD ["node", "server.js"]

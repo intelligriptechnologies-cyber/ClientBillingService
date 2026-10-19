@@ -34,25 +34,6 @@ done
   -v app_password="${CBS_APP_PASSWORD:?set CBS_APP_PASSWORD in .env.<env>.db}" \
   -v platform_password="${CBS_PLATFORM_PASSWORD:?set CBS_PLATFORM_PASSWORD in .env.<env>.db}"' < db/roles.sql
 
-# The SQLite snapshot stays until ADR 0001 unit D12 removes it. It runs only if a running app still has the file.
-if [ -n "$("${C[@]}" ps -q --status running "$SERVICE")" ] && "${C[@]}" exec -T "$SERVICE" sh -c 'test -f "${CLIENT_BILLING_DATABASE:-/nonexistent}"'; then
-  mkdir -p "$BACKUP_DIR"
-  STAMP="$(date +%Y%m%d-%H%M%S)"
-  "${C[@]}" exec -T "$SERVICE" node -e "
-    const { DatabaseSync } = require('node:sqlite');
-    const fs = require('node:fs');
-    const db = new DatabaseSync(process.env.CLIENT_BILLING_DATABASE);
-    fs.mkdirSync('/tmp/backup', { recursive: true });
-    db.exec(\"VACUUM INTO '/tmp/backup/pre-deploy.sqlite'\");
-    db.close();
-  "
-  "${C[@]}" cp "$SERVICE:/tmp/backup/pre-deploy.sqlite" "$BACKUP_DIR/pre-deploy-$STAMP.sqlite"
-  "${C[@]}" exec -T "$SERVICE" rm -f /tmp/backup/pre-deploy.sqlite
-  [ -s "$BACKUP_DIR/pre-deploy-$STAMP.sqlite" ] || { echo "SQLite backup is empty; aborting" >&2; exit 1; }
-  echo "SQLite backup written: $BACKUP_DIR/pre-deploy-$STAMP.sqlite"
-  ls -1t "$BACKUP_DIR"/pre-deploy-*.sqlite | tail -n +$((KEEP_BACKUPS + 1)) | xargs -r rm -f
-fi
-
 # A dump before every migration, as the container superuser (ADR 0001, Consequences), in the custom format that
 # the restore drill of unit D13 reads.
 mkdir -p "$BACKUP_DIR"

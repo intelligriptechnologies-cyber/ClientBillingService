@@ -4,7 +4,7 @@ This mirrors the nexio_stock flow: a manually dispatched GitHub Actions workflow
 
 ## Layout
 
-- `Dockerfile` is a multi-stage Next.js `standalone` build on `node:22-bookworm-slim`. The runner stage also installs headless Chromium (see PDF rendering). The `migrator` stage carries `node-pg-migrate`, `db/migrations`, the demo seed and the SQLite import, because the standalone output trims `node_modules`.
+- `Dockerfile` is a multi-stage Next.js `standalone` build on `node:22-bookworm-slim`. The runner stage also installs headless Chromium (see PDF rendering). The `migrator` stage carries `node-pg-migrate`, `db/migrations` and the demo seed, because the standalone output trims `node_modules`.
 - `deploy/docker-compose.yml` has, per environment, `app-<env>`, `db-<env>` (`postgres:16-alpine` with its own volume `<env>_pgdata`) and `migrator-<env>` (profile `migrate`, run once per deploy), plus one `caddy`. Each database sits on an internal network, `<env>-db`, that only its own app and migrator join. It publishes no port. Each app also sits on its own edge network, `cbs-<env>-edge`, shared with Caddy alone, so staging cannot reach production. Caddy keeps the default network too, for Authelia and for its published ports.
 - `deploy/Caddyfile` imports `deploy/caddy/cbs.caddy`, which holds the site blocks. Caddy terminates TLS (automatic certificates), asks Authelia about every request, and proxies each domain to its app on port 3000 (see Sign-in through Authelia).
 - `deploy/authelia/` holds two snippets for the server's Authelia configuration. `deploy/authelia-user.sh` provisions sign-ins. `deploy/smoke/` is the local smoke stack.
@@ -64,11 +64,7 @@ Run the Deploy workflow from the Actions tab and pick the environment. The workf
 6. Sign in as `DATABASE_URL` and `DATABASE_PLATFORM_URL` from the migrator image. The app's health check reads no data, so a wrong password would otherwise show only on the first real request.
 7. Replace only that environment's app container, start Caddy if it is not running, and fail unless `/api/health` reports healthy.
 
-The first deploy of an environment migrates an empty database and seeds nothing. To load the initial data once, run the SQLite import from the migrator image (see `seed/README.md`):
-
-```sh
-docker compose -f deploy/docker-compose.yml --profile migrate run --rm migrator-production node scripts/import-sqlite.ts seed/initial-data.sqlite
-```
+The first deploy of an environment migrates an empty database and seeds nothing. No environment held production data, so ADR 0001 unit D12 deleted the SQLite seed file and its one-shot import instead of running them.
 
 `GET /api/health` returns `{"ok":true}` with no authentication and reads no tenant data.
 
@@ -84,19 +80,18 @@ Invoice and bulk-preview PDFs are printed by headless Chromium through `playwrig
 
 ## Database and backups
 
-The database is Postgres 16, one container per environment, with its data in the named volume `client-billing_<env>_pgdata`. The app connects as `cbs_app` and `cbs_platform`. The migrator, the demo seed and the SQLite import connect as `cbs_owner` (ADR 0001, Consequences). The app refuses to start without `DATABASE_URL` and `DATABASE_PLATFORM_URL`, unless `CLIENT_BILLING_STORE=sqlite` asks for the legacy SQLite store, which ADR 0001 unit D12 deletes. The app volume at `/data` is left from the SQLite store and goes with it.
+The database is Postgres 16, one container per environment, with its data in the named volume `client-billing_<env>_pgdata`. The app connects as `cbs_app` and `cbs_platform`. The migrator and the demo seed connect as `cbs_owner` (ADR 0001, Consequences). The app refuses to start without `DATABASE_URL` and `DATABASE_PLATFORM_URL`. The app container has no volume. The `/data` volume held the SQLite file and went with it in unit D12, so a host that deployed before then keeps an unused `client-billing_<env>_data` volume until someone removes it.
 
 Backups:
 
 - Every deploy writes a `pg_dump -Fc` before it migrates, to `/opt/client-billing/backups/<env>/pre-deploy-<timestamp>.dump` on the host. The last 14 are kept. Override the directory with `BACKUP_DIR`.
 - The deploy aborts if the dump fails or is empty, so the running container is left untouched.
-- If a running app still holds a SQLite file, the deploy also writes the old `VACUUM INTO` snapshot beside the dumps, until unit D12 removes it.
 - There is no scheduled backup between deploys yet. ADR 0001 unit D13 adds the nightly dump, `pg_dumpall --roles-only`, the Storage Box copy and the restore drill. Take one manually with `docker compose -f deploy/docker-compose.yml exec -T db-production sh -c 'pg_dump -Fc -U "$POSTGRES_USER" "$POSTGRES_DB"' > backup.dump`.
 - To restore a dump, stop the app service and run `pg_restore --clean --if-exists -U postgres -d cbs` inside `db-<env>` with the file on stdin, then start the service. No restore has been rehearsed yet. That is D13's drill.
 - Back the host backup directory up off the server. A single Hetzner box is the only copy otherwise.
 
 ## Not verified here
 
-The workflow, the server script and TLS issuance have not run against a real server or real secrets. `deploy-remote.sh` itself has not run end to end anywhere, because it tags global images and binds ports 80 and 443. Its database steps (database up, roles, dump, migrator, role sign-in) ran twice on Docker Desktop under a separate Compose project, with the migrator image built from this `Dockerfile`. The second run's dump held the schema and the migrator had nothing to do. The SQLite import also ran twice from the migrator image. The app build, the app swap and Caddy did not run. The first staging deploy is the real test.
+The workflow, the server script and TLS issuance have not run against a real server or real secrets. `deploy-remote.sh` itself has not run end to end anywhere, because it tags global images and binds ports 80 and 443. Its database steps (database up, roles, dump, migrator, role sign-in) ran twice on Docker Desktop under a separate Compose project, with the migrator image built from this `Dockerfile`. The second run's dump held the schema and the migrator had nothing to do. The app build, the app swap and Caddy did not run. The first staging deploy is the real test.
 
 The Authelia edge has run only on the local smoke stack (Docker Desktop on Windows), never against a real host. Not verified there: Caddy obtaining a certificate from a public CA (the smoke stack uses Caddy's local CA), a real DNS name for the portal, Authelia's email notifier or password reset (disabled; the filesystem notifier is not read by any check), TOTP registration and a real two-factor sign-in, the shared host's own Caddy and Authelia, and the reload nudge on a native Linux host (CI runs it there; the same write event was checked from inside the container).
