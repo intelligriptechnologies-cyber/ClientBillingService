@@ -1,3 +1,4 @@
+import { sessionCookie } from '@/lib/auth/password';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { demoCookie, tenantCookie } from '@/lib/auth/resolve';
 import { POST } from './route';
@@ -27,13 +28,13 @@ describe('POST /api/auth/logout', () => {
     const response = await POST();
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({ logoutUrl: 'https://auth.example.com/logout' });
-    expect(cleared(response)).toEqual([demoCookie, tenantCookie].sort());
+    expect(cleared(response)).toEqual([demoCookie, tenantCookie, sessionCookie].sort());
   });
 
   it('clears both cookies and has no portal to visit in demo mode', async () => {
     stubEnv({});
     const response = await POST();
     expect(await response.json()).toEqual({ logoutUrl: null });
-    expect(cleared(response)).toEqual([demoCookie, tenantCookie].sort());
+    expect(cleared(response)).toEqual([demoCookie, tenantCookie, sessionCookie].sort());
   });
 });

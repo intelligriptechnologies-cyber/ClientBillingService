@@ -1,3 +1,4 @@
+import { passwordIdentity } from './password';
 import { getTenantStore, type DemoIdentity, type TenantStore } from '../tenant-store';
 import { readAuthConfig, type AuthConfig, type AutheliaAuthConfig } from './config';
 import { DEMO_SUPERADMIN } from './demo-identities';
@@ -59,7 +60,16 @@ async function resolveDemo(headers: Headers, store: TenantStore): Promise<Resolu
   return selectMembership(memberships, readCookie(headers, tenantCookie) ?? identity.tenantId, { name: identity.name, email: identity.email }, null);
 }
 
-export function resolvePrincipal(config: AuthConfig, request: PrincipalRequest, store: TenantStore): Promise<Resolution | null> {
+export async function resolvePrincipal(config: AuthConfig, request: PrincipalRequest, store: TenantStore): Promise<Resolution | null> {
+  if (config.mode === 'password') {
+    const user = passwordIdentity(config.usersFile, request.headers);
+    if (!user) return null;
+    const { username, email, name } = user;
+    const viewer = { name, email };
+    if (user.platform) return { kind: 'platform', actor: { kind: 'platform', username }, viewer };
+    await store.bindMemberships(username, email);
+    return selectMembership(await store.listMemberships(username), readCookie(request.headers, tenantCookie), viewer, username);
+  }
   return config.mode === 'authelia' ? resolveForwarded(config, request.headers, store) : resolveDemo(request.headers, store);
 }
 

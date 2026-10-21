@@ -12,14 +12,14 @@ export function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
   // The health check calls the app directly from the container and reads no tenant data.
-  if (config.mode === 'authelia' && pathname !== '/api/health' && !hasValidProxySecret(request.headers, config.proxySecret)) return refuse(401, 'Unauthorized.');
+  if (config.mode !== 'demo' && pathname !== '/api/health' && !hasValidProxySecret(request.headers, config.proxySecret)) return refuse(401, 'Unauthorized.');
 
   const origin = checkOrigin({
     method: request.method,
     pathname,
     protocol: request.nextUrl.protocol.replace(/:$/, ''),
     headers: request.headers,
-    credentials: config.mode === 'authelia' ? 'proxy-headers' : 'cookie',
+    credentials: config.mode !== 'demo' ? 'proxy-headers' : 'cookie',
     publicOrigin: config.publicOrigin,
   });
   if (!origin.ok) return refuse(403, 'Cross-origin request refused.');

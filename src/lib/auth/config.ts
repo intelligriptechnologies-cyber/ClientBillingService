@@ -8,7 +8,8 @@ const minimumSecretBytes = 32;
 type Base = { env: AppEnv; publicOrigin?: string };
 export type DemoAuthConfig = Base & { mode: 'demo' };
 export type AutheliaAuthConfig = Base & { mode: 'authelia'; proxySecret: string; memberGroup: string; superadminGroup: string; logoutUrl: string };
-export type AuthConfig = DemoAuthConfig | AutheliaAuthConfig;
+export type PasswordAuthConfig = Base & { mode: 'password'; proxySecret: string; usersFile: string; publicOrigin: string };
+export type AuthConfig = DemoAuthConfig | AutheliaAuthConfig | PasswordAuthConfig;
 export type AuthConfigResult = { ok: true; config: AuthConfig } | { ok: false; reason: string };
 
 const refuse = (reason: string): AuthConfigResult => ({ ok: false, reason });
@@ -36,7 +37,7 @@ export function parseAuthConfig(env: Env): AuthConfigResult {
   if (!appEnv) return refuse(`CLIENT_BILLING_ENV must be one of ${appEnvs.join(', ')}.`);
 
   const rawMode = present(env.CLIENT_BILLING_AUTH_MODE) ?? 'demo';
-  if (rawMode !== 'demo' && rawMode !== 'authelia') return refuse('CLIENT_BILLING_AUTH_MODE must be demo or authelia.');
+  if (rawMode !== 'demo' && rawMode !== 'authelia' && rawMode !== 'password') return refuse('CLIENT_BILLING_AUTH_MODE must be demo, password or authelia.');
 
   const rawOrigin = present(env.CBS_PUBLIC_ORIGIN);
   const publicOrigin = rawOrigin === undefined ? undefined : parseOrigin(rawOrigin);
@@ -46,6 +47,13 @@ export function parseAuthConfig(env: Env): AuthConfigResult {
   if (rawMode === 'demo') {
     if (appEnv === 'production') return refuse('Demo auth mode is refused when CLIENT_BILLING_ENV is production.');
     return { ok: true, config: { mode: 'demo', ...base } };
+  }
+
+  if (rawMode === 'password') {
+    const proxySecret = present(env.CBS_PROXY_SECRET);
+    const usersFile = present(env.CBS_PASSWORD_USERS_FILE);
+    if (!proxySecret || Buffer.byteLength(proxySecret) < minimumSecretBytes || !usersFile || !publicOrigin?.startsWith('https://')) return refuse('Password mode requires a proxy secret, credential file and HTTPS public origin.');
+    return { ok: true, config: { mode: 'password', ...base, proxySecret, usersFile, publicOrigin } };
   }
 
   const proxySecret = present(env.CBS_PROXY_SECRET);
