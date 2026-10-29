@@ -42,6 +42,8 @@ services:
   app-staging:
     <<: *app
     image: client-billing:staging
+    volumes:
+      - ./auth/staging.json:/run/cbs-auth/users.json:ro
     env_file:
       - path: ../.env.staging
         required: false
@@ -72,6 +74,8 @@ services:
   app-production:
     <<: *app
     image: client-billing:production
+    volumes:
+      - ./auth/production.json:/run/cbs-auth/users.json:ro
     env_file:
       - path: ../.env.production
         required: false

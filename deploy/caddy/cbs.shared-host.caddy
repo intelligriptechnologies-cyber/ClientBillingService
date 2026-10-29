@@ -1,57 +1,30 @@
-# Client Billing routes for the existing host-wide Caddy (Barstock on the Hetzner server).
-# Import this file from /opt/barstock/deploy/Caddyfile.production. The importing Caddy container must join both
-# cbs-staging-edge and cbs-production-edge Docker networks. Do not run the `caddy` service in this project: Barstock
-# already owns the host's ports 80 and 443.
-#
-# Required environment on Barstock's `proxy` service:
-#   CBS_STAGING_PROXY_SECRET, CBS_PRODUCTION_PROXY_SECRET  Values of CBS_PROXY_SECRET in the matching CBS .env files.
-#   CBS_AUTHELIA_UPSTREAM                                Reachable Authelia host:port (currently host gateway:19091).
-#
-# The two domain pairs are intentionally siblings: a cookie for billing.nexiohyper.com must never be sent to staging.
-
+# Shared Hetzner Caddy routes. Each app verifies its own password and session.
+# The edge secret authenticates the proxy connection, never the end user.
 (cbs_shared_site) {
-	encode gzip zstd
-
-	@machine path /api/v1/*
-	handle @machine {
-		route {
-			request_header -Remote-*
-			request_header X-CBS-Proxy-Secret {args[1]}
-			reverse_proxy {args[0]}
-		}
-	}
-
-	handle {
-		route {
-			request_header -Remote-*
-			forward_auth {$CBS_AUTHELIA_UPSTREAM} {
-				uri /api/authz/forward-auth
-				copy_headers Remote-User Remote-Groups Remote-Email Remote-Name
-			}
-			request_header X-CBS-Proxy-Secret {args[1]}
-			reverse_proxy {args[0]} {
-				header_up Cookie cbs_session=[^;]+ cbs_session=_Value_Hidden.
-			}
-		}
-	}
-}
-
-(cbs_shared_portal) {
-	reverse_proxy {$CBS_AUTHELIA_UPSTREAM}
+    encode gzip zstd
+    header {
+        X-Content-Type-Options nosniff
+        X-Frame-Options DENY
+        Referrer-Policy strict-origin-when-cross-origin
+        Strict-Transport-Security "max-age=31536000"
+    }
+    route {
+        request_header -Remote-*
+        request_header X-CBS-Proxy-Secret {args[1]}
+        request_header X-CBS-Client-IP {remote_host}
+        reverse_proxy {args[0]}
+    }
 }
 
 billing-staging.nexiohyper.com {
-	import cbs_shared_site app-staging:3000 {$CBS_STAGING_PROXY_SECRET}
-}
-
-auth.billing-staging.nexiohyper.com {
-	import cbs_shared_portal
+    import cbs_shared_site app-staging:3000 {$CBS_STAGING_PROXY_SECRET}
 }
 
 billing.nexiohyper.com {
-	import cbs_shared_site app-production:3000 {$CBS_PRODUCTION_PROXY_SECRET}
+    import cbs_shared_site app-production:3000 {$CBS_PRODUCTION_PROXY_SECRET}
 }
 
-auth.billing.nexiohyper.com {
-	import cbs_shared_portal
+# Keep rollback portals until independent-login acceptance and a separate retirement review.
+auth.billing-staging.nexiohyper.com, auth.billing.nexiohyper.com {
+    reverse_proxy {$CBS_AUTHELIA_UPSTREAM}
 }
