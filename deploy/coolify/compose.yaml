@@ -68,8 +68,6 @@ services:
       - sh
       - -c
       - 'umask 077; printf %s "$$USERS_JSON" > /tmp/users.json; unset USERS_JSON; exec node server.js'
-    # Caddy (outside Coolify) reaches the app on the Docker bridge gateway; never bind publicly.
-    ports: ['172.19.0.1:${HOST_PORT:?required}:3000']
     # Native Coolify routing (caddy-docker-proxy). The hostname comes from the Domain set on this service in Coolify,
     # which generates caddy_0, the reverse_proxy and gzip. These add what the old shared-Caddy route did: security headers
     # and the edge headers the app checks. The secret is the app's own CBS_PROXY_SECRET, never typed into a label by hand.
