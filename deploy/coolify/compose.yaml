@@ -1,0 +1,86 @@
+# One Coolify "Docker Compose" app per environment (staging, production) from this file.
+# NOTE: Coolify runs compose with the repository root as project directory, so build contexts are "." here.
+# Per-app Coolify environment variables (values come from the old .env.<env>, .env.<env>.db and deploy/auth/<env>.json):
+#   DB_ALIAS (db-staging | db-production: the host name used inside DATABASE_URL), HOST_PORT,
+#   POSTGRES_PASSWORD, DATABASE_URL, DATABASE_PLATFORM_URL, DATABASE_MIGRATE_URL,
+#   CLIENT_BILLING_ENV, CBS_PROXY_SECRET, CLIENT_BILLING_AUTH_MODE, CBS_PUBLIC_ORIGIN, USERS_JSON.
+# Order on every deploy: db -> backup (pg_dump) -> migrate + role sign-in check -> app. Any failed step leaves the old app running.
+name: client-billing
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_DB: cbs
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?required}
+    volumes: [pgdata:/var/lib/postgresql/data]
+    networks:
+      database:
+        aliases: [db, "${DB_ALIAS:?required}"]
+    healthcheck:
+      test: [CMD-SHELL, 'pg_isready -U postgres -d cbs']
+      interval: 5s
+      timeout: 3s
+      retries: 30
+  backup:
+    image: postgres:16-alpine
+    restart: 'no'
+    environment:
+      PGPASSWORD: ${POSTGRES_PASSWORD:?required}
+    volumes: [backups:/backups]
+    networks: [database]
+    depends_on:
+      db: {condition: service_healthy}
+    command:
+      - sh
+      - -c
+      - 'f=/backups/pre-deploy-$$(date +%Y%m%d-%H%M%S).dump; pg_dump -h db -U postgres -Fc cbs > "$$f" && [ -s "$$f" ] && ls -1t /backups/pre-deploy-*.dump | tail -n +15 | xargs -r rm -f'
+  migrate:
+    build: {context: ., target: migrator}
+    restart: 'no'
+    environment:
+      DATABASE_MIGRATE_URL: ${DATABASE_MIGRATE_URL:?required}
+      DATABASE_URL: ${DATABASE_URL:?required}
+      DATABASE_PLATFORM_URL: ${DATABASE_PLATFORM_URL:?required}
+    networks: [database]
+    depends_on:
+      backup: {condition: service_completed_successfully}
+    command:
+      - sh
+      - -c
+      - 'node node_modules/node-pg-migrate/bin/node-pg-migrate.js up -m db/migrations -d DATABASE_MIGRATE_URL && node db/check-roles.cjs'
+  app:
+    build: {context: ., target: runner}
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: ${DATABASE_URL:?required}
+      DATABASE_PLATFORM_URL: ${DATABASE_PLATFORM_URL:?required}
+      CLIENT_BILLING_ENV: ${CLIENT_BILLING_ENV:?required}
+      CBS_PROXY_SECRET: ${CBS_PROXY_SECRET:?required}
+      CLIENT_BILLING_CHROMIUM_NO_SANDBOX: '1'
+      CLIENT_BILLING_AUTH_MODE: ${CLIENT_BILLING_AUTH_MODE:?required}
+      CBS_PASSWORD_USERS_FILE: /tmp/users.json
+      CBS_PUBLIC_ORIGIN: ${CBS_PUBLIC_ORIGIN:?required}
+      USERS_JSON: ${USERS_JSON:?required}
+    # The credential file is a secret, not part of the repo: write it to /tmp, then drop it from the process environment.
+    command:
+      - sh
+      - -c
+      - 'umask 077; printf %s "$$USERS_JSON" > /tmp/users.json; unset USERS_JSON; exec node server.js'
+    # Caddy (outside Coolify) reaches the app on the Docker bridge gateway; never bind publicly.
+    ports: ['172.19.0.1:${HOST_PORT:?required}:3000']
+    networks: [database, default]
+    depends_on:
+      migrate: {condition: service_completed_successfully}
+    healthcheck:
+      test: [CMD, node, -e, "fetch('http://127.0.0.1:3000/api/health').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+networks:
+  database: {internal: true}
+volumes:
+  pgdata:
+  backups:
