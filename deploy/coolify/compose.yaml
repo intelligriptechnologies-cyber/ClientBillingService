@@ -70,6 +70,17 @@ services:
       - 'umask 077; printf %s "$$USERS_JSON" > /tmp/users.json; unset USERS_JSON; exec node server.js'
     # Caddy (outside Coolify) reaches the app on the Docker bridge gateway; never bind publicly.
     ports: ['172.19.0.1:${HOST_PORT:?required}:3000']
+    # Native Coolify routing (caddy-docker-proxy). The hostname comes from the Domain set on this service in Coolify,
+    # which generates caddy_0, the reverse_proxy and gzip. These add what the old shared-Caddy route did: security headers
+    # and the edge headers the app checks. The secret is the app's own CBS_PROXY_SECRET, never typed into a label by hand.
+    labels:
+      - caddy_0.1_header.X-Content-Type-Options=nosniff
+      - caddy_0.1_header.X-Frame-Options=DENY
+      - caddy_0.1_header.Referrer-Policy=strict-origin-when-cross-origin
+      - caddy_0.1_header.Strict-Transport-Security="max-age=31536000"
+      - caddy_0.handle_path.1_request_header=-Remote-*
+      - caddy_0.handle_path.2_request_header=X-CBS-Proxy-Secret ${CBS_PROXY_SECRET:?required}
+      - caddy_0.handle_path.3_request_header=X-CBS-Client-IP {remote_host}
     networks: [database, default]
     depends_on:
       migrate: {condition: service_completed_successfully}
